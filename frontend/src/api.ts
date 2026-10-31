@@ -1,5 +1,5 @@
 // fetch helpers for the member REST API (/api/v1/members).
-import type { Member, MemberCreate, MemberStatus } from "./members"
+import type { Member, MemberCreate, MemberStatus, MemberUpdate } from "./members"
 
 const BASE = "/api/v1/members"
 export const PAGE_SIZE = 20
@@ -48,3 +48,8 @@ export const getMember = (id: number) => request<Member>(`${BASE}/${id}`)
 
 export const createMember = (body: MemberCreate) =>
   request<Member>(BASE, { method: "POST", body: JSON.stringify(body) })
+
+export const updateMember = (id: number, body: MemberUpdate) =>
+  request<Member>(`${BASE}/${id}`, { method: "PATCH", body: JSON.stringify(body) })
+
+export const deleteMember = (id: number) => request<void>(`${BASE}/${id}`, { method: "DELETE" })

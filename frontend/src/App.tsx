@@ -56,6 +56,11 @@ export default function App() {
     setReloadKey((k) => k + 1)
   }
 
+  function handleDeleted() {
+    setSelectedId(null)
+    setReloadKey((k) => k + 1)
+  }
+
   return (
     <div className="page">
       <header>
@@ -79,7 +84,11 @@ export default function App() {
           />
         </div>
         <aside className="column">
-          <MemberDetail memberId={selectedId} />
+          <MemberDetail
+            memberId={selectedId}
+            onChanged={() => setReloadKey((k) => k + 1)}
+            onDeleted={handleDeleted}
+          />
         </aside>
       </div>
     </div>

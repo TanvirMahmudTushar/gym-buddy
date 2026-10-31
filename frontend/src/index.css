@@ -213,6 +213,16 @@ button.primary {
   border-color: var(--accent);
 }
 
+button.danger {
+  color: var(--bad);
+}
+
+button.danger.solid {
+  background: var(--bad);
+  color: var(--surface);
+  border-color: var(--bad);
+}
+
 /* Member list */
 .toolbar {
   display: flex;
@@ -348,6 +358,33 @@ dd {
   margin: 0;
   overflow-wrap: anywhere;
   font-variant-numeric: tabular-nums;
+}
+
+.separator {
+  border: 0;
+  border-top: 1px solid var(--line);
+  margin: 0;
+}
+
+.inline {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+
+.inline .field {
+  flex: 1;
+  min-width: 140px;
+}
+
+.confirm {
+  background: var(--bad-bg);
+  border-radius: 8px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 @media (max-width: 860px) {
