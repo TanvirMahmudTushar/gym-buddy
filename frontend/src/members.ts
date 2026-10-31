@@ -23,6 +23,9 @@ export interface MemberCreate {
   notes: string | null
 }
 
+/** PATCH body: only the fields sent change. */
+export type MemberUpdate = Partial<Pick<Member, "full_name" | "phone" | "plan" | "expires_on" | "is_active" | "notes">>
+
 export const PLANS: { value: Plan; label: string }[] = [
   { value: "monthly", label: "Monthly" },
   { value: "quarterly", label: "Quarterly" },

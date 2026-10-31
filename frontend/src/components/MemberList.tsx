@@ -35,7 +35,8 @@ export default function MemberList(props: Props) {
   }
 
   let body
-  if (loading) body = <p className="empty">Loading members…</p>
+  // Keep the current rows on screen while a reload runs, so the table does not flicker after each change.
+  if (loading && members.length === 0) body = <p className="empty">Loading members…</p>
   else if (error) body = <p className="error">{error}</p>
   else if (members.length === 0)
     body = <p className="empty">{filter === "all" ? "No members yet. Add the first one above." : `No ${filter} members.`}</p>
@@ -92,7 +93,7 @@ export default function MemberList(props: Props) {
         </div>
       </div>
       {body}
-      {!loading && !error && members.length > 0 && (
+      {!error && members.length > 0 && (
         <div className="list-foot">
           <span>
             Showing {members.length} member{members.length === 1 ? "" : "s"}
