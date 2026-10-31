@@ -3,8 +3,17 @@ from pathlib import Path
 from fastapi import FastAPI
 
 from app.database import create_db_and_tables
+from app.routers import members
 
-app = FastAPI(title="FastAPI + React")
+# Docs live under /api because vercel.json only sends /api/* to the backend.
+app = FastAPI(
+    title="Gym Buddy API",
+    docs_url="/api/docs",
+    openapi_url="/api/openapi.json",
+    redoc_url=None,
+)
+
+app.include_router(members.router)
 
 # Run at import (not in a lifespan hook) so it also works on Vercel's serverless functions.
 create_db_and_tables()
