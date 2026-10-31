@@ -5,7 +5,7 @@ from fastapi import APIRouter, HTTPException, Query
 from sqlmodel import Session, col, select
 
 from app.database import SessionDep
-from app.models import Member, MemberCreate, MemberRead, utc_today
+from app.models import Member, MemberCreate, MemberRead, MemberUpdate, utc_now, utc_today
 
 router = APIRouter(prefix="/api/v1/members", tags=["members"])
 
@@ -52,3 +52,25 @@ def list_members(
 @router.get("/{member_id}", response_model=MemberRead)
 def get_member(member_id: int, session: SessionDep) -> Member:
     return get_member_or_404(session, member_id)
+
+
+@router.patch("/{member_id}", response_model=MemberRead)
+def update_member(member_id: int, body: MemberUpdate, session: SessionDep) -> Member:
+    """Only the fields sent change. A later expires_on renews; is_active false / true freezes / unfreezes."""
+    member = get_member_or_404(session, member_id)
+    changes = body.model_dump(exclude_unset=True)
+    if "expires_on" in changes and changes["expires_on"] < member.joined_on:
+        raise HTTPException(status_code=422, detail="expires_on must be on or after joined_on")
+    member.sqlmodel_update(changes)
+    member.updated_at = utc_now()
+    session.add(member)
+    session.commit()
+    session.refresh(member)
+    return member
+
+
+@router.delete("/{member_id}", status_code=204)
+def delete_member(member_id: int, session: SessionDep) -> None:
+    member = get_member_or_404(session, member_id)
+    session.delete(member)
+    session.commit()
