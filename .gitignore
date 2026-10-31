@@ -2,6 +2,7 @@
 __pycache__/
 .venv/
 *.pyc
+gym_buddy.db
 
 # Node
 node_modules/
