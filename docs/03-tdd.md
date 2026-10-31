@@ -389,7 +389,7 @@ In the MVP no login is needed. In the Beta the member endpoints become admin-onl
 
 ### 6.2 Endpoints — Beta
 
-"Who" uses the roles from the [SRS permission matrix (section 3.9)](02-srs.md#39-permission-matrix--beta). Every endpoint except auth, health and docs needs `Authorization: Bearer <access_token>` (`401` without it).
+"Who" uses the roles from the [SRS permission matrix (section 3.11)](02-srs.md#311-permission-matrix--beta). Every endpoint except auth, health and docs needs `Authorization: Bearer <access_token>` (`401` without it).
 
 **Auth and profile**
 
@@ -715,7 +715,7 @@ stats = AdminStats(
 | Free-tier project pauses when idle | Check the Supabase dashboard before demos; any API activity keeps it awake |
 | Code deployed before its migration ran (or the reverse) | Always run `alembic upgrade head` before merging a migration; keep migrations additive where possible |
 | JWT secret leaked | Only in Vercel env vars; rotating it logs everyone out (acceptable) |
-| Permission bug exposes another member's data | All permission checks go through the dependencies in section 10.3; review every new route against the [SRS permission matrix](02-srs.md#39-permission-matrix--beta) |
+| Permission bug exposes another member's data | All permission checks go through the dependencies in section 10.3; review every new route against the [SRS permission matrix](02-srs.md#311-permission-matrix--beta) |
 | Two members book the last class spot at the same time | Capacity check and insert run in one transaction; the composite primary key blocks duplicate bookings |
 | Expiry compared against the wrong date (time zones) | Store `expires_on` as a plain date; compare with the server's `date.today()` in UTC and state this in the SRS |
 | No automated tests or CI yet | Review each PR manually against the [SRS acceptance criteria](02-srs.md#5-acceptance-criteria); tests and CI are planned after this semester's scope |
