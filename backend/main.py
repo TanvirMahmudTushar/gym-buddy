@@ -2,7 +2,12 @@ from pathlib import Path
 
 from fastapi import FastAPI
 
+from app.database import create_db_and_tables
+
 app = FastAPI(title="FastAPI + React")
+
+# Run at import (not in a lifespan hook) so it also works on Vercel's serverless functions.
+create_db_and_tables()
 
 
 @app.get("/api/health")
