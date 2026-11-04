@@ -2,10 +2,20 @@
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, HTTPException, Query
-from sqlmodel import Session, col, func, select
+from sqlmodel import Session, col, delete, func, select
 
 from app.database import SessionDep
-from app.models import Member, MemberCreate, MemberPage, MemberRead, MemberUpdate, utc_now, utc_today
+from app.models import (
+    Member,
+    MemberBulkDelete,
+    MemberBulkDeleteResult,
+    MemberCreate,
+    MemberPage,
+    MemberRead,
+    MemberUpdate,
+    utc_now,
+    utc_today,
+)
 
 router = APIRouter(prefix="/api/v1/members", tags=["members"])
 
@@ -54,6 +64,14 @@ def list_members(
         .limit(limit)
     )
     return {"items": session.exec(query).all(), "total": total, "offset": offset, "limit": limit}
+
+
+@router.post("/bulk-delete", response_model=MemberBulkDeleteResult)
+def bulk_delete_members(body: MemberBulkDelete, session: SessionDep) -> dict:
+    """All in one transaction. An ID that no longer exists is skipped, so deleted can be lower than the IDs sent."""
+    result = session.exec(delete(Member).where(col(Member.id).in_(body.ids)))
+    session.commit()
+    return {"deleted": result.rowcount}
 
 
 @router.get("/{member_id}", response_model=MemberRead)

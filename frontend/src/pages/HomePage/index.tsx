@@ -11,6 +11,8 @@ export default function App() {
   const [members, setMembers] = useState<Member[]>([])
   const [filter, setFilter] = useState<Filter>("all")
   const [selectedId, setSelectedId] = useState<number | null>(null)
+  // Members ticked for bulk delete; separate from selectedId, the member shown in the details panel.
+  const [checkedIds, setCheckedIds] = useState<number[]>([])
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
   const [total, setTotal] = useState(0)
@@ -30,6 +32,8 @@ export default function App() {
         if (ignore) return
         setMembers(page.items)
         setTotal(page.total)
+        // Only members still on screen can stay ticked, so nothing hidden gets deleted.
+        setCheckedIds((prev) => prev.filter((id) => page.items.some((m) => m.id === id)))
       })
       .catch((err) => !ignore && setError(errorText(err)))
       .finally(() => !ignore && setLoading(false))
@@ -62,6 +66,17 @@ export default function App() {
     setReloadKey((k) => k + 1)
   }
 
+  function handleFilterChange(next: Filter) {
+    setFilter(next)
+    setCheckedIds([])
+  }
+
+  function handleBulkDeleted(ids: number[]) {
+    setCheckedIds([])
+    setSelectedId((current) => (current !== null && ids.includes(current) ? null : current))
+    setReloadKey((k) => k + 1)
+  }
+
   return (
     <div className="page">
       <header>
@@ -74,7 +89,7 @@ export default function App() {
           <MemberList
             members={members}
             filter={filter}
-            onFilterChange={setFilter}
+            onFilterChange={handleFilterChange}
             selectedId={selectedId}
             onSelect={setSelectedId}
             loading={loading}
@@ -82,6 +97,9 @@ export default function App() {
             total={total}
             loadingMore={loadingMore}
             onLoadMore={loadMore}
+            checkedIds={checkedIds}
+            onCheckedChange={setCheckedIds}
+            onBulkDeleted={handleBulkDeleted}
           />
         </div>
         <aside className="column">

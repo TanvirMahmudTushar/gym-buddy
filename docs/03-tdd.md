@@ -322,6 +322,8 @@ erDiagram
 | `MemberUpdate` | `PATCH` member body | all optional: `full_name`, `phone`, `plan`, `expires_on`, `is_active`, `notes` | MVP |
 | `MemberRead` | Member responses | all member columns (+ `user_id` in Beta) | MVP |
 | `MemberPage` | Member list response | `items` (`MemberRead[]`), `total` (all members matching the filter), `offset`, `limit` | MVP |
+| `MemberBulkDelete` | Bulk delete body | `ids` (1 to 100 member IDs) | MVP |
+| `MemberBulkDeleteResult` | Bulk delete response | `deleted` (how many members were deleted) | MVP |
 | `SignupRequest` | Sign up | `email`, `name`, `password` | Beta |
 | `LoginRequest` | Log in | `email`, `password` | Beta |
 | `TokenResponse` | Login / refresh | `access_token`, `token_type: "bearer"`, `expires_in` | Beta |
@@ -390,6 +392,7 @@ In the MVP no login is needed. In the Beta the member endpoints become admin-onl
 | `GET` | `/api/v1/members/{id}` | — | `200` `MemberRead` | `404` | FR-04 |
 | `PATCH` | `/api/v1/members/{id}` | `MemberUpdate` | `200` `MemberRead` | `404`, `422` | FR-05, FR-07 |
 | `DELETE` | `/api/v1/members/{id}` | — | `204` | `404` | FR-06 |
+| `POST` | `/api/v1/members/bulk-delete` | `MemberBulkDelete` | `200` `MemberBulkDeleteResult` | `422` | FR-06a |
 | `GET` | `/api/health` | — | `200` `{"status":"ok"}` | — | FR-10 |
 
 `status` is an optional filter: `active` (valid membership), `expired` (`expires_on < today`) or `frozen` (`is_active = false`).

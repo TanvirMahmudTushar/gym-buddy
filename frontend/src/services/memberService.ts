@@ -1,5 +1,5 @@
 // fetch helpers for the member REST API (/api/v1/members).
-import type { Member, MemberCreate, MemberPage, MemberStatus, MemberUpdate } from "../types/member"
+import type { Member, MemberBulkDeleteResult, MemberCreate, MemberPage, MemberStatus, MemberUpdate } from "../types/member"
 
 const BASE = "/api/v1/members"
 const PAGE_SIZE = 20
@@ -53,3 +53,6 @@ export const updateMember = (id: number, body: MemberUpdate) =>
   request<Member>(`${BASE}/${id}`, { method: "PATCH", body: JSON.stringify(body) })
 
 export const deleteMember = (id: number) => request<void>(`${BASE}/${id}`, { method: "DELETE" })
+
+export const deleteMembers = (ids: number[]) =>
+  request<MemberBulkDeleteResult>(`${BASE}/bulk-delete`, { method: "POST", body: JSON.stringify({ ids }) })

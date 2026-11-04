@@ -7,6 +7,8 @@ from sqlmodel import Field, SQLModel
 
 Plan = Literal["monthly", "quarterly", "yearly"]
 FullName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
+# The id column is a 32-bit integer, so anything larger cannot match a member.
+MemberId = Annotated[int, Field(gt=0, le=2_147_483_647)]
 
 
 def utc_now() -> datetime:
@@ -83,3 +85,11 @@ class MemberPage(SQLModel):
     total: int
     offset: int
     limit: int
+
+
+class MemberBulkDelete(SQLModel):
+    ids: list[MemberId] = Field(min_length=1, max_length=100)
+
+
+class MemberBulkDeleteResult(SQLModel):
+    deleted: int

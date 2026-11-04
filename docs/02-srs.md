@@ -175,6 +175,7 @@ Every Admin is also a logged-in user, so they can log out, edit their profile an
 | FR-04 | The system shall return one member by their ID. | MVP | US-03 |
 | FR-05 | The system shall update any of `full_name`, `phone`, `plan`, `expires_on`, `is_active`, `notes` on an existing member. Fields not sent stay unchanged. Setting a later `expires_on` renews the membership; setting `is_active = false` freezes it. | MVP | US-04, US-05 |
 | FR-06 | The system shall delete a member by their ID. | MVP | US-06 |
+| FR-06a | The system shall delete several members in one request, given 1 to 100 IDs, and report how many were deleted. | MVP | US-06 |
 | FR-07 | The system shall set `created_at` when a member is created and update `updated_at` on every change. | MVP | US-04 |
 | FR-08 | The system shall reject invalid input with status `422` and a message saying which field is wrong. This includes an `expires_on` earlier than `joined_on`. | MVP | US-07 |
 | FR-09 | The system shall return `404` when a member ID does not exist. | MVP | US-07 |
@@ -510,7 +511,7 @@ Every endpoint except sign up, log in, refresh, health and the docs returns `401
 | US-02 | FR-02, FR-03 | `GET /api/v1/members` | MVP |
 | US-03 | FR-04 | `GET /api/v1/members/{id}` | MVP |
 | US-04, US-05 | FR-05, FR-07 | `PATCH /api/v1/members/{id}` | MVP |
-| US-06 | FR-06 | `DELETE /api/v1/members/{id}` | MVP |
+| US-06 | FR-06, FR-06a | `DELETE /api/v1/members/{id}`, `POST /api/v1/members/bulk-delete` | MVP |
 | US-07 | FR-08, FR-09, FR-11 | All, `/api/docs` | MVP |
 | US-08 | FR-10 | `GET /api/health` | MVP |
 | US-09 | FR-12 | `POST /api/v1/auth/signup` | Beta |
