@@ -74,3 +74,12 @@ class MemberRead(SQLModel):
     notes: str | None
     created_at: datetime
     updated_at: datetime
+
+
+class MemberPage(SQLModel):
+    """One page of the member list. total counts every member matching the filter, not just this page."""
+
+    items: list[MemberRead]
+    total: int
+    offset: int
+    limit: int

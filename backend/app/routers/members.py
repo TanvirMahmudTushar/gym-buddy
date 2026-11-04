@@ -2,10 +2,10 @@
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, HTTPException, Query
-from sqlmodel import Session, col, select
+from sqlmodel import Session, col, func, select
 
 from app.database import SessionDep
-from app.models import Member, MemberCreate, MemberRead, MemberUpdate, utc_now, utc_today
+from app.models import Member, MemberCreate, MemberPage, MemberRead, MemberUpdate, utc_now, utc_today
 
 router = APIRouter(prefix="/api/v1/members", tags=["members"])
 
@@ -29,24 +29,31 @@ def create_member(body: MemberCreate, session: SessionDep) -> Member:
     return member
 
 
-@router.get("", response_model=list[MemberRead])
+@router.get("", response_model=MemberPage)
 def list_members(
     session: SessionDep,
     offset: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
     status: MemberStatus | None = None,
-) -> list[Member]:
+) -> dict:
     """Newest first. A frozen member counts as frozen whatever its expiry date."""
-    query = select(Member)
     today = utc_today()
+    filters = []
     if status == "active":
-        query = query.where(col(Member.is_active).is_(True), Member.expires_on >= today)
+        filters = [col(Member.is_active).is_(True), Member.expires_on >= today]
     elif status == "expired":
-        query = query.where(col(Member.is_active).is_(True), Member.expires_on < today)
+        filters = [col(Member.is_active).is_(True), Member.expires_on < today]
     elif status == "frozen":
-        query = query.where(col(Member.is_active).is_(False))
-    query = query.order_by(col(Member.created_at).desc(), col(Member.id).desc()).offset(offset).limit(limit)
-    return list(session.exec(query).all())
+        filters = [col(Member.is_active).is_(False)]
+    total = session.exec(select(func.count()).select_from(Member).where(*filters)).one()
+    query = (
+        select(Member)
+        .where(*filters)
+        .order_by(col(Member.created_at).desc(), col(Member.id).desc())
+        .offset(offset)
+        .limit(limit)
+    )
+    return {"items": session.exec(query).all(), "total": total, "offset": offset, "limit": limit}
 
 
 @router.get("/{member_id}", response_model=MemberRead)

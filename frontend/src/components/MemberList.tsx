@@ -19,13 +19,13 @@ interface Props {
   onSelect: (id: number) => void
   loading: boolean
   error: string
-  hasMore: boolean
+  total: number
   loadingMore: boolean
   onLoadMore: () => void
 }
 
 export default function MemberList(props: Props) {
-  const { members, filter, selectedId, onSelect, loading, error } = props
+  const { members, filter, selectedId, onSelect, loading, error, total } = props
 
   function handleKey(e: KeyboardEvent, id: number) {
     if (e.key === "Enter" || e.key === " ") {
@@ -96,9 +96,9 @@ export default function MemberList(props: Props) {
       {!error && members.length > 0 && (
         <div className="list-foot">
           <span>
-            Showing {members.length} member{members.length === 1 ? "" : "s"}
+            Showing {members.length} of {total} member{total === 1 ? "" : "s"}
           </span>
-          {props.hasMore && (
+          {members.length < total && (
             <button type="button" onClick={props.onLoadMore} disabled={props.loadingMore}>
               {props.loadingMore ? "Loading…" : "Load more"}
             </button>

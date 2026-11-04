@@ -15,6 +15,13 @@ export interface Member {
   updated_at: string
 }
 
+export interface MemberPage {
+  items: Member[]
+  total: number
+  offset: number
+  limit: number
+}
+
 export interface MemberCreate {
   full_name: string
   phone: string | null
