@@ -1,5 +1,6 @@
 import { type FormEvent, useState } from "react"
-import { type Member, type MemberUpdate, type Plan, PLANS } from "../members"
+import type { Member, MemberUpdate, Plan } from "../types/member"
+import { PLANS } from "../utils/member"
 
 interface Props {
   member: Member

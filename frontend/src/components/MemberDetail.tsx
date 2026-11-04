@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
-import { deleteMember, getMember, updateMember } from "../api"
-import { type Member, type MemberUpdate, errorText, formatDate, memberStatus, planLabel } from "../members"
+import { deleteMember, getMember, updateMember } from "../services/memberService"
+import type { Member, MemberUpdate } from "../types/member"
+import { errorText, formatDate, memberStatus, planLabel } from "../utils/member"
 import EditMemberForm from "./EditMemberForm"
 import StatusPill from "./StatusPill"
 

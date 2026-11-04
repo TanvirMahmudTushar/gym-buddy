@@ -1,5 +1,5 @@
 // fetch helpers for the member REST API (/api/v1/members).
-import type { Member, MemberCreate, MemberPage, MemberStatus, MemberUpdate } from "./members"
+import type { Member, MemberCreate, MemberPage, MemberStatus, MemberUpdate } from "../types/member"
 
 const BASE = "/api/v1/members"
 const PAGE_SIZE = 20

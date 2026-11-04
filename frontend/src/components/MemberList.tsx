@@ -1,5 +1,6 @@
 import { type KeyboardEvent } from "react"
-import { type Member, type MemberStatus, formatDate, memberStatus, planLabel } from "../members"
+import type { Member, MemberStatus } from "../types/member"
+import { formatDate, memberStatus, planLabel } from "../utils/member"
 import StatusPill from "./StatusPill"
 
 export type Filter = MemberStatus | "all"

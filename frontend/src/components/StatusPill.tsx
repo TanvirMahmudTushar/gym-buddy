@@ -1,4 +1,4 @@
-import type { MemberStatus } from "../members"
+import type { MemberStatus } from "../types/member"
 
 const LABELS: Record<MemberStatus, string> = { active: "Active", expired: "Expired", frozen: "Frozen" }
 
