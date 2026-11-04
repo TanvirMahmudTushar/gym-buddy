@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { PAGE_SIZE, listMembers } from "./api"
+import { listMembers } from "./api"
 import AddMemberForm from "./components/AddMemberForm"
 import MemberDetail from "./components/MemberDetail"
 import MemberList, { type Filter } from "./components/MemberList"
@@ -12,7 +12,7 @@ export default function App() {
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
-  const [hasMore, setHasMore] = useState(false)
+  const [total, setTotal] = useState(0)
   const [error, setError] = useState("")
   // Bumped to reload the first page after a change.
   const [reloadKey, setReloadKey] = useState(0)
@@ -27,8 +27,8 @@ export default function App() {
     listMembers(0, status)
       .then((page) => {
         if (ignore) return
-        setMembers(page)
-        setHasMore(page.length === PAGE_SIZE)
+        setMembers(page.items)
+        setTotal(page.total)
       })
       .catch((err) => !ignore && setError(errorText(err)))
       .finally(() => !ignore && setLoading(false))
@@ -41,8 +41,8 @@ export default function App() {
     setLoadingMore(true)
     try {
       const page = await listMembers(members.length, status)
-      setMembers((prev) => [...prev, ...page])
-      setHasMore(page.length === PAGE_SIZE)
+      setMembers((prev) => [...prev, ...page.items])
+      setTotal(page.total)
     } catch (err) {
       setError(errorText(err))
     } finally {
@@ -78,7 +78,7 @@ export default function App() {
             onSelect={setSelectedId}
             loading={loading}
             error={error}
-            hasMore={hasMore}
+            total={total}
             loadingMore={loadingMore}
             onLoadMore={loadMore}
           />

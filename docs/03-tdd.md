@@ -315,6 +315,7 @@ erDiagram
 | `MemberCreate` | `POST` member body | `full_name`, `phone?`, `plan`, `joined_on?`, `expires_on`, `notes?` | MVP |
 | `MemberUpdate` | `PATCH` member body | all optional: `full_name`, `phone`, `plan`, `expires_on`, `is_active`, `notes` | MVP |
 | `MemberRead` | Member responses | all member columns (+ `user_id` in Beta) | MVP |
+| `MemberPage` | Member list response | `items` (`MemberRead[]`), `total` (all members matching the filter), `offset`, `limit` | MVP |
 | `SignupRequest` | Sign up | `email`, `name`, `password` | Beta |
 | `LoginRequest` | Log in | `email`, `password` | Beta |
 | `TokenResponse` | Login / refresh | `access_token`, `token_type: "bearer"`, `expires_in` | Beta |
@@ -379,7 +380,7 @@ In the MVP no login is needed. In the Beta the member endpoints become admin-onl
 | Method | Path | Body | Success | Errors | FR |
 |---|---|---|---|---|---|
 | `POST` | `/api/v1/members` | `MemberCreate` | `201` `MemberRead` | `422` | FR-01, FR-07 |
-| `GET` | `/api/v1/members?offset=0&limit=20&status=` | — | `200` `MemberRead[]` | `422` | FR-02, FR-03 |
+| `GET` | `/api/v1/members?offset=0&limit=20&status=` | — | `200` `MemberPage` | `422` | FR-02, FR-03 |
 | `GET` | `/api/v1/members/{id}` | — | `200` `MemberRead` | `404` | FR-04 |
 | `PATCH` | `/api/v1/members/{id}` | `MemberUpdate` | `200` `MemberRead` | `404`, `422` | FR-05, FR-07 |
 | `DELETE` | `/api/v1/members/{id}` | — | `204` | `404` | FR-06 |
@@ -410,7 +411,7 @@ In the MVP no login is needed. In the Beta the member endpoints become admin-onl
 | Method | Path | Who | Body | Success | Errors | FR |
 |---|---|---|---|---|---|---|
 | `POST` | `/api/v1/members` | Admin | `MemberCreate` (+ optional `user_id`) | `201` `MemberRead` | `403`, `409` (user already linked), `422` | FR-19 |
-| `GET` | `/api/v1/members?offset&limit&status` | Admin | — | `200` `MemberRead[]` | `403` | FR-19 |
+| `GET` | `/api/v1/members?offset&limit&status` | Admin | — | `200` `MemberPage` | `403` | FR-19 |
 | `GET` | `/api/v1/members/{id}` | Admin | — | `200` `MemberRead` | `403`, `404` | FR-19 |
 | `PATCH` | `/api/v1/members/{id}` | Admin | `MemberUpdate` | `200` `MemberRead` | `403`, `404`, `422` | FR-19 |
 | `DELETE` | `/api/v1/members/{id}` | Admin | — | `204` | `403`, `404` | FR-19 |

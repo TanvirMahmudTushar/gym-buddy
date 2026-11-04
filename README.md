@@ -28,13 +28,14 @@ Interactive docs: `/api/docs` (for example http://localhost:8000/api/docs).
 | Operation | Method and path | Success | Errors |
 |---|---|---|---|
 | Create | `POST /api/v1/members` | `201` member | `422` |
-| Read list | `GET /api/v1/members?offset=0&limit=20&status=active` | `200` list, newest first | `422` |
+| Read list | `GET /api/v1/members?offset=0&limit=20&status=active` | `200` `{items, total, offset, limit}`, newest first | `422` |
 | Read single | `GET /api/v1/members/{id}` | `200` member | `404` |
 | Update | `PATCH /api/v1/members/{id}` | `200` member | `404`, `422` |
 | Delete | `DELETE /api/v1/members/{id}` | `204` | `404` |
 | Health | `GET /api/health` | `200` `{"status": "ok"}` | |
 
 - `status` filter: `active` (valid), `expired` (expiry date passed) or `frozen` (`is_active = false`).
+- `total` counts every member matching the filter, not just the page returned.
 - `PATCH` changes only the fields sent: a later `expires_on` renews, `is_active: false` freezes.
 
 Example body for `POST`:
