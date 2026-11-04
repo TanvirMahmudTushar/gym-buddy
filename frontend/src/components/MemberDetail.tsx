@@ -79,6 +79,7 @@ export default function MemberDetail({ memberId, onChanged, onDeleted }: Props) 
       onDeleted()
     } catch (err) {
       setActionError(errorText(err))
+    } finally {
       setBusy(false)
     }
   }
