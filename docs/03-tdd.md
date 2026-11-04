@@ -130,8 +130,14 @@ backend/
   requirements.txt
 frontend/
   src/
-    App.tsx            # (Could) simple member list using the API
-    pages/             # (Beta, Could) Login, Signup, MyMembership, Classes, Profile, AdminDashboard
+    App.tsx            # shows HomePage
+    components/        # add form, member list, details panel
+    context/           # (Later) empty for now
+    layouts/           # (Later) empty for now
+    pages/             # HomePage; (Later) AboutPage, MemberDetailsPage; (Beta, Could) Login, Signup, MyMembership, Classes, Profile, AdminDashboard
+    services/          # fetch calls to the API
+    types/             # TypeScript types
+    utils/             # display helpers
 docs/
   01-prd.md
   02-srs.md

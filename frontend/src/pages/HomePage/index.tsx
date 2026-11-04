@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react"
-import { listMembers } from "./api"
-import AddMemberForm from "./components/AddMemberForm"
-import MemberDetail from "./components/MemberDetail"
-import MemberList, { type Filter } from "./components/MemberList"
-import { type Member, errorText } from "./members"
+import { listMembers } from "../../services/memberService"
+import AddMemberForm from "../../components/AddMemberForm"
+import MemberDetail from "../../components/MemberDetail"
+import MemberList, { type Filter } from "../../components/MemberList"
+import type { Member } from "../../types/member"
+import { errorText } from "../../utils/member"
 
 // The whole MVP is this one page: add form and member list on the left, details of the selected member on the right.
 export default function App() {

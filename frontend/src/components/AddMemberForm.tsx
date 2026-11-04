@@ -1,6 +1,7 @@
 import { type FormEvent, useState } from "react"
-import { createMember } from "../api"
-import { type Member, type Plan, PLANS, errorText, formatDate, todayUtc } from "../members"
+import { createMember } from "../services/memberService"
+import type { Member, Plan } from "../types/member"
+import { PLANS, errorText, formatDate, todayUtc } from "../utils/member"
 
 const EMPTY = { full_name: "", phone: "", plan: "monthly" as Plan, expires_on: "", notes: "" }
 

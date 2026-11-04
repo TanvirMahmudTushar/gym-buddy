@@ -10,7 +10,11 @@ backend/          FastAPI app (routes under /api)
   app/database.py engine and session (Supabase or local SQLite)
   app/models.py   Member table and request / response schemas
   app/routers/    members.py: the five CRUD endpoints
-frontend/         Vite + React + TypeScript, one page (src/App.tsx)
+frontend/         Vite + React + TypeScript, one page (src/pages/HomePage/index.tsx)
+  src/components/ add form, member list, details panel
+  src/services/   memberService.ts: fetch calls to the API
+  src/types/      member.ts: TypeScript types
+  src/utils/      member.ts: display helpers
 docs/             PRD, SRS and TDD
 vercel.json       Vercel setup: /api/* goes to backend, everything else to frontend
 ```
