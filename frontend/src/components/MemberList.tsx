@@ -1,6 +1,7 @@
 import { type KeyboardEvent } from "react"
 import type { Member, MemberStatus } from "../types/member"
 import { formatDate, memberStatus, planLabel } from "../utils/member"
+import BulkDeleteBar from "./BulkDeleteBar"
 import StatusPill from "./StatusPill"
 
 export type Filter = MemberStatus | "all"
@@ -23,10 +24,19 @@ interface Props {
   total: number
   loadingMore: boolean
   onLoadMore: () => void
+  checkedIds: number[]
+  onCheckedChange: (ids: number[]) => void
+  onBulkDeleted: (ids: number[]) => void
 }
 
 export default function MemberList(props: Props) {
-  const { members, filter, selectedId, onSelect, loading, error, total } = props
+  const { members, filter, selectedId, onSelect, loading, error, total, checkedIds, onCheckedChange } = props
+
+  const allChecked = members.length > 0 && checkedIds.length === members.length
+
+  function toggleChecked(id: number) {
+    onCheckedChange(checkedIds.includes(id) ? checkedIds.filter((c) => c !== id) : [...checkedIds, id])
+  }
 
   function handleKey(e: KeyboardEvent, id: number) {
     if (e.key === "Enter" || e.key === " ") {
@@ -47,6 +57,17 @@ export default function MemberList(props: Props) {
         <table>
           <thead>
             <tr>
+              <th className="check">
+                <input
+                  type="checkbox"
+                  aria-label="Select all members shown"
+                  checked={allChecked}
+                  ref={(el) => {
+                    if (el) el.indeterminate = checkedIds.length > 0 && !allChecked
+                  }}
+                  onChange={() => onCheckedChange(allChecked ? [] : members.map((m) => m.id))}
+                />
+              </th>
               <th>Name</th>
               <th>Plan</th>
               <th>Expires</th>
@@ -62,6 +83,15 @@ export default function MemberList(props: Props) {
                 onClick={() => onSelect(m.id)}
                 onKeyDown={(e) => handleKey(e, m.id)}
               >
+                {/* Ticking a box must not also open the details panel. */}
+                <td className="check" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+                  <input
+                    type="checkbox"
+                    aria-label={`Select ${m.full_name}`}
+                    checked={checkedIds.includes(m.id)}
+                    onChange={() => toggleChecked(m.id)}
+                  />
+                </td>
                 <td className="name">{m.full_name}</td>
                 <td>{planLabel(m.plan)}</td>
                 <td>{formatDate(m.expires_on)}</td>
@@ -93,6 +123,9 @@ export default function MemberList(props: Props) {
           ))}
         </div>
       </div>
+      {checkedIds.length > 0 && (
+        <BulkDeleteBar ids={checkedIds} onDeleted={props.onBulkDeleted} onClear={() => onCheckedChange([])} />
+      )}
       {body}
       {!error && members.length > 0 && (
         <div className="list-foot">

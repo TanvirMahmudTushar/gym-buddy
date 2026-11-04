@@ -281,6 +281,33 @@ td.name {
   font-weight: 600;
 }
 
+th.check,
+td.check {
+  width: 1%;
+  padding-right: 0;
+  cursor: default;
+}
+
+.check input {
+  display: block;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  padding: 0;
+  cursor: pointer;
+  accent-color: var(--accent);
+}
+
+.bulk-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.bulk-bar .error {
+  margin: 0;
+}
+
 tbody tr {
   cursor: pointer;
 }

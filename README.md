@@ -36,6 +36,7 @@ Interactive docs: `/api/docs` (for example http://localhost:8000/api/docs).
 | Read single | `GET /api/v1/members/{id}` | `200` member | `404` |
 | Update | `PATCH /api/v1/members/{id}` | `200` member | `404`, `422` |
 | Delete | `DELETE /api/v1/members/{id}` | `204` | `404` |
+| Delete several | `POST /api/v1/members/bulk-delete` with `{"ids": [1, 2, 3]}` | `200` `{"deleted": 3}` | `422` |
 | Health | `GET /api/health` | `200` `{"status": "ok"}` | |
 
 - `status` filter: `active` (valid), `expired` (expiry date passed) or `frozen` (`is_active = false`).

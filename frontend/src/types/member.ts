@@ -32,3 +32,7 @@ export interface MemberCreate {
 
 /** PATCH body: only the fields sent change. */
 export type MemberUpdate = Partial<Pick<Member, "full_name" | "phone" | "plan" | "expires_on" | "is_active" | "notes">>
+
+export interface MemberBulkDeleteResult {
+  deleted: number
+}
