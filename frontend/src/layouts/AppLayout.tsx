@@ -1,8 +1,9 @@
 import type { ReactNode } from "react"
 import { useAuth } from "../context/AuthContext"
-import { type Page, canOpen, roleLabel } from "../utils/auth"
+import { type ProtectedPage, type Page, canOpen, roleLabel } from "../utils/auth"
 
-const LINKS: { page: "members" | "account" | "users"; label: string }[] = [
+const LINKS: { page: ProtectedPage; label: string }[] = [
+  { page: "dashboard", label: "Dashboard" },
   { page: "members", label: "Members" },
   { page: "users", label: "Users" },
   { page: "account", label: "My account" },

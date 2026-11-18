@@ -225,6 +225,8 @@ Every Admin is also a logged-in user, so they can log out, edit their profile an
 | FR-38 | An admin shall be able to unban a user; the user can then log in again. The user's linked membership and bookings are kept while banned. | Beta | US-22 |
 | FR-39 | The admin user list shall show each user's status (`active` / `banned`), ban date and ban reason. | Beta | US-21 |
 
+> **Built so far (admin):** FR-35 with the member and user numbers (classes and check-ins are not built yet, so those counts are not shown), and FR-36 to FR-39 without refresh tokens, since none exist yet to revoke. An admin lands on the dashboard after logging in.
+
 ### 3.6 Classes and bookings — Beta
 
 | ID | Requirement | Release | Story |

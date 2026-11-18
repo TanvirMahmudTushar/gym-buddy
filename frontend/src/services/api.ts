@@ -25,6 +25,9 @@ export function setSessionExpiredHandler(handler: (() => void) | null): void {
   onSessionExpired = handler
 }
 
+// The text the API sends when an admin has banned the account (must match the backend).
+const ACCOUNT_BANNED = "Account banned"
+
 interface ValidationError {
   loc: (string | number)[]
   msg: string
@@ -59,8 +62,10 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
   const res = await fetch(path, { ...init, headers })
   if (!res.ok) {
     // A 401 while holding a token means it is no longer valid. A wrong password on the login form has no token yet.
-    if (res.status === 401 && token) onSessionExpired?.()
-    throw new Error(await errorMessage(res))
+    const message = await errorMessage(res)
+    // A ban also ends the login, so the person is sent back to Log in with a clear reason on their next try.
+    if (token && (res.status === 401 || (res.status === 403 && message === ACCOUNT_BANNED))) onSessionExpired?.()
+    throw new Error(message)
   }
   return (res.status === 204 ? undefined : await res.json()) as T
 }

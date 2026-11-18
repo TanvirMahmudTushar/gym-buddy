@@ -110,6 +110,9 @@ class User(SQLModel, table=True):
     name: str = Field(max_length=100)
     password_hash: str
     role: str = Field(default="user", max_length=20)
+    is_banned: bool = False
+    banned_at: datetime | None = None
+    ban_reason: str | None = Field(default=None, max_length=500)
     created_at: datetime = Field(default_factory=utc_now)
 
 
@@ -138,11 +141,44 @@ class TokenResponse(SQLModel):
     user: UserRead
 
 
-class UserPage(SQLModel):
-    items: list[UserRead]
+class AdminUserRead(UserRead):
+    """What an admin sees about a user: the ban status as well."""
+
+    is_banned: bool
+    banned_at: datetime | None
+    ban_reason: str | None
+
+
+class AdminUserPage(SQLModel):
+    items: list[AdminUserRead]
     total: int
     offset: int
     limit: int
+
+
+class BanRequest(SQLModel):
+    reason: Annotated[str, StringConstraints(strip_whitespace=True, max_length=500)] | None = None
+
+
+class MemberStats(SQLModel):
+    total: int
+    active: int
+    expired: int
+    frozen: int
+    new_last_7_days: int
+
+
+class UserStats(SQLModel):
+    total: int
+    users: int
+    gym_managers: int
+    admins: int
+    banned: int
+
+
+class AdminStats(SQLModel):
+    members: MemberStats
+    users: UserStats
 
 
 class UserNameUpdate(SQLModel):

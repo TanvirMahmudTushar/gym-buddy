@@ -6,6 +6,7 @@ from typing import Annotated
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from fastapi import Depends
+from sqlalchemy import inspect, text
 from sqlalchemy.pool import NullPool
 from sqlmodel import Session, SQLModel, create_engine
 
@@ -45,11 +46,32 @@ else:
     engine = create_engine(DATABASE_URL, poolclass=NullPool, connect_args={"prepare_threshold": None})
 
 
+# create_all() never changes a table that already exists, so columns added later are listed here.
+# Table and column names and the definitions are fixed text, never user input.
+_ADDED_COLUMNS = [
+    ("app_user", "is_banned", "BOOLEAN NOT NULL DEFAULT FALSE"),
+    ("app_user", "banned_at", "TIMESTAMP"),
+    ("app_user", "ban_reason", "VARCHAR(500)"),
+]
+
+
+def _add_missing_columns() -> None:
+    with engine.begin() as conn:
+        found = inspect(conn)
+        existing = {table: {c["name"] for c in found.get_columns(table)} for table in {t for t, _, _ in _ADDED_COLUMNS}}
+        # IF NOT EXISTS: two serverless instances may start at the same moment.
+        guard = "IF NOT EXISTS " if engine.dialect.name == "postgresql" else ""
+        for table, column, definition in _ADDED_COLUMNS:
+            if column not in existing[table]:
+                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {guard}{column} {definition}"))
+
+
 def create_db_and_tables() -> None:
-    """Create missing tables; existing data is kept."""
+    """Create missing tables and columns; existing data is kept."""
     from app import models  # noqa: F401  (registers the tables on SQLModel.metadata)
 
     SQLModel.metadata.create_all(engine)
+    _add_missing_columns()
 
 
 def get_session() -> Iterator[Session]:

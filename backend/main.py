@@ -6,9 +6,14 @@ from fastapi.responses import JSONResponse
 
 from app.database import create_db_and_tables
 from app.routers import admin, auth, members, users
-from app.services.auth_service import EmailTakenError, InvalidCredentialsError
+from app.services.auth_service import (
+    ACCOUNT_BANNED_MESSAGE,
+    AccountBannedError,
+    EmailTakenError,
+    InvalidCredentialsError,
+)
 from app.services.member_service import InvalidExpiryError, MemberNotFoundError
-from app.services.user_service import CannotChangeOwnRoleError, UserNotFoundError
+from app.services.user_service import CannotBanError, CannotChangeOwnRoleError, UserNotFoundError
 
 logger = logging.getLogger("gym_buddy")
 
@@ -52,6 +57,16 @@ async def invalid_credentials(request: Request, exc: InvalidCredentialsError) ->
         content={"detail": "Wrong email or password"},
         headers={"WWW-Authenticate": "Bearer"},
     )
+
+
+@app.exception_handler(AccountBannedError)
+async def account_banned(request: Request, exc: AccountBannedError) -> JSONResponse:
+    return JSONResponse(status_code=403, content={"detail": ACCOUNT_BANNED_MESSAGE})
+
+
+@app.exception_handler(CannotBanError)
+async def cannot_ban(request: Request, exc: CannotBanError) -> JSONResponse:
+    return JSONResponse(status_code=400, content={"detail": str(exc)})
 
 
 @app.exception_handler(UserNotFoundError)

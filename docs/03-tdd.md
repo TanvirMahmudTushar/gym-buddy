@@ -126,13 +126,14 @@ backend/
       members.py       # /api/v1/members (+ check-ins in Beta)
       auth.py          # /api/v1/auth/signup, /login
       users.py         # /api/v1/users/me (profile, change name); (Beta) change password
-      admin.py         # /api/v1/admin/users (list, change role); (Beta) stats, ban / unban
+      admin.py         # /api/v1/admin/stats, /users (list, change role, ban, unban)
       classes.py       # (Beta) /api/v1/classes/* (classes and bookings)
     services/
       __init__.py
       member_service.py  # member rules and queries; raises MemberNotFoundError / InvalidExpiryError
       auth_service.py    # sign up (always role user) and log in; raises EmailTakenError / InvalidCredentialsError
-      user_service.py    # list users, change role, rename; raises UserNotFoundError / CannotChangeOwnRoleError
+      user_service.py    # list users, change role, rename, ban / unban; raises UserNotFoundError / CannotChangeOwnRoleError / CannotBanError
+      stats_service.py   # member and user counts for the admin dashboard
   alembic/             # (Beta) migration scripts
   alembic.ini          # (Beta)
   requirements.txt
@@ -142,7 +143,7 @@ frontend/
     components/        # add form, member list, details panel
     context/           # AuthContext: who is logged in, login / signup / logout
     layouts/           # AppLayout: header, and the pages each role may open
-    pages/             # HomePage (members), LoginPage, SignupPage, AccountPage, UsersPage; (Later) AboutPage, MemberDetailsPage; (Beta, Could) MyMembership, Classes, AdminDashboard
+    pages/             # HomePage (members), LoginPage, SignupPage, AccountPage, DashboardPage (admin), UsersPage (admin); (Later) AboutPage, MemberDetailsPage; (Beta, Could) MyMembership, Classes, AdminDashboard
     services/          # fetch calls to the API
     types/             # TypeScript types
     utils/             # display helpers
@@ -193,7 +194,7 @@ erDiagram
 
 **`app_user`**
 
-> Built so far: `id`, `email`, `name`, `password_hash`, `role` and `created_at`. The lockout and ban columns come with those features.
+> Built so far: `id`, `email`, `name`, `password_hash`, `role`, `is_banned`, `banned_at`, `ban_reason` and `created_at`. The login lockout columns come with that feature.
 
 | Column | Type | Rules |
 |---|---|---|
@@ -441,13 +442,17 @@ In the MVP no login is needed. In the Beta the member endpoints become admin-onl
 
 | Method | Path | Who | Body | Success | Errors | FR |
 |---|---|---|---|---|---|---|
-| `GET` | `/api/v1/admin/users?offset&limit` | Admin | — | `200` `UserPage` (built so far; `AdminUserRead[]` with ban info comes later) | `403` | FR-21 |
-| `PATCH` | `/api/v1/admin/users/{user_id}/role` | Admin | `RoleUpdate` | `200` `UserRead` | `400` (own role), `403`, `404` | FR-22 |
+| `GET` | `/api/v1/admin/users?offset&limit` | Admin | — | `200` `AdminUserPage` (`AdminUserRead` items, with ban info) | `403` | FR-21 |
+| `PATCH` | `/api/v1/admin/users/{user_id}/role` | Admin | `RoleUpdate` | `200` `AdminUserRead` | `400` (own role), `403`, `404` | FR-22 |
 | `GET` | `/api/v1/admin/stats` | Admin | — | `200` `AdminStats` | `403` | FR-35 |
 | `POST` | `/api/v1/admin/users/{user_id}/ban` | Admin | `BanRequest` | `200` `AdminUserRead` | `400` (self / other admin), `403`, `404` | FR-36 |
 | `POST` | `/api/v1/admin/users/{user_id}/unban` | Admin | — | `200` `AdminUserRead` | `403`, `404` | FR-38 |
 
-`GET /api/v1/admin/users` returns `AdminUserRead[]` so the dashboard can show who is banned (FR-39).
+`GET /api/v1/admin/users` returns `AdminUserRead` items so the Users page can show who is banned, since when and why (FR-39).
+
+`GET /api/v1/admin/stats` returns `{members: {total, active, expired, frozen, new_last_7_days}, users: {total, users, gym_managers, admins, banned}}`. "Active", "expired" and "frozen" use the same rules as the member list. Class and check-in numbers are added with those features.
+
+Ban rules: banning is idempotent (banning a banned user changes nothing), an admin cannot ban themself or another admin (`400`), and unbanning clears `banned_at` and `ban_reason` but keeps the role. `get_current_user` returns `403 Account banned` for a banned user on every request, and `/auth/login` does the same after the password is checked, so a stranger cannot find out who is banned.
 
 **Classes and bookings**
 
@@ -725,6 +730,7 @@ stats = AdminStats(
 - Revision `0002_beta`: create `app_user` (including lockout and ban columns), `refresh_token`, `gym_class`, `class_booking`, `check_in`; add nullable unique `user_id` and its index to `member` (existing MVP members stay as walk-in members, so no data is deleted).
 - Run migrations from a developer machine: `MIGRATION_DATABASE_URL=... alembic upgrade head` (Supabase session pooler, port `5432`), then merge the code.
 - After `0002_beta`, remove `create_all` from startup.
+- Until Alembic is added, `create_db_and_tables()` also adds columns that were created after a table first existed (`app_user.is_banned`, `banned_at`, `ban_reason`) with `ALTER TABLE ... ADD COLUMN`, only when they are missing, so an existing Supabase database keeps its data. Remove this with `create_all`.
 - Promote the first admin in the Supabase table editor: set `role = 'admin'` on your `app_user` row.
 
 ## 13. Risks

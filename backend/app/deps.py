@@ -8,6 +8,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from app.database import SessionDep
 from app.models import Role, User
 from app.security import InvalidTokenError, read_access_token
+from app.services.auth_service import ACCOUNT_BANNED_MESSAGE
 
 # auto_error is off so a missing token gives our own 401 (HTTPBearer alone would answer 403).
 _bearer = HTTPBearer(auto_error=False)
@@ -31,6 +32,9 @@ def get_current_user(
     user = session.get(User, user_id)
     if user is None:
         raise _unauthorized()
+    # Even a token that has not expired yet stops working the moment an admin bans the account.
+    if user.is_banned:
+        raise HTTPException(status_code=403, detail=ACCOUNT_BANNED_MESSAGE)
     return user
 
 

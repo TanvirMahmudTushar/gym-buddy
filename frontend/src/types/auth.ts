@@ -21,9 +21,21 @@ export interface SignupBody {
   password: string
 }
 
-export interface UserPage {
-  items: User[]
+/** What an admin sees about a user: the ban status as well. */
+export interface AdminUser extends User {
+  is_banned: boolean
+  banned_at: string | null
+  ban_reason: string | null
+}
+
+export interface AdminUserPage {
+  items: AdminUser[]
   total: number
   offset: number
   limit: number
+}
+
+export interface AdminStats {
+  members: { total: number; active: number; expired: number; frozen: number; new_last_7_days: number }
+  users: { total: number; users: number; gym_managers: number; admins: number; banned: number }
 }
