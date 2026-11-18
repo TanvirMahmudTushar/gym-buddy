@@ -5,6 +5,7 @@ import { type ProtectedPage, type Page, canOpen, roleLabel } from "../utils/auth
 const LINKS: { page: ProtectedPage; label: string }[] = [
   { page: "dashboard", label: "Dashboard" },
   { page: "members", label: "Members" },
+  { page: "classes", label: "Classes" },
   { page: "users", label: "Users" },
   { page: "account", label: "My account" },
 ]

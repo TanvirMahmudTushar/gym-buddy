@@ -9,13 +9,14 @@ export const ROLES: { value: Role; label: string; description: string }[] = [
 
 export const roleLabel = (role: Role) => ROLES.find((r) => r.value === role)?.label ?? role
 
-export type Page = "login" | "signup" | "dashboard" | "members" | "account" | "users"
-export type ProtectedPage = "dashboard" | "members" | "account" | "users"
+export type Page = "login" | "signup" | "dashboard" | "members" | "classes" | "account" | "users"
+export type ProtectedPage = "dashboard" | "members" | "classes" | "account" | "users"
 
 /** Pages that need a login, and the roles allowed to open them. */
 const ALLOWED: Record<ProtectedPage, Role[]> = {
   dashboard: ["admin"],
   members: ["gym_manager", "admin"],
+  classes: ["gym_manager", "admin"],
   account: ["user", "gym_manager", "admin"],
   users: ["admin"],
 }

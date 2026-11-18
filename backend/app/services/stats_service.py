@@ -4,7 +4,7 @@ from datetime import timedelta
 from sqlmodel import Session, col, func, select
 
 from app.models import Member, User, utc_now, utc_today
-from app.services import checkin_service
+from app.services import checkin_service, class_service
 
 
 def _count(session: Session, *filters) -> int:
@@ -44,4 +44,9 @@ def check_in_stats(session: Session) -> dict:
 
 
 def admin_stats(session: Session) -> dict:
-    return {"members": member_stats(session), "users": user_stats(session), "check_ins": check_in_stats(session)}
+    return {
+        "members": member_stats(session),
+        "users": user_stats(session),
+        "check_ins": check_in_stats(session),
+        "classes": class_service.class_stats(session),
+    }

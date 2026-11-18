@@ -2,6 +2,7 @@ import { useEffect, useState } from "react"
 import { useAuth } from "./context/AuthContext"
 import AppLayout from "./layouts/AppLayout"
 import AccountPage from "./pages/AccountPage"
+import ClassesPage from "./pages/ClassesPage"
 import DashboardPage from "./pages/DashboardPage"
 import HomePage from "./pages/HomePage"
 import LoginPage from "./pages/LoginPage"
@@ -9,7 +10,7 @@ import SignupPage from "./pages/SignupPage"
 import UsersPage from "./pages/UsersPage"
 import { type Page, type ProtectedPage, canOpen, homePage } from "./utils/auth"
 
-const PAGES: Page[] = ["login", "signup", "dashboard", "members", "account", "users"]
+const PAGES: Page[] = ["login", "signup", "dashboard", "members", "classes", "account", "users"]
 const isProtected = (page: Page | null): page is ProtectedPage => page !== null && page !== "login" && page !== "signup"
 
 /** The page named in the URL hash (#/members), or null when there is none. */
@@ -51,6 +52,7 @@ export default function App() {
       {page === "signup" && <SignupPage />}
       {page === "dashboard" && <DashboardPage />}
       {page === "members" && <HomePage />}
+      {page === "classes" && <ClassesPage />}
       {page === "account" && <AccountPage />}
       {page === "users" && <UsersPage />}
     </AppLayout>

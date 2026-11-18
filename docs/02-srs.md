@@ -225,17 +225,19 @@ Every Admin is also a logged-in user, so they can log out, edit their profile an
 | FR-38 | An admin shall be able to unban a user; the user can then log in again. The user's linked membership and bookings are kept while banned. | Beta | US-22 |
 | FR-39 | The admin user list shall show each user's status (`active` / `banned`), ban date and ban reason. | Beta | US-21 |
 
-> **Built so far (admin):** FR-35 with the member, check-in and user numbers (class numbers are not shown, since classes are not built yet), and FR-36 to FR-39 without refresh tokens, since none exist yet to revoke. An admin lands on the dashboard after logging in.
+> **Built so far (admin):** FR-35 with the member, check-in and user numbers (class numbers are `total` and `upcoming`), and FR-36 to FR-39 without refresh tokens, since none exist yet to revoke. An admin lands on the dashboard after logging in.
 
 ### 3.6 Classes and bookings — Beta
 
 | ID | Requirement | Release | Story |
 |---|---|---|---|
-| FR-25 | An admin shall be able to create a class with `name`, `starts_at`, `duration_minutes` and `capacity` (and optional `description`, `trainer_name`). | Beta | US-14 |
+| FR-25 | A gym manager or admin shall be able to create a class with `name`, `starts_at`, `duration_minutes` and `capacity` (and optional `description`, `trainer_name`). | Beta | US-14 |
 | FR-26 | Any logged-in user shall be able to list classes (optionally only upcoming, ordered by start time) and view one class. Each class shows `booked_count` and, for members, whether they booked it (`is_booked_by_me`). | Beta | US-15 |
-| FR-27 | An admin shall be able to edit or delete a class. Lowering `capacity` below the current number of bookings returns `422`. Deleting a class deletes its bookings. | Beta | US-14 |
-| FR-28 | An admin shall be able to list the bookings of a class (member name and booking time). | Beta | US-17 |
+| FR-27 | A gym manager or admin shall be able to edit or delete a class. Lowering `capacity` below the current number of bookings returns `422`. Deleting a class deletes its bookings. | Beta | US-14 |
+| FR-28 | A gym manager or admin shall be able to list the bookings of a class (member name and booking time). | Beta | US-17 |
 | FR-29 | A member with a valid membership shall be able to book a class that has not started yet, and cancel their own booking. Booking returns `400` if the membership is not valid or the class already started, `409` if the class is full or the member already booked it. A member can book or cancel only for themself. | Beta | US-16 |
+
+> **Built so far (gym manager):** FR-25, FR-26 (with `booked_count`; `is_booked_by_me` comes with member booking), FR-27 and FR-28. Deleting a member also deletes their bookings. FR-29 (a member booking and cancelling) comes with the User features.
 
 ### 3.7 Check-ins — Beta
 

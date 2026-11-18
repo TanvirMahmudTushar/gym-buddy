@@ -128,13 +128,15 @@ backend/
       users.py         # /api/v1/users/me (profile, change name); (Beta) change password
       admin.py         # /api/v1/admin/stats, /users (list, change role, ban, unban)
       check_ins.py     # /api/v1/check-ins/today
+      classes.py       # /api/v1/classes (read: anyone logged in; change and bookings: gym manager, admin)
       classes.py       # (Beta) /api/v1/classes/* (classes and bookings)
     services/
       __init__.py
       member_service.py  # member rules and queries; raises MemberNotFoundError / InvalidExpiryError
       auth_service.py    # sign up (always role user) and log in; raises EmailTakenError / InvalidCredentialsError
       user_service.py    # list users, change role, rename, ban / unban; raises UserNotFoundError / CannotChangeOwnRoleError / CannotBanError
-      stats_service.py   # member, check-in and user counts for the admin dashboard
+      stats_service.py   # member, check-in, class and user counts for the admin dashboard
+      class_service.py   # classes and bookings: create, list, edit, delete, who booked; raises ClassNotFoundError / CapacityBelowBookingsError
       checkin_service.py # record a check-in (membership must be valid), history, today's list; raises MembershipNotValidError
   alembic/             # (Beta) migration scripts
   alembic.ini          # (Beta)
@@ -145,7 +147,7 @@ frontend/
     components/        # add form, member list, details panel
     context/           # AuthContext: who is logged in, login / signup / logout
     layouts/           # AppLayout: header, and the pages each role may open
-    pages/             # HomePage (members), LoginPage, SignupPage, AccountPage, DashboardPage (admin), UsersPage (admin); (Later) AboutPage, MemberDetailsPage; (Beta, Could) MyMembership, Classes, AdminDashboard
+    pages/             # HomePage (members), LoginPage, SignupPage, AccountPage, DashboardPage (admin), UsersPage (admin), ClassesPage (gym manager, admin); (Later) AboutPage, MemberDetailsPage; (Beta, Could) MyMembership, Classes, AdminDashboard
     services/          # fetch calls to the API
     types/             # TypeScript types
     utils/             # display helpers
@@ -230,6 +232,8 @@ erDiagram
 | `user_id` | integer | FK → `app_user.id`, nullable, unique, on delete set null. Links a membership record to a login account. `null` = walk-in member without an account |
 
 **`gym_class`**
+
+> Built so far: all columns and the `starts_at` index. `class_booking` exists too, and its rows are created by the member booking feature that comes next; for now the gym manager sees them and the service deletes them with the class or the member (SQLite does not enforce `on delete cascade` by default).
 
 | Column | Type | Rules |
 |---|---|---|
@@ -350,7 +354,8 @@ erDiagram
 | `BanRequest` | Ban a user | `reason?` | Beta |
 | `AdminStats` | Dashboard | `members {total, active, expired, new_last_7_days}`, `classes {total, upcoming}`, `check_ins {today, last_7_days}`, `users {total, admins, banned}` | Beta |
 | `ClassCreate` / `ClassUpdate` | Create / edit class | `name`, `description?`, `trainer_name?`, `starts_at`, `duration_minutes`, `capacity` (all optional on update) | Beta |
-| `ClassRead` | Class responses | all class columns + `booked_count`, `is_booked_by_me` | Beta |
+| `ClassRead` | Class responses | all class columns except `created_by` + `booked_count` (`is_booked_by_me` comes with member booking); times are UTC with a trailing `Z` | Beta |
+| `ClassPage` / `BookingPage` | Class and booking lists | `items`, `total`, `offset`, `limit` | Beta |
 | `BookingRead` | Booking responses | `class_id`, `member_id`, `member_name`, `booked_at` | Beta |
 | `CheckInRead` | Check-in responses | `id`, `member_id`, `member_name`, `checked_in_at`, `recorded_by_name` | Beta |
 | `CheckInPage` | Check-in lists | `items: CheckInRead[]`, `total`, `offset`, `limit` | Beta |
@@ -464,12 +469,12 @@ Ban rules: banning is idempotent (banning a banned user changes nothing), an adm
 
 | Method | Path | Who | Body | Success | Errors | FR |
 |---|---|---|---|---|---|---|
-| `POST` | `/api/v1/classes` | Admin | `ClassCreate` | `201` `ClassRead` | `403`, `422` | FR-25 |
-| `GET` | `/api/v1/classes?offset&limit&upcoming=true` | Member | — | `200` `ClassRead[]` | — | FR-26 |
-| `GET` | `/api/v1/classes/{class_id}` | Member | — | `200` `ClassRead` | `404` | FR-26 |
-| `PATCH` | `/api/v1/classes/{class_id}` | Admin | `ClassUpdate` | `200` `ClassRead` | `403`, `404`, `422` (capacity below current bookings) | FR-27 |
-| `DELETE` | `/api/v1/classes/{class_id}` | Admin | — | `204` | `403`, `404` | FR-27 |
-| `GET` | `/api/v1/classes/{class_id}/bookings` | Admin | — | `200` `BookingRead[]` | `403`, `404` | FR-28 |
+| `POST` | `/api/v1/classes` | Gym Manager, Admin | `ClassCreate` | `201` `ClassRead` | `401`, `403`, `422` | FR-25 |
+| `GET` | `/api/v1/classes?offset&limit&upcoming=true` | Any logged-in user | — | `200` `ClassPage` (ordered by `starts_at`) | `401`, `422` | FR-26 |
+| `GET` | `/api/v1/classes/{class_id}` | Any logged-in user | — | `200` `ClassRead` | `401`, `404` | FR-26 |
+| `PATCH` | `/api/v1/classes/{class_id}` | Gym Manager, Admin | `ClassUpdate` | `200` `ClassRead` | `403`, `404`, `422` (capacity below current bookings) | FR-27 |
+| `DELETE` | `/api/v1/classes/{class_id}` | Gym Manager, Admin | — | `204` (its bookings are deleted too) | `403`, `404` | FR-27 |
+| `GET` | `/api/v1/classes/{class_id}/bookings` | Gym Manager, Admin | — | `200` `BookingPage` (in booking order) | `403`, `404` | FR-28 |
 | `POST` | `/api/v1/classes/{class_id}/bookings` | Member | — | `201` `BookingRead` | `400` (membership not valid / class already started), `404`, `409` (full or already booked) | FR-28, FR-29 |
 | `DELETE` | `/api/v1/classes/{class_id}/bookings` | Member | — | `204` (cancel my booking) | `404` | FR-29 |
 
