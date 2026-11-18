@@ -2,7 +2,7 @@
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
-from app.models import LoginRequest, SignupRequest, User
+from app.models import LoginRequest, SignupRequest, User, utc_now
 from app.security import hash_password, verify_password
 
 
@@ -15,6 +15,10 @@ ACCOUNT_BANNED_MESSAGE = "Account banned"
 
 class AccountBannedError(Exception):
     """The password is right but an admin has banned this account."""
+
+
+class WrongPasswordError(Exception):
+    """The current password given when changing the password is wrong."""
 
 
 class InvalidCredentialsError(Exception):
@@ -51,3 +55,13 @@ def authenticate(session: Session, data: LoginRequest) -> User:
     if user.is_banned:
         raise AccountBannedError
     return user
+
+
+def change_password(session: Session, user: User, current_password: str, new_password: str) -> None:
+    """Every token issued before this moment stops working (see deps.get_current_user)."""
+    if not verify_password(current_password, user.password_hash):
+        raise WrongPasswordError
+    user.password_hash = hash_password(new_password)
+    user.password_changed_at = utc_now()
+    session.add(user)
+    session.commit()

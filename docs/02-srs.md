@@ -195,7 +195,7 @@ Every Admin is also a logged-in user, so they can log out, edit their profile an
 | FR-40 | A user shall be able to change their own `name`. Email and role cannot be changed through the profile. | Beta | US-23, US-24 |
 | FR-41 | A user shall be able to change their password by sending the current and the new password. A wrong current password returns `400`. On success all the user's sessions (refresh tokens) are revoked and they log in again. | Beta | US-24 |
 
-> **Built so far:** sign up, log in, own profile and rename (FR-12, FR-13, FR-16, FR-40), with one access token valid for 8 hours and no refresh cookie. Refresh tokens (FR-14, FR-15), password change (FR-41) and the login attempt limit (FR-34) come later.
+> **Built so far:** sign up, log in, own profile and rename (FR-12, FR-13, FR-16, FR-40), with one access token valid for 8 hours and no refresh cookie. Password change (FR-41) is built too: it ends every login made before the change, because there are no refresh tokens to revoke. Refresh tokens (FR-14, FR-15) and the login attempt limit (FR-34) come later.
 
 ### 3.3 Own membership and check-ins — Beta
 
@@ -209,7 +209,7 @@ Every Admin is also a logged-in user, so they can log out, edit their profile an
 | ID | Requirement | Release | Story |
 |---|---|---|---|
 | FR-19 | In the Beta, the member endpoints (`/api/v1/members`) create, list, view, update and delete shall be available to gym managers and admins only. A caller who is not logged in gets `401`; a `user` gets `403`. | Beta | US-13 |
-| FR-23 | When creating or updating a member, an admin may set `user_id` to link the record to an existing account. A user can be linked to only one member (`409` otherwise); an unknown `user_id` returns `422`. | Beta | US-13 |
+| FR-23 | When creating or updating a member, a gym manager or admin may set `user_id` to link the record to an existing account. A user can be linked to only one member (`409` otherwise); an unknown `user_id` returns `422`. | Beta | US-13 |
 
 ### 3.5 Roles (RBAC) and admin — Beta
 
@@ -237,7 +237,9 @@ Every Admin is also a logged-in user, so they can log out, edit their profile an
 | FR-28 | A gym manager or admin shall be able to list the bookings of a class (member name and booking time). | Beta | US-17 |
 | FR-29 | A member with a valid membership shall be able to book a class that has not started yet, and cancel their own booking. Booking returns `400` if the membership is not valid or the class already started, `409` if the class is full or the member already booked it. A member can book or cancel only for themself. | Beta | US-16 |
 
-> **Built so far (gym manager):** FR-25, FR-26 (with `booked_count`; `is_booked_by_me` comes with member booking), FR-27 and FR-28. Deleting a member also deletes their bookings. FR-29 (a member booking and cancelling) comes with the User features.
+> **Built so far (gym manager):** FR-25, FR-26 (with `booked_count`), FR-27 and FR-28. Deleting a member also deletes their bookings.
+
+> **Built so far (user):** FR-29 (book and cancel; two people booking the last place at the same moment cannot both get it) and `is_booked_by_me` in FR-26.
 
 ### 3.7 Check-ins — Beta
 
@@ -249,7 +251,9 @@ Every Admin is also a logged-in user, so they can log out, edit their profile an
 | FR-32 | Recording more than one check-in for the same member on the same day is allowed; each is stored as its own record. | Beta | US-18 |
 | FR-33 | A user whose account has no linked membership shall get `404` for FR-17, FR-18 and FR-29. | Beta | US-11 |
 
-> **Built so far (gym manager):** FR-30, FR-31, FR-32 and FR-42. Deleting a member also deletes their check-ins. The member's own view of their check-ins (FR-18) comes with the User features.
+> **Built so far (gym manager):** FR-30, FR-31, FR-32 and FR-42. Deleting a member also deletes their check-ins. The member's own view of their check-ins (FR-18) is built, with FR-17, FR-23 and FR-33 (see the user notes).
+
+> **Built so far (user):** FR-17, FR-18, FR-23, FR-33 and FR-41. A person with no linked membership gets a clear message instead of an error page. Gym managers and admins who are linked to a member can book through the API; the screens for booking are the User's.
 
 ### 3.8 Account security — Beta
 

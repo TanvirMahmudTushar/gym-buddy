@@ -147,7 +147,7 @@ frontend/
     components/        # add form, member list, details panel
     context/           # AuthContext: who is logged in, login / signup / logout
     layouts/           # AppLayout: header, and the pages each role may open
-    pages/             # HomePage (members), LoginPage, SignupPage, AccountPage, DashboardPage (admin), UsersPage (admin), ClassesPage (gym manager, admin); (Later) AboutPage, MemberDetailsPage; (Beta, Could) MyMembership, Classes, AdminDashboard
+    pages/             # HomePage (members), LoginPage, SignupPage, AccountPage, DashboardPage (admin), UsersPage (admin), ClassesPage (gym manager, admin), MembershipPage and TimetablePage (user); (Later) AboutPage, MemberDetailsPage; (Beta, Could) MyMembership, Classes, AdminDashboard
     services/          # fetch calls to the API
     types/             # TypeScript types
     utils/             # display helpers
@@ -198,7 +198,7 @@ erDiagram
 
 **`app_user`**
 
-> Built so far: `id`, `email`, `name`, `password_hash`, `role`, `is_banned`, `banned_at`, `ban_reason` and `created_at`. The login lockout columns come with that feature.
+> Built so far: `id`, `email`, `name`, `password_hash`, `role`, `is_banned`, `banned_at`, `ban_reason`, `password_changed_at` and `created_at`. The login lockout columns come with that feature. Tokens issued before `password_changed_at` are refused, which is how a password change ends earlier logins.
 
 | Column | Type | Rules |
 |---|---|---|
@@ -229,11 +229,11 @@ erDiagram
 
 | Column | Type | Rules |
 |---|---|---|
-| `user_id` | integer | FK → `app_user.id`, nullable, unique, on delete set null. Links a membership record to a login account. `null` = walk-in member without an account |
+| `user_id` | integer | FK → `app_user.id`, nullable, unique (index `ix_member_user_id`; built so far without `on delete set null`, since accounts are never deleted). Added to an existing table by `create_db_and_tables()`. Links a membership record to a login account. `null` = walk-in member without an account |
 
 **`gym_class`**
 
-> Built so far: all columns and the `starts_at` index. `class_booking` exists too, and its rows are created by the member booking feature that comes next; for now the gym manager sees them and the service deletes them with the class or the member (SQLite does not enforce `on delete cascade` by default).
+> Built so far: all columns and the `starts_at` index. `class_booking` rows are created when a member books (`POST /classes/{id}/bookings`); booking locks the class row (`SELECT ... FOR UPDATE` on PostgreSQL) before counting, so the capacity is never exceeded, and the service deletes bookings with the class or the member (SQLite does not enforce `on delete cascade` by default).
 
 | Column | Type | Rules |
 |---|---|---|
@@ -432,9 +432,10 @@ In the MVP no login is needed. In the Beta the member endpoints become admin-onl
 | `POST` | `/api/v1/auth/logout` | Refresh cookie | — | `204`, cookie cleared | — | FR-15 |
 | `GET` | `/api/v1/users/me` | Member | — | `200` `UserRead` | `401` | FR-16 |
 | `PATCH` | `/api/v1/users/me` | Member | `ProfileUpdate` | `200` `UserRead` | `422` | FR-40 |
-| `POST` | `/api/v1/users/me/password` | Member | `PasswordChange` | `204` (all sessions logged out) | `400` (wrong current password), `422` | FR-41 |
-| `GET` | `/api/v1/users/me/membership` | Member | — | `200` `MemberRead` | `404` (no membership linked) | FR-17 |
-| `GET` | `/api/v1/users/me/check-ins?offset&limit` | Member | — | `200` `CheckInRead[]` | `404` | FR-18 |
+| `POST` | `/api/v1/users/me/password` | Any logged-in user | `PasswordChange` | `204` (tokens issued before the change stop working) | `400` (wrong current password), `401`, `422` | FR-41 |
+| `GET` | `/api/v1/users/lookup?email` or `?id` | Gym Manager, Admin | — | `200` `AccountLookup` (`id`, `name`, `email`) | `403`, `404`, `422` | FR-23 |
+| `GET` | `/api/v1/users/me/membership` | Any logged-in user | — | `200` `MemberRead` | `401`, `404` (no membership linked) | FR-17 |
+| `GET` | `/api/v1/users/me/check-ins?offset&limit` | Any logged-in user | — | `200` `CheckInPage` (newest first) | `401`, `404` | FR-18 |
 
 **Members (gym manager and admin)** — same five endpoints as the MVP, now for gym managers and admins only (`401` without a token, `403` for a `user`).
 
@@ -475,8 +476,8 @@ Ban rules: banning is idempotent (banning a banned user changes nothing), an adm
 | `PATCH` | `/api/v1/classes/{class_id}` | Gym Manager, Admin | `ClassUpdate` | `200` `ClassRead` | `403`, `404`, `422` (capacity below current bookings) | FR-27 |
 | `DELETE` | `/api/v1/classes/{class_id}` | Gym Manager, Admin | — | `204` (its bookings are deleted too) | `403`, `404` | FR-27 |
 | `GET` | `/api/v1/classes/{class_id}/bookings` | Gym Manager, Admin | — | `200` `BookingPage` (in booking order) | `403`, `404` | FR-28 |
-| `POST` | `/api/v1/classes/{class_id}/bookings` | Member | — | `201` `BookingRead` | `400` (membership not valid / class already started), `404`, `409` (full or already booked) | FR-28, FR-29 |
-| `DELETE` | `/api/v1/classes/{class_id}/bookings` | Member | — | `204` (cancel my booking) | `404` | FR-29 |
+| `POST` | `/api/v1/classes/{class_id}/bookings` | Any logged-in user with a linked, valid membership | — | `201` `BookingRead` | `400` (membership not valid / class already started), `404`, `409` (full or already booked) | FR-28, FR-29 |
+| `DELETE` | `/api/v1/classes/{class_id}/bookings` | Any logged-in user with a linked membership | — | `204` (cancel my booking) | `404` | FR-29 |
 
 ### 6.3 Examples
 
@@ -658,7 +659,7 @@ def require_valid_membership(member: Member = Depends(get_own_member)) -> Member
 |---|---|
 | `/api/v1/users/me/*`, `GET /api/v1/classes`, `GET /api/v1/classes/{id}` | `get_current_user` |
 | `/api/v1/users/me/membership`, `/api/v1/users/me/check-ins` | `get_own_member` |
-| `/api/v1/members/*`, `/api/v1/admin/*`, `POST/PATCH/DELETE /classes`, `GET /classes/{id}/bookings` | `require_admin` |
+| `/api/v1/members/*`, `/api/v1/admin/*`, `/api/v1/users/lookup`, `POST/PATCH/DELETE /classes`, `GET /classes/{id}/bookings` | `require_roles("gym_manager", "admin")` (admin-only for `/admin/*`) |
 | `POST/DELETE /classes/{id}/bookings` | `require_valid_membership` (cancel uses `get_own_member`) |
 
 Row-level rules that depend on the data are checked inside the route:

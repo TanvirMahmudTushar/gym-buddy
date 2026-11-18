@@ -64,10 +64,10 @@ def create_access_token(user_id: int) -> str:
     return jwt.encode(payload, _secret(), algorithm=ALGORITHM)
 
 
-def read_access_token(token: str) -> int:
-    """Return the user id inside the token, or raise InvalidTokenError."""
+def read_access_token(token: str) -> tuple[int, int]:
+    """Return the user id and the time the token was issued (seconds), or raise InvalidTokenError."""
     try:
-        payload = jwt.decode(token, _secret(), algorithms=[ALGORITHM], options={"require": ["sub", "exp"]})
-        return int(payload["sub"])
+        payload = jwt.decode(token, _secret(), algorithms=[ALGORITHM], options={"require": ["sub", "exp", "iat"]})
+        return int(payload["sub"]), int(payload["iat"])
     except (jwt.PyJWTError, ValueError) as exc:
         raise InvalidTokenError from exc

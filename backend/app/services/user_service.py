@@ -77,3 +77,13 @@ def unban_user(session: Session, user_id: int) -> User:
         session.commit()
         session.refresh(user)
     return user
+
+
+def find_account(session: Session, email: str | None, user_id: int | None) -> User:
+    """Staff use this to find the account to link to a member: by exact email, or by ID."""
+    if user_id is not None:
+        return get_user(session, user_id)
+    user = session.exec(select(User).where(User.email == (email or "").strip().lower())).first()
+    if user is None:
+        raise UserNotFoundError(email)
+    return user

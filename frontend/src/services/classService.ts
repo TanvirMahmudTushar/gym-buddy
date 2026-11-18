@@ -1,5 +1,5 @@
-// fetch helpers for classes: /api/v1/classes. Reading is open to anyone logged in; the rest is for gym managers and admins.
-import type { BookingPage, ClassBody, ClassPage, GymClass } from "../types/gymClass"
+// fetch helpers for classes: /api/v1/classes. Reading and booking are open to anyone logged in; the rest is for gym managers and admins.
+import type { Booking, BookingPage, ClassBody, ClassPage, GymClass } from "../types/gymClass"
 import { request } from "./api"
 
 const BASE = "/api/v1/classes"
@@ -19,3 +19,8 @@ export const updateClass = (id: number, body: Partial<ClassBody>) =>
 export const deleteClass = (id: number) => request<void>(`${BASE}/${id}`, { method: "DELETE" })
 
 export const listBookings = (id: number): Promise<BookingPage> => request<BookingPage>(`${BASE}/${id}/bookings?limit=100`)
+
+// A member books or cancels for themself only; the API uses the logged-in account's linked member.
+export const bookClass = (id: number) => request<Booking>(`${BASE}/${id}/bookings`, { method: "POST" })
+
+export const cancelBooking = (id: number) => request<void>(`${BASE}/${id}/bookings`, { method: "DELETE" })

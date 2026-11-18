@@ -6,8 +6,8 @@ from fastapi import APIRouter, Depends, Query
 
 from app.database import SessionDep
 from app.deps import CurrentUser, require_roles
-from app.models import BookingPage, ClassCreate, ClassPage, ClassRead, ClassUpdate, User
-from app.services import class_service
+from app.models import BookingRead, BookingPage, ClassCreate, ClassPage, ClassRead, ClassUpdate, User
+from app.services import class_service, member_service
 
 router = APIRouter(prefix="/api/v1/classes", tags=["classes"])
 
@@ -22,19 +22,20 @@ def create_class(body: ClassCreate, session: SessionDep, staff: Staff) -> dict:
 @router.get("", response_model=ClassPage)
 def list_classes(
     session: SessionDep,
-    _user: CurrentUser,
+    user: CurrentUser,
     upcoming: bool = False,
     offset: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
 ) -> dict:
     """Ordered by start time. upcoming=true leaves out classes that have already started."""
-    items, total = class_service.list_classes(session, upcoming, offset, limit)
+    # is_booked_by_me is true for the classes this user's linked member has booked.
+    items, total = class_service.list_classes(session, upcoming, offset, limit, member_service.own_member_id(session, user))
     return {"items": items, "total": total, "offset": offset, "limit": limit}
 
 
 @router.get("/{class_id}", response_model=ClassRead)
-def get_class(class_id: int, session: SessionDep, _user: CurrentUser) -> dict:
-    return class_service.get_class(session, class_id)
+def get_class(class_id: int, session: SessionDep, user: CurrentUser) -> dict:
+    return class_service.get_class(session, class_id, member_service.own_member_id(session, user))
 
 
 @router.patch("/{class_id}", response_model=ClassRead)
@@ -59,3 +60,16 @@ def list_bookings(
 ) -> dict:
     items, total = class_service.list_bookings(session, class_id, offset, limit)
     return {"items": items, "total": total, "offset": offset, "limit": limit}
+
+
+@router.post("/{class_id}/bookings", status_code=201, response_model=BookingRead)
+def book_class(class_id: int, session: SessionDep, user: CurrentUser) -> dict:
+    """Books a place for the logged-in user's own member record (404 if none is linked).
+    400 if the membership is not valid or the class has started; 409 if it is full or already booked."""
+    return class_service.book_class(session, class_id, member_service.get_own_member(session, user))
+
+
+@router.delete("/{class_id}/bookings", status_code=204)
+def cancel_booking(class_id: int, session: SessionDep, user: CurrentUser) -> None:
+    """Cancels the logged-in user's own booking (404 if there is none)."""
+    class_service.cancel_booking(session, class_id, member_service.get_own_member(session, user))

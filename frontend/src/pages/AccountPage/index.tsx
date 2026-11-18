@@ -1,4 +1,5 @@
 import { type FormEvent, useState } from "react"
+import ChangePasswordForm from "../../components/ChangePasswordForm"
 import { useAuth } from "../../context/AuthContext"
 import { renameMe } from "../../services/authService"
 import { ROLES, canOpen, roleLabel } from "../../utils/auth"
@@ -83,6 +84,7 @@ export default function AccountPage() {
           </div>
         </form>
       </section>
+      <ChangePasswordForm />
     </div>
   )
 }

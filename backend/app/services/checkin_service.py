@@ -11,7 +11,7 @@ class MembershipNotValidError(Exception):
     """The member is frozen or expired, so they cannot be checked in. The message says which."""
 
 
-def _check_membership_valid(member: Member) -> None:
+def check_membership_valid(member: Member) -> None:
     if not member.is_active:
         raise MembershipNotValidError("Membership is frozen")
     if member.expires_on < utc_today():
@@ -52,7 +52,7 @@ def _page(session: Session, filters: list, offset: int, limit: int) -> tuple[lis
 def record_check_in(session: Session, member_id: int, recorded_by: User) -> dict:
     """More than one check-in for the same member on the same day is allowed (FR-32)."""
     member = member_service.get_member(session, member_id)
-    _check_membership_valid(member)
+    check_membership_valid(member)
     check_in = CheckIn(member_id=member.id, recorded_by=recorded_by.id)
     session.add(check_in)
     session.commit()

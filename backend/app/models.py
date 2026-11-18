@@ -38,6 +38,8 @@ class Member(SQLModel, table=True):
     expires_on: date
     is_active: bool = True
     notes: str | None = Field(default=None, max_length=500)
+    # The login account this record belongs to, if any. One account can be linked to only one member.
+    user_id: int | None = Field(default=None, foreign_key="app_user.id", unique=True, index=True)
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
 
@@ -60,6 +62,7 @@ class MemberCreate(SQLModel):
     joined_on: date | None = None
     expires_on: date
     notes: str | None = Field(default=None, max_length=500)
+    user_id: int | None = None
 
     @model_validator(mode="after")
     def check_dates(self) -> "MemberCreate":
@@ -75,6 +78,8 @@ class MemberUpdate(SQLModel):
     expires_on: date | None = None
     is_active: bool | None = None
     notes: str | None = Field(default=None, max_length=500)
+    # null unlinks the account
+    user_id: int | None = None
 
     @model_validator(mode="after")
     def check_required_not_null(self) -> "MemberUpdate":
@@ -94,6 +99,7 @@ class MemberRead(SQLModel):
     expires_on: date
     is_active: bool
     notes: str | None
+    user_id: int | None
     created_at: datetime
     updated_at: datetime
 
@@ -133,6 +139,8 @@ class User(SQLModel, table=True):
     is_banned: bool = False
     banned_at: datetime | None = None
     ban_reason: str | None = Field(default=None, max_length=500)
+    # Tokens issued before this moment stop working (set when the password is changed).
+    password_changed_at: datetime | None = None
     created_at: datetime = Field(default_factory=utc_now)
 
 
@@ -311,6 +319,7 @@ class ClassRead(SQLModel):
     duration_minutes: int
     capacity: int
     booked_count: int
+    is_booked_by_me: bool
     created_at: UtcDateTime
     updated_at: UtcDateTime
 
@@ -334,3 +343,17 @@ class BookingPage(SQLModel):
     total: int
     offset: int
     limit: int
+
+
+# --- Account lookup (for staff linking a member to an account) and password change ---
+
+
+class AccountLookup(SQLModel):
+    id: int
+    name: str
+    email: str
+
+
+class PasswordChange(SQLModel):
+    current_password: Annotated[str, StringConstraints(max_length=128)]
+    new_password: Password

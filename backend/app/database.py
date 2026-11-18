@@ -52,7 +52,12 @@ _ADDED_COLUMNS = [
     ("app_user", "is_banned", "BOOLEAN NOT NULL DEFAULT FALSE"),
     ("app_user", "banned_at", "TIMESTAMP"),
     ("app_user", "ban_reason", "VARCHAR(500)"),
+    ("app_user", "password_changed_at", "TIMESTAMP"),
+    ("member", "user_id", "INTEGER REFERENCES app_user (id)"),
 ]
+
+# One account can be linked to only one member. Same name as the index create_all() makes on a new database.
+_ADDED_UNIQUE_INDEXES = [("ix_member_user_id", "member", "user_id")]
 
 
 def _add_missing_columns() -> None:
@@ -64,6 +69,8 @@ def _add_missing_columns() -> None:
         for table, column, definition in _ADDED_COLUMNS:
             if column not in existing[table]:
                 conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {guard}{column} {definition}"))
+        for name, table, column in _ADDED_UNIQUE_INDEXES:
+            conn.execute(text(f"CREATE UNIQUE INDEX IF NOT EXISTS {name} ON {table} ({column})"))
 
 
 def create_db_and_tables() -> None:

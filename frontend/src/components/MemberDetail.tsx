@@ -4,6 +4,7 @@ import type { Member, MemberUpdate } from "../types/member"
 import { errorText, formatDate, memberStatus, planLabel } from "../utils/member"
 import CheckInSection from "./CheckInSection"
 import EditMemberForm from "./EditMemberForm"
+import LinkedAccount from "./LinkedAccount"
 import StatusPill from "./StatusPill"
 
 interface Props {
@@ -144,6 +145,14 @@ export default function MemberDetail({ memberId, onChanged, onDeleted, onChecked
         <dt>Notes</dt>
         <dd>{member.notes || "None"}</dd>
       </dl>
+      <hr className="separator" />
+      <LinkedAccount
+        member={member}
+        onUpdated={(updated) => {
+          setMember(updated)
+          onChanged(updated)
+        }}
+      />
       <hr className="separator" />
       <CheckInSection key={member.id} member={member} onCheckedIn={onCheckedIn} />
       <hr className="separator" />
