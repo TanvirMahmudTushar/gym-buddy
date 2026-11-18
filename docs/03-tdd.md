@@ -119,18 +119,20 @@ backend/
     config.py          # (Beta) settings from env vars: JWT secret, token lifetimes
     database.py        # engine, get_session()
     models.py          # tables + Create / Update / Read schemas
-    security.py        # (Beta) password hashing, JWT create/verify, refresh tokens
-    deps.py            # (Beta) get_current_user, require_admin, get_own_member, get_class_or_404
+    security.py        # password hashing (Argon2), JWT create/verify; (Beta) refresh tokens
+    deps.py            # get_current_user, require_roles; (Beta) get_own_member, get_class_or_404
     routers/
       __init__.py
       members.py       # /api/v1/members (+ check-ins in Beta)
-      auth.py          # (Beta) /api/v1/auth/*
-      users.py         # (Beta) /api/v1/users/me (profile, change name, change password)
-      admin.py         # (Beta) /api/v1/admin/*
+      auth.py          # /api/v1/auth/signup, /login
+      users.py         # /api/v1/users/me (profile, change name); (Beta) change password
+      admin.py         # /api/v1/admin/users (list, change role); (Beta) stats, ban / unban
       classes.py       # (Beta) /api/v1/classes/* (classes and bookings)
     services/
       __init__.py
       member_service.py  # member rules and queries; raises MemberNotFoundError / InvalidExpiryError
+      auth_service.py    # sign up (always role user) and log in; raises EmailTakenError / InvalidCredentialsError
+      user_service.py    # list users, change role, rename; raises UserNotFoundError / CannotChangeOwnRoleError
   alembic/             # (Beta) migration scripts
   alembic.ini          # (Beta)
   requirements.txt
@@ -138,9 +140,9 @@ frontend/
   src/
     App.tsx            # shows HomePage
     components/        # add form, member list, details panel
-    context/           # (Later) empty for now
-    layouts/           # (Later) empty for now
-    pages/             # HomePage; (Later) AboutPage, MemberDetailsPage; (Beta, Could) Login, Signup, MyMembership, Classes, Profile, AdminDashboard
+    context/           # AuthContext: who is logged in, login / signup / logout
+    layouts/           # AppLayout: header, and the pages each role may open
+    pages/             # HomePage (members), LoginPage, SignupPage, AccountPage, UsersPage; (Later) AboutPage, MemberDetailsPage; (Beta, Could) MyMembership, Classes, AdminDashboard
     services/          # fetch calls to the API
     types/             # TypeScript types
     utils/             # display helpers
@@ -191,13 +193,15 @@ erDiagram
 
 **`app_user`**
 
+> Built so far: `id`, `email`, `name`, `password_hash`, `role` and `created_at`. The lockout and ban columns come with those features.
+
 | Column | Type | Rules |
 |---|---|---|
 | `id` | integer | Primary key |
 | `email` | varchar(254) | Unique, stored lowercase |
 | `name` | varchar(100) | Not null |
 | `password_hash` | varchar | Argon2 hash, never returned by the API |
-| `role` | varchar(10) | `member` or `admin`, default `member` |
+| `role` | varchar(20) | `user`, `gym_manager` or `admin`, default `user` |
 | `failed_login_count` | integer | Default 0 |
 | `locked_until` | timestamp (UTC) | Nullable |
 | `is_banned` | boolean | Default `false` |
@@ -421,15 +425,15 @@ In the MVP no login is needed. In the Beta the member endpoints become admin-onl
 | `GET` | `/api/v1/users/me/membership` | Member | — | `200` `MemberRead` | `404` (no membership linked) | FR-17 |
 | `GET` | `/api/v1/users/me/check-ins?offset&limit` | Member | — | `200` `CheckInRead[]` | `404` | FR-18 |
 
-**Members (admin management)** — same five endpoints as the MVP, now admin-only (`403` for non-admins).
+**Members (gym manager and admin)** — same five endpoints as the MVP, now for gym managers and admins only (`401` without a token, `403` for a `user`).
 
 | Method | Path | Who | Body | Success | Errors | FR |
 |---|---|---|---|---|---|---|
-| `POST` | `/api/v1/members` | Admin | `MemberCreate` (+ optional `user_id`) | `201` `MemberRead` | `403`, `409` (user already linked), `422` | FR-19 |
-| `GET` | `/api/v1/members?offset&limit&status` | Admin | — | `200` `MemberPage` | `403` | FR-19 |
-| `GET` | `/api/v1/members/{id}` | Admin | — | `200` `MemberRead` | `403`, `404` | FR-19 |
-| `PATCH` | `/api/v1/members/{id}` | Admin | `MemberUpdate` | `200` `MemberRead` | `403`, `404`, `422` | FR-19 |
-| `DELETE` | `/api/v1/members/{id}` | Admin | — | `204` | `403`, `404` | FR-19 |
+| `POST` | `/api/v1/members` | Gym Manager, Admin | `MemberCreate` (+ optional `user_id`) | `201` `MemberRead` | `403`, `409` (user already linked), `422` | FR-19 |
+| `GET` | `/api/v1/members?offset&limit&status` | Gym Manager, Admin | — | `200` `MemberPage` | `403` | FR-19 |
+| `GET` | `/api/v1/members/{id}` | Gym Manager, Admin | — | `200` `MemberRead` | `403`, `404` | FR-19 |
+| `PATCH` | `/api/v1/members/{id}` | Gym Manager, Admin | `MemberUpdate` | `200` `MemberRead` | `403`, `404`, `422` | FR-19 |
+| `DELETE` | `/api/v1/members/{id}` | Gym Manager, Admin | — | `204` | `403`, `404` | FR-19 |
 | `POST` | `/api/v1/members/{id}/check-ins` | Admin | — | `201` `CheckInRead` | `400` (membership not valid), `403`, `404` | FR-30 |
 | `GET` | `/api/v1/members/{id}/check-ins?offset&limit` | Admin | — | `200` `CheckInRead[]` | `403`, `404` | FR-31 |
 
@@ -437,7 +441,7 @@ In the MVP no login is needed. In the Beta the member endpoints become admin-onl
 
 | Method | Path | Who | Body | Success | Errors | FR |
 |---|---|---|---|---|---|---|
-| `GET` | `/api/v1/admin/users?offset&limit` | Admin | — | `200` `AdminUserRead[]` | `403` | FR-21 |
+| `GET` | `/api/v1/admin/users?offset&limit` | Admin | — | `200` `UserPage` (built so far; `AdminUserRead[]` with ban info comes later) | `403` | FR-21 |
 | `PATCH` | `/api/v1/admin/users/{user_id}/role` | Admin | `RoleUpdate` | `200` `UserRead` | `400` (own role), `403`, `404` | FR-22 |
 | `GET` | `/api/v1/admin/stats` | Admin | — | `200` `AdminStats` | `403` | FR-35 |
 | `POST` | `/api/v1/admin/users/{user_id}/ban` | Admin | `BanRequest` | `200` `AdminUserRead` | `400` (self / other admin), `403`, `404` | FR-36 |
@@ -591,6 +595,7 @@ flowchart LR
 
 - **Refresh rotation:** each refresh revokes the old token and issues a new one. If a revoked token is used again, all of that user's refresh tokens are revoked (it was probably stolen).
 - **Logout:** revokes the current refresh token and clears the cookie. The access token simply expires within 15 minutes.
+- **Built so far:** the access token holds `sub`, `iat` and `exp` only, lasts 8 hours and is kept in the browser's `sessionStorage`; there is no refresh token yet. `JWT_SECRET` is required on Vercel.
 - The `role` claim is only informational; permission checks always use the role loaded from the database, so a role change applies on the next request.
 
 ### 10.2 Passwords and login lockout

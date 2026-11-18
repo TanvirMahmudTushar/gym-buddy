@@ -1,0 +1,43 @@
+import type { ReactNode } from "react"
+import { useAuth } from "../context/AuthContext"
+import { type Page, canOpen, roleLabel } from "../utils/auth"
+
+const LINKS: { page: "members" | "account" | "users"; label: string }[] = [
+  { page: "members", label: "Members" },
+  { page: "users", label: "Users" },
+  { page: "account", label: "My account" },
+]
+
+// The header shared by every page: the name, the pages this role may open, who is logged in, and Log out.
+export default function AppLayout({ page, children }: { page: Page; children: ReactNode }) {
+  const { user, logout } = useAuth()
+
+  return (
+    <div className="page">
+      <header className="topbar">
+        <div className="brand">
+          <h1>Gym Buddy</h1>
+          <span className="tagline">Member records for the front desk</span>
+        </div>
+        {user && (
+          <>
+            <nav aria-label="Main">
+              {LINKS.filter((l) => canOpen(user.role, l.page)).map((l) => (
+                <a key={l.page} href={`#/${l.page}`} aria-current={page === l.page ? "page" : undefined}>
+                  {l.label}
+                </a>
+              ))}
+            </nav>
+            <div className="who">
+              <span>
+                {user.name} <span className={`pill role-${user.role}`}>{roleLabel(user.role)}</span>
+              </span>
+              <button onClick={logout}>Log out</button>
+            </div>
+          </>
+        )}
+      </header>
+      {children}
+    </div>
+  )
+}
