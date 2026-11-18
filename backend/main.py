@@ -5,13 +5,14 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from app.database import create_db_and_tables
-from app.routers import admin, auth, members, users
+from app.routers import admin, auth, check_ins, members, users
 from app.services.auth_service import (
     ACCOUNT_BANNED_MESSAGE,
     AccountBannedError,
     EmailTakenError,
     InvalidCredentialsError,
 )
+from app.services.checkin_service import MembershipNotValidError
 from app.services.member_service import InvalidExpiryError, MemberNotFoundError
 from app.services.user_service import CannotBanError, CannotChangeOwnRoleError, UserNotFoundError
 
@@ -29,6 +30,7 @@ app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(admin.router)
 app.include_router(members.router)
+app.include_router(check_ins.router)
 
 # Run at import (not in a lifespan hook) so it also works on Vercel's serverless functions.
 create_db_and_tables()
@@ -43,6 +45,11 @@ async def member_not_found(request: Request, exc: MemberNotFoundError) -> JSONRe
 @app.exception_handler(InvalidExpiryError)
 async def invalid_expiry(request: Request, exc: InvalidExpiryError) -> JSONResponse:
     return JSONResponse(status_code=422, content={"detail": str(exc)})
+
+
+@app.exception_handler(MembershipNotValidError)
+async def membership_not_valid(request: Request, exc: MembershipNotValidError) -> JSONResponse:
+    return JSONResponse(status_code=400, content={"detail": str(exc)})
 
 
 @app.exception_handler(EmailTakenError)

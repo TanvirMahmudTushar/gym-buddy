@@ -27,4 +27,10 @@ export function formatDate(isoDate: string): string {
   })
 }
 
+export const formatTime = (isoDateTime: string) =>
+  new Date(isoDateTime).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })
+
+export const formatDateTime = (isoDateTime: string) =>
+  new Date(isoDateTime).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })
+
 export const errorText = (err: unknown) => (err instanceof Error ? err.message : "Something went wrong")

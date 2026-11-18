@@ -63,6 +63,13 @@ export default function DashboardPage() {
               <a href="#/members">Open the members page</a>
             </p>
           </section>
+          <section className="card" aria-labelledby="stats-checkins">
+            <h2 id="stats-checkins">Check-ins</h2>
+            <dl className="stats">
+              <Stat label="Today" value={stats.check_ins.today} />
+              <Stat label="Last 7 days" value={stats.check_ins.last_7_days} />
+            </dl>
+          </section>
           <section className="card" aria-labelledby="stats-users">
             <h2 id="stats-users">Accounts</h2>
             <dl className="stats">

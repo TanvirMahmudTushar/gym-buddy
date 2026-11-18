@@ -225,7 +225,7 @@ Every Admin is also a logged-in user, so they can log out, edit their profile an
 | FR-38 | An admin shall be able to unban a user; the user can then log in again. The user's linked membership and bookings are kept while banned. | Beta | US-22 |
 | FR-39 | The admin user list shall show each user's status (`active` / `banned`), ban date and ban reason. | Beta | US-21 |
 
-> **Built so far (admin):** FR-35 with the member and user numbers (classes and check-ins are not built yet, so those counts are not shown), and FR-36 to FR-39 without refresh tokens, since none exist yet to revoke. An admin lands on the dashboard after logging in.
+> **Built so far (admin):** FR-35 with the member, check-in and user numbers (class numbers are not shown, since classes are not built yet), and FR-36 to FR-39 without refresh tokens, since none exist yet to revoke. An admin lands on the dashboard after logging in.
 
 ### 3.6 Classes and bookings — Beta
 
@@ -241,10 +241,13 @@ Every Admin is also a logged-in user, so they can log out, edit their profile an
 
 | ID | Requirement | Release | Story |
 |---|---|---|---|
-| FR-30 | An admin shall be able to record a check-in for a member. The request returns `400` if the membership is not valid (frozen or expired). The check-in stores who recorded it and when. | Beta | US-18 |
-| FR-31 | An admin shall be able to list a member's check-ins (newest first, paginated). | Beta | US-18 |
+| FR-30 | A gym manager or admin shall be able to record a check-in for a member. The request returns `400` if the membership is not valid (frozen or expired). The check-in stores who recorded it and when. | Beta | US-18 |
+| FR-31 | A gym manager or admin shall be able to list a member's check-ins (newest first, paginated). | Beta | US-18 |
+| FR-42 | A gym manager or admin shall be able to list everyone who has checked in today (since midnight UTC), newest first, with the member's name and who recorded it. | Beta | US-18 |
 | FR-32 | Recording more than one check-in for the same member on the same day is allowed; each is stored as its own record. | Beta | US-18 |
 | FR-33 | A user whose account has no linked membership shall get `404` for FR-17, FR-18 and FR-29. | Beta | US-11 |
+
+> **Built so far (gym manager):** FR-30, FR-31, FR-32 and FR-42. Deleting a member also deletes their check-ins. The member's own view of their check-ins (FR-18) comes with the User features.
 
 ### 3.8 Account security — Beta
 

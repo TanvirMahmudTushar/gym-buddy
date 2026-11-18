@@ -33,6 +33,17 @@ class Member(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=utc_now)
 
 
+class CheckIn(SQLModel, table=True):
+    """One arrival at the gym, recorded by a gym manager or admin (TDD 5.2)."""
+
+    __tablename__ = "check_in"
+
+    id: int | None = Field(default=None, primary_key=True)
+    member_id: int = Field(foreign_key="member.id", ondelete="CASCADE", index=True)
+    checked_in_at: datetime = Field(default_factory=utc_now, index=True)
+    recorded_by: int | None = Field(default=None, foreign_key="app_user.id")
+
+
 class MemberCreate(SQLModel):
     full_name: FullName
     phone: str | None = Field(default=None, max_length=20)
@@ -160,6 +171,26 @@ class BanRequest(SQLModel):
     reason: Annotated[str, StringConstraints(strip_whitespace=True, max_length=500)] | None = None
 
 
+class CheckInRead(SQLModel):
+    id: int
+    member_id: int
+    member_name: str
+    checked_in_at: datetime
+    recorded_by_name: str | None
+
+
+class CheckInPage(SQLModel):
+    items: list[CheckInRead]
+    total: int
+    offset: int
+    limit: int
+
+
+class CheckInStats(SQLModel):
+    today: int
+    last_7_days: int
+
+
 class MemberStats(SQLModel):
     total: int
     active: int
@@ -179,6 +210,7 @@ class UserStats(SQLModel):
 class AdminStats(SQLModel):
     members: MemberStats
     users: UserStats
+    check_ins: CheckInStats
 
 
 class UserNameUpdate(SQLModel):
