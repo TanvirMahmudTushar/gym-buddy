@@ -255,6 +255,17 @@ Every Admin is also a logged-in user, so they can log out, edit their profile an
 
 > **Built so far (user):** FR-17, FR-18, FR-23, FR-33 and FR-41. A person with no linked membership gets a clear message instead of an error page. Gym managers and admins who are linked to a member can book through the API; the screens for booking are the User's.
 
+### 3.7a Plans and payments — Beta
+
+| ID | Requirement | Release | Story |
+|---|---|---|---|
+| FR-43 | Each plan (`monthly`, `quarterly`, `yearly`) shall have a price in whole taka and a length in days. Any logged-in user can list them. | Beta | US-25 |
+| FR-44 | A gym manager or admin shall be able to record a payment for a member: `amount` (whole taka, 1 to 10,000,000), `method` (`cash`, `card`, `bank_transfer` or `mobile_banking`) and an optional `note` (up to 200 characters). A User gets `403`, a logged-out caller `401`, an unknown member `404`. | Beta | US-25 |
+| FR-45 | When a payment names a `renew_plan`, the member's `expires_on` shall become the later of today and the current expiry, plus that plan's days, and the member's `plan` shall become that plan. A frozen member's expiry is extended but they stay frozen. | Beta | US-25 |
+| FR-46 | A gym manager or admin shall be able to list a member's payments, newest first, paginated. Each payment keeps the member's name, so it still reads correctly if the member is deleted; deleting a member never deletes their payments. | Beta | US-25 |
+
+> **Built so far (payments):** FR-43 to FR-46. Editing plan prices, the all-payments list, a member's own payments, voiding and CSV export, and the revenue numbers are separate issues (#34 to #36).
+
 ### 3.8 Account security — Beta
 
 | ID | Requirement | Release | Story |

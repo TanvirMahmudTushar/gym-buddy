@@ -357,3 +357,71 @@ class AccountLookup(SQLModel):
 class PasswordChange(SQLModel):
     current_password: Annotated[str, StringConstraints(max_length=128)]
     new_password: Password
+
+
+# --- Plans and payments ---
+
+PaymentMethod = Literal["cash", "card", "bank_transfer", "mobile_banking"]
+Amount = Annotated[int, Field(gt=0, le=10_000_000)]  # whole taka
+
+# Price (whole taka) and length in days of each plan. These fill a new database; an admin can change them later.
+DEFAULT_PLAN_PRICES: dict[str, tuple[int, int]] = {"monthly": (1500, 30), "quarterly": (4000, 90), "yearly": (14000, 365)}
+
+
+class PlanPrice(SQLModel, table=True):
+    __tablename__ = "plan_price"
+
+    plan: str = Field(primary_key=True, max_length=10)
+    price: int
+    duration_days: int
+    updated_at: datetime = Field(default_factory=utc_now)
+
+
+class Payment(SQLModel, table=True):
+    __tablename__ = "payment"
+
+    id: int | None = Field(default=None, primary_key=True)
+    # null once the member is deleted: the payment, and so the revenue, stays on record.
+    member_id: int | None = Field(default=None, foreign_key="member.id", ondelete="SET NULL", index=True)
+    member_name: str = Field(max_length=100)
+    amount: int
+    method: str = Field(max_length=20)
+    plan: str | None = Field(default=None, max_length=10)
+    note: str | None = Field(default=None, max_length=200)
+    paid_at: datetime = Field(default_factory=utc_now, index=True)
+    renewed_until: date | None = None
+    recorded_by: int | None = Field(default=None, foreign_key="app_user.id")
+
+
+class PaymentCreate(SQLModel):
+    amount: Amount
+    method: PaymentMethod
+    note: Annotated[str, StringConstraints(strip_whitespace=True, max_length=200)] | None = None
+    # Set to extend the membership by this plan's days in the same step.
+    renew_plan: Plan | None = None
+
+
+class PaymentRead(SQLModel):
+    id: int
+    member_id: int | None
+    member_name: str
+    amount: int
+    method: PaymentMethod
+    plan: Plan | None
+    note: str | None
+    paid_at: UtcDateTime
+    renewed_until: date | None
+    recorded_by_name: str | None
+
+
+class PaymentPage(SQLModel):
+    items: list[PaymentRead]
+    total: int
+    offset: int
+    limit: int
+
+
+class PlanRead(SQLModel):
+    plan: Plan
+    price: int
+    duration_days: int

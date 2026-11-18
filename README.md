@@ -12,7 +12,7 @@ backend/          FastAPI app (routes under /api)
   app/security.py password hashing (Argon2) and login tokens (JWT)
   app/deps.py     who is calling, and the role check
   app/routers/    members.py, auth.py, users.py, admin.py: the endpoints (HTTP only)
-  app/services/   member_service.py, auth_service.py, user_service.py, checkin_service.py, class_service.py, stats_service.py: rules and database queries
+  app/services/   member_service.py, auth_service.py, user_service.py, checkin_service.py, class_service.py, payment_service.py, stats_service.py: rules and database queries
 frontend/         Vite + React + TypeScript, one page (src/pages/HomePage/index.tsx)
   src/components/ add form, member list, details panel
   src/context/    AuthContext.tsx: who is logged in
@@ -50,6 +50,8 @@ Pages: `#/login`, `#/signup`, `#/dashboard` (Admin), `#/members` (Gym Manager, A
 - **Classes:** the **Classes** page lists upcoming classes (or all of them), in start-time order. Add a class with a name, start time, length (15 to 240 minutes) and places (1 to 200), plus an optional trainer and description. Edit or delete a class, and open **Bookings** to see who has booked it. Capacity cannot be lowered below the bookings already made, and deleting a class deletes its bookings. A member's bookings are made by the member (see **User features**).
 - **Link an account to a member:** in a member's details, **Linked account** takes the person's account email and links it, so that person can see their own membership and book classes. One account can be linked to only one member. Unlink at any time. Without a link, a User sees "Your account is not linked to a gym membership yet".
 
+- **Payments:** in a member's details, **Payments** records what the member paid (amount in whole taka, and cash, card, bank transfer or mobile banking, with an optional note). Tick **Renew the membership with this payment**, pick the plan, and the amount fills in from the plan's price and the new expiry date is shown. An active member renews from their current expiry, so no paid days are lost; an expired member renews from today. The member's payments are listed below, newest first. A payment stays on record when its member is deleted.
+
 **User features**
 - **My membership:** plan, status, joined and expiry dates, and the person's own visits, newest first. A User can only ever see their own record.
 - **Classes:** upcoming classes with places left. **Book** takes a place, **Cancel booking** frees it. Booking needs a valid membership (not frozen or expired) and a class that has not started; a full class or one you already booked is refused with a clear message. Two people booking the last place at the same moment cannot both get it.
@@ -75,6 +77,9 @@ Interactive docs: `/api/docs` (for example http://localhost:8000/api/docs).
 | Update | `PATCH /api/v1/members/{id}` | `200` member | `404`, `422` |
 | Delete | `DELETE /api/v1/members/{id}` | `204` | `404` |
 | Delete several | `POST /api/v1/members/bulk-delete` with `{"ids": [1, 2, 3]}` | `200` `{"deleted": 3}` | `422` |
+| Record a payment | `POST /api/v1/members/{id}/payments` `{amount, method, note?, renew_plan?}` | `201` payment | `403`, `404`, `422` |
+| Member's payments | `GET /api/v1/members/{id}/payments?offset=0&limit=20` | `200` `{items, total, offset, limit}`, newest first | `403`, `404`, `422` |
+| Plan prices | `GET /api/v1/plans` (any logged-in user) | `200` list of `{plan, price, duration_days}` | `401` |
 | Check in a member | `POST /api/v1/members/{id}/check-ins` | `201` check-in | `400` (frozen or expired), `403`, `404` |
 | Member's visits | `GET /api/v1/members/{id}/check-ins?offset=0&limit=20` | `200` `{items, total, offset, limit}`, newest first | `403`, `404`, `422` |
 | Checked in today | `GET /api/v1/check-ins/today?offset=0&limit=50` | `200` `{items, total, offset, limit}`, newest first | `401`, `403` |
@@ -158,7 +163,7 @@ vercel dev -L
 2. **Connect** → **Transaction pooler** → copy the URI (port `6543`).
 3. In Vercel → Project → **Settings** → **Environment Variables**, add it as `DATABASE_URL`, then redeploy.
 
-The backend accepts `postgres://` or `postgresql://` URLs and creates the `member`, `app_user`, `check_in`, `gym_class` and `class_booking` tables on start, and adds any columns an older `app_user` table is missing (the ban columns), keeping existing data. To use Supabase locally as well, set `DATABASE_URL` in your terminal before `fastapi dev main.py`.
+The backend accepts `postgres://` or `postgresql://` URLs and creates the `member`, `app_user`, `check_in`, `gym_class`, `class_booking`, `plan_price` and `payment` tables on start (and fills `plan_price` with monthly 1,500 / 30 days, quarterly 4,000 / 90 days and yearly 14,000 / 365 days), and adds any columns an older `app_user` table is missing (the ban columns), keeping existing data. To use Supabase locally as well, set `DATABASE_URL` in your terminal before `fastapi dev main.py`.
 
 Free-tier Supabase projects pause after a week with no activity; open the dashboard and restore the project before a demo if needed.
 
