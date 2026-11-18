@@ -703,6 +703,11 @@ button.linklike {
   width: 100%;
 }
 
+.plan-name {
+  min-width: 100px;
+  align-self: center;
+}
+
 @media (max-width: 860px) {
   .layout {
     grid-template-columns: 1fr;

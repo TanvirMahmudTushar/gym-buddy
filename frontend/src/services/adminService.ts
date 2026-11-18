@@ -1,5 +1,7 @@
 // fetch helpers for the admin-only endpoints: /api/v1/admin.
 import type { AdminStats, AdminUser, AdminUserPage, Role } from "../types/auth"
+import type { PlanPrice } from "../types/payment"
+import type { Plan } from "../types/member"
 import { request } from "./api"
 
 const BASE = "/api/v1/admin"
@@ -19,3 +21,7 @@ export const banUser = (id: number, reason: string) =>
 export const unbanUser = (id: number) => request<AdminUser>(`${BASE}/users/${id}/unban`, { method: "POST" })
 
 export const getStats = () => request<AdminStats>(`${BASE}/stats`)
+
+// Set a plan's price (whole taka) and the number of days a renewal adds.
+export const updatePlan = (plan: Plan, body: { price: number; duration_days: number }) =>
+  request<PlanPrice>(`${BASE}/plans/${plan}`, { method: "PUT", body: JSON.stringify(body) })

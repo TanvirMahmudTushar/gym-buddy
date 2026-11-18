@@ -25,6 +25,18 @@ def list_plan_prices(session: Session) -> list[PlanPrice]:
     return [get_plan_price(session, plan) for plan in PLAN_ORDER]
 
 
+def update_plan_price(session: Session, plan: str, price: int, duration_days: int) -> PlanPrice:
+    """An admin sets a plan's price and length. Payments already recorded are not changed."""
+    row = get_plan_price(session, plan)
+    row.price = price
+    row.duration_days = duration_days
+    row.updated_at = utc_now()
+    session.add(row)
+    session.commit()
+    session.refresh(row)
+    return row
+
+
 def _read(payment: Payment, recorded_by_name: str | None) -> dict:
     return {
         "id": payment.id,
