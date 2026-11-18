@@ -2,7 +2,7 @@
 from datetime import date, datetime, timezone
 from typing import Annotated, Literal
 
-from pydantic import EmailStr, StringConstraints, model_validator
+from pydantic import EmailStr, PlainSerializer, StringConstraints, field_validator, model_validator
 from sqlmodel import Field, SQLModel
 
 Plan = Literal["monthly", "quarterly", "yearly"]
@@ -13,6 +13,15 @@ MemberId = Annotated[int, Field(gt=0, le=2_147_483_647)]
 
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def as_utc(value: datetime) -> datetime:
+    """A time with no zone is taken to be UTC; any other zone is converted to UTC."""
+    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
+
+
+# Always sent as UTC with a trailing Z, so the browser shows it in the viewer's local time.
+UtcDateTime = Annotated[datetime, PlainSerializer(lambda v: as_utc(v).isoformat().replace("+00:00", "Z"), return_type=str)]
 
 
 def utc_today() -> date:
@@ -175,7 +184,7 @@ class CheckInRead(SQLModel):
     id: int
     member_id: int
     member_name: str
-    checked_in_at: datetime
+    checked_in_at: UtcDateTime
     recorded_by_name: str | None
 
 
@@ -207,10 +216,16 @@ class UserStats(SQLModel):
     banned: int
 
 
+class ClassStats(SQLModel):
+    total: int
+    upcoming: int
+
+
 class AdminStats(SQLModel):
     members: MemberStats
     users: UserStats
     check_ins: CheckInStats
+    classes: ClassStats
 
 
 class UserNameUpdate(SQLModel):
@@ -219,3 +234,103 @@ class UserNameUpdate(SQLModel):
 
 class UserRoleUpdate(SQLModel):
     role: Role
+
+
+# --- Classes and bookings ---
+
+DurationMinutes = Annotated[int, Field(ge=15, le=240)]
+Capacity = Annotated[int, Field(ge=1, le=200)]
+
+
+class GymClass(SQLModel, table=True):
+    # Stored in gym_class because "class" is reserved in Python.
+    __tablename__ = "gym_class"
+
+    id: int | None = Field(default=None, primary_key=True)
+    name: str = Field(max_length=100)
+    description: str | None = Field(default=None, max_length=500)
+    trainer_name: str | None = Field(default=None, max_length=100)
+    starts_at: datetime = Field(index=True)
+    duration_minutes: int
+    capacity: int
+    created_by: int | None = Field(default=None, foreign_key="app_user.id")
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+
+
+class ClassBooking(SQLModel, table=True):
+    __tablename__ = "class_booking"
+
+    class_id: int = Field(foreign_key="gym_class.id", ondelete="CASCADE", primary_key=True)
+    member_id: int = Field(foreign_key="member.id", ondelete="CASCADE", primary_key=True, index=True)
+    booked_at: datetime = Field(default_factory=utc_now)
+
+
+class ClassCreate(SQLModel):
+    name: FullName
+    description: str | None = Field(default=None, max_length=500)
+    trainer_name: str | None = Field(default=None, max_length=100)
+    starts_at: datetime
+    duration_minutes: DurationMinutes
+    capacity: Capacity
+
+    @field_validator("starts_at")
+    @classmethod
+    def starts_at_in_utc(cls, value: datetime) -> datetime:
+        return as_utc(value)
+
+
+class ClassUpdate(SQLModel):
+    name: FullName | None = None
+    description: str | None = Field(default=None, max_length=500)
+    trainer_name: str | None = Field(default=None, max_length=100)
+    starts_at: datetime | None = None
+    duration_minutes: DurationMinutes | None = None
+    capacity: Capacity | None = None
+
+    @field_validator("starts_at")
+    @classmethod
+    def starts_at_in_utc(cls, value: datetime | None) -> datetime | None:
+        return None if value is None else as_utc(value)
+
+    @model_validator(mode="after")
+    def check_required_not_null(self) -> "ClassUpdate":
+        # These columns are NOT NULL, so they may be left out but not sent as null.
+        for name in ("name", "starts_at", "duration_minutes", "capacity"):
+            if name in self.model_fields_set and getattr(self, name) is None:
+                raise ValueError(f"{name} cannot be null")
+        return self
+
+
+class ClassRead(SQLModel):
+    id: int
+    name: str
+    description: str | None
+    trainer_name: str | None
+    starts_at: UtcDateTime
+    duration_minutes: int
+    capacity: int
+    booked_count: int
+    created_at: UtcDateTime
+    updated_at: UtcDateTime
+
+
+class ClassPage(SQLModel):
+    items: list[ClassRead]
+    total: int
+    offset: int
+    limit: int
+
+
+class BookingRead(SQLModel):
+    class_id: int
+    member_id: int
+    member_name: str
+    booked_at: UtcDateTime
+
+
+class BookingPage(SQLModel):
+    items: list[BookingRead]
+    total: int
+    offset: int
+    limit: int

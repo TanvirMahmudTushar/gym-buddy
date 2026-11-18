@@ -70,6 +70,16 @@ export default function DashboardPage() {
               <Stat label="Last 7 days" value={stats.check_ins.last_7_days} />
             </dl>
           </section>
+          <section className="card" aria-labelledby="stats-classes">
+            <h2 id="stats-classes">Classes</h2>
+            <dl className="stats">
+              <Stat label="Total" value={stats.classes.total} />
+              <Stat label="Upcoming" value={stats.classes.upcoming} />
+            </dl>
+            <p className="hint">
+              <a href="#/classes">Open the classes page</a>
+            </p>
+          </section>
           <section className="card" aria-labelledby="stats-users">
             <h2 id="stats-users">Accounts</h2>
             <dl className="stats">
