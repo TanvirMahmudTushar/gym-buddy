@@ -588,6 +588,58 @@ td.wrap {
   flex: 1 1 220px;
 }
 
+/* Check-ins (gym manager) */
+h3 {
+  font-family: var(--display);
+  font-size: 15px;
+  margin: 0;
+}
+
+.visits {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.visits .toolbar {
+  width: 100%;
+}
+
+.visit-list,
+.today-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  width: 100%;
+}
+
+.today-list {
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.visit-list li,
+.today-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 2px;
+  border-bottom: 1px solid var(--line);
+  font-variant-numeric: tabular-nums;
+}
+
+button.linklike {
+  border: 0;
+  background: none;
+  padding: 0;
+  color: var(--accent);
+  font-weight: 600;
+  text-align: left;
+  text-decoration: underline;
+}
+
 @media (max-width: 860px) {
   .layout {
     grid-template-columns: 1fr;

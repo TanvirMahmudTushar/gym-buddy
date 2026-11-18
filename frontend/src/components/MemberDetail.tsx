@@ -2,6 +2,7 @@ import { useEffect, useState } from "react"
 import { deleteMember, getMember, updateMember } from "../services/memberService"
 import type { Member, MemberUpdate } from "../types/member"
 import { errorText, formatDate, memberStatus, planLabel } from "../utils/member"
+import CheckInSection from "./CheckInSection"
 import EditMemberForm from "./EditMemberForm"
 import StatusPill from "./StatusPill"
 
@@ -9,9 +10,11 @@ interface Props {
   memberId: number | null
   onChanged: (member: Member) => void
   onDeleted: () => void
+  /** A check-in was recorded for this member. */
+  onCheckedIn: () => void
 }
 
-export default function MemberDetail({ memberId, onChanged, onDeleted }: Props) {
+export default function MemberDetail({ memberId, onChanged, onDeleted, onCheckedIn }: Props) {
   const [member, setMember] = useState<Member | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
@@ -141,6 +144,8 @@ export default function MemberDetail({ memberId, onChanged, onDeleted }: Props) 
         <dt>Notes</dt>
         <dd>{member.notes || "None"}</dd>
       </dl>
+      <hr className="separator" />
+      <CheckInSection key={member.id} member={member} onCheckedIn={onCheckedIn} />
       <hr className="separator" />
       <div className="inline">
         <div className="field">

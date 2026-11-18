@@ -3,6 +3,7 @@ import { listMembers } from "../../services/memberService"
 import AddMemberForm from "../../components/AddMemberForm"
 import MemberDetail from "../../components/MemberDetail"
 import MemberList, { type Filter } from "../../components/MemberList"
+import TodayCheckIns from "../../components/TodayCheckIns"
 import type { Member } from "../../types/member"
 import { errorText } from "../../utils/member"
 
@@ -19,6 +20,8 @@ export default function HomePage() {
   const [error, setError] = useState("")
   // Bumped to reload the first page after a change.
   const [reloadKey, setReloadKey] = useState(0)
+  // Bumped after a check-in, to reload the Checked in today card.
+  const [checkInKey, setCheckInKey] = useState(0)
 
   const status = filter === "all" ? null : filter
 
@@ -80,6 +83,8 @@ export default function HomePage() {
   return (
     <div className="layout">
       <div className="column">
+        {/* Also reloads after deletes, which remove a member's check-ins. */}
+        <TodayCheckIns refreshKey={checkInKey + reloadKey} onSelect={setSelectedId} />
         <AddMemberForm onCreated={handleCreated} />
         <MemberList
           members={members}
@@ -102,6 +107,7 @@ export default function HomePage() {
           memberId={selectedId}
           onChanged={() => setReloadKey((k) => k + 1)}
           onDeleted={handleDeleted}
+          onCheckedIn={() => setCheckInKey((k) => k + 1)}
         />
       </aside>
     </div>

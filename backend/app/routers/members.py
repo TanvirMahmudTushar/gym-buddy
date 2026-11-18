@@ -4,8 +4,10 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 
 from app.database import SessionDep
-from app.deps import require_roles
+from app.deps import CurrentUser, require_roles
 from app.models import (
+    CheckInPage,
+    CheckInRead,
     Member,
     MemberBulkDelete,
     MemberBulkDeleteResult,
@@ -14,7 +16,7 @@ from app.models import (
     MemberRead,
     MemberUpdate,
 )
-from app.services import member_service
+from app.services import checkin_service, member_service
 from app.services.member_service import MemberStatus
 
 # Only gym managers and admins may touch member records (SRS FR-19).
@@ -57,6 +59,24 @@ def get_member(member_id: int, session: SessionDep) -> Member:
 def update_member(member_id: int, body: MemberUpdate, session: SessionDep) -> Member:
     """Only the fields sent change. A later expires_on renews; is_active false / true freezes / unfreezes."""
     return member_service.update_member(session, member_id, body.model_dump(exclude_unset=True))
+
+
+@router.post("/{member_id}/check-ins", status_code=201, response_model=CheckInRead)
+def record_check_in(member_id: int, session: SessionDep, user: CurrentUser) -> dict:
+    """400 if the membership is frozen or expired. Several check-ins on the same day are allowed."""
+    return checkin_service.record_check_in(session, member_id, user)
+
+
+@router.get("/{member_id}/check-ins", response_model=CheckInPage)
+def list_member_check_ins(
+    member_id: int,
+    session: SessionDep,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+) -> dict:
+    """This member's visits, newest first."""
+    items, total = checkin_service.list_member_check_ins(session, member_id, offset, limit)
+    return {"items": items, "total": total, "offset": offset, "limit": limit}
 
 
 @router.delete("/{member_id}", status_code=204)

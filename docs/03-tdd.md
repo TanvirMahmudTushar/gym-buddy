@@ -127,13 +127,15 @@ backend/
       auth.py          # /api/v1/auth/signup, /login
       users.py         # /api/v1/users/me (profile, change name); (Beta) change password
       admin.py         # /api/v1/admin/stats, /users (list, change role, ban, unban)
+      check_ins.py     # /api/v1/check-ins/today
       classes.py       # (Beta) /api/v1/classes/* (classes and bookings)
     services/
       __init__.py
       member_service.py  # member rules and queries; raises MemberNotFoundError / InvalidExpiryError
       auth_service.py    # sign up (always role user) and log in; raises EmailTakenError / InvalidCredentialsError
       user_service.py    # list users, change role, rename, ban / unban; raises UserNotFoundError / CannotChangeOwnRoleError / CannotBanError
-      stats_service.py   # member and user counts for the admin dashboard
+      stats_service.py   # member, check-in and user counts for the admin dashboard
+      checkin_service.py # record a check-in (membership must be valid), history, today's list; raises MembershipNotValidError
   alembic/             # (Beta) migration scripts
   alembic.ini          # (Beta)
   requirements.txt
@@ -251,12 +253,14 @@ erDiagram
 
 **`check_in`**
 
+> Built so far: all four columns, with indexes on `member_id` and `checked_in_at`. The service deletes a member's check-ins before deleting the member, because SQLite (local development) does not enforce `on delete cascade` by default.
+
 | Column | Type | Rules |
 |---|---|---|
 | `id` | integer | Primary key |
 | `member_id` | integer | FK → `member.id`, on delete cascade |
 | `checked_in_at` | timestamp (UTC) | Not null |
-| `recorded_by` | integer | FK → `app_user.id`: the admin who recorded it |
+| `recorded_by` | integer | FK → `app_user.id`: the gym manager or admin who recorded it |
 
 Indexes: `member(user_id)`, `class_booking(member_id)`, `check_in(member_id, checked_in_at)`, `gym_class(starts_at)`, `refresh_token(user_id)`.
 
@@ -348,7 +352,8 @@ erDiagram
 | `ClassCreate` / `ClassUpdate` | Create / edit class | `name`, `description?`, `trainer_name?`, `starts_at`, `duration_minutes`, `capacity` (all optional on update) | Beta |
 | `ClassRead` | Class responses | all class columns + `booked_count`, `is_booked_by_me` | Beta |
 | `BookingRead` | Booking responses | `class_id`, `member_id`, `member_name`, `booked_at` | Beta |
-| `CheckInRead` | Check-in responses | `id`, `member_id`, `checked_in_at` | Beta |
+| `CheckInRead` | Check-in responses | `id`, `member_id`, `member_name`, `checked_in_at`, `recorded_by_name` | Beta |
+| `CheckInPage` | Check-in lists | `items: CheckInRead[]`, `total`, `offset`, `limit` | Beta |
 
 MVP sketch:
 
@@ -435,8 +440,9 @@ In the MVP no login is needed. In the Beta the member endpoints become admin-onl
 | `GET` | `/api/v1/members/{id}` | Gym Manager, Admin | — | `200` `MemberRead` | `403`, `404` | FR-19 |
 | `PATCH` | `/api/v1/members/{id}` | Gym Manager, Admin | `MemberUpdate` | `200` `MemberRead` | `403`, `404`, `422` | FR-19 |
 | `DELETE` | `/api/v1/members/{id}` | Gym Manager, Admin | — | `204` | `403`, `404` | FR-19 |
-| `POST` | `/api/v1/members/{id}/check-ins` | Admin | — | `201` `CheckInRead` | `400` (membership not valid), `403`, `404` | FR-30 |
-| `GET` | `/api/v1/members/{id}/check-ins?offset&limit` | Admin | — | `200` `CheckInRead[]` | `403`, `404` | FR-31 |
+| `POST` | `/api/v1/members/{id}/check-ins` | Gym Manager, Admin | — | `201` `CheckInRead` | `400` (frozen: "Membership is frozen"; expired: "Membership expired on YYYY-MM-DD"), `403`, `404` | FR-30 |
+| `GET` | `/api/v1/members/{id}/check-ins?offset&limit` | Gym Manager, Admin | — | `200` `CheckInPage` (newest first) | `403`, `404`, `422` | FR-31 |
+| `GET` | `/api/v1/check-ins/today?offset&limit` | Gym Manager, Admin | — | `200` `CheckInPage` (since midnight UTC, newest first; `limit` up to 100, default 50) | `401`, `403`, `422` | FR-42 |
 
 **Admin**
 

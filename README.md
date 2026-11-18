@@ -12,7 +12,7 @@ backend/          FastAPI app (routes under /api)
   app/security.py password hashing (Argon2) and login tokens (JWT)
   app/deps.py     who is calling, and the role check
   app/routers/    members.py, auth.py, users.py, admin.py: the endpoints (HTTP only)
-  app/services/   member_service.py, auth_service.py, user_service.py, stats_service.py: rules and database queries
+  app/services/   member_service.py, auth_service.py, user_service.py, checkin_service.py, stats_service.py: rules and database queries
 frontend/         Vite + React + TypeScript, one page (src/pages/HomePage/index.tsx)
   src/components/ add form, member list, details panel
   src/context/    AuthContext.tsx: who is logged in
@@ -37,13 +37,19 @@ Everyone who signs up is a **User**. Only an admin can change a role.
 | Role | Can do |
 |---|---|
 | User | Log in, see and rename their own account |
-| Gym Manager | Everything a User can, plus manage gym members (add, edit, renew, freeze, delete) |
+| Gym Manager | Everything a User can, plus manage gym members (add, edit, renew, freeze, delete) and record check-ins |
 | Admin | Everything a Gym Manager can, plus list users and change their roles |
 
 Pages: `#/login`, `#/signup`, `#/dashboard` (Admin), `#/members` (Gym Manager, Admin), `#/users` (Admin), `#/account` (everyone). An admin lands on the Dashboard after logging in.
 
+**Gym Manager features (also available to Admins)**
+- **Check in a member:** open a member on the Members page and click **Check in**. Frozen and expired members cannot be checked in (the page says why; renew or unfreeze first). The same member can check in more than once a day.
+- **Visit history:** each member's visits, newest first, with who recorded each one.
+- **Checked in today:** a card at the top of the Members page lists everyone who has arrived since midnight UTC. Click a name to open that member.
+- Deleting a member also deletes their check-ins.
+
 **Admin features**
-- **Dashboard:** members (total, active, expired, frozen, new in the last 7 days) and accounts (total, users, gym managers, admins, banned).
+- **Dashboard:** members (total, active, expired, frozen, new in the last 7 days), check-ins (today, last 7 days) and accounts (total, users, gym managers, admins, banned).
 - **Ban / unban:** on the **Users** page, an admin can ban a User or Gym Manager with an optional reason. A banned person gets `403 Account banned` when logging in and on every request, even with a token that has not expired, and the app logs them out. Unbanning restores access with their role and data unchanged. An admin cannot ban themself or another admin; change the other admin's role first.
 
 **First admin.** Nobody can make themselves an admin. Sign up in the app, then in Supabase → **Table Editor** → `app_user`, set that row's `role` to `admin` (or run `update app_user set role = 'admin' where email = 'you@example.com';` in the SQL editor). Log in again. From then on, change roles on the **Users** page.
@@ -62,6 +68,9 @@ Interactive docs: `/api/docs` (for example http://localhost:8000/api/docs).
 | Update | `PATCH /api/v1/members/{id}` | `200` member | `404`, `422` |
 | Delete | `DELETE /api/v1/members/{id}` | `204` | `404` |
 | Delete several | `POST /api/v1/members/bulk-delete` with `{"ids": [1, 2, 3]}` | `200` `{"deleted": 3}` | `422` |
+| Check in a member | `POST /api/v1/members/{id}/check-ins` | `201` check-in | `400` (frozen or expired), `403`, `404` |
+| Member's visits | `GET /api/v1/members/{id}/check-ins?offset=0&limit=20` | `200` `{items, total, offset, limit}`, newest first | `403`, `404`, `422` |
+| Checked in today | `GET /api/v1/check-ins/today?offset=0&limit=50` | `200` `{items, total, offset, limit}`, newest first | `401`, `403` |
 | Health | `GET /api/health` | `200` `{"status": "ok"}` | |
 | Sign up | `POST /api/v1/auth/signup` `{email, name, password}` | `201` user (role `user`) | `409`, `422` |
 | Log in | `POST /api/v1/auth/login` `{email, password}` | `200` `{access_token, token_type, user}` | `401`, `422` |
@@ -129,7 +138,7 @@ vercel dev -L
 2. **Connect** → **Transaction pooler** → copy the URI (port `6543`).
 3. In Vercel → Project → **Settings** → **Environment Variables**, add it as `DATABASE_URL`, then redeploy.
 
-The backend accepts `postgres://` or `postgresql://` URLs and creates the `member` and `app_user` tables on start, and adds any columns an older `app_user` table is missing (the ban columns), keeping existing data. To use Supabase locally as well, set `DATABASE_URL` in your terminal before `fastapi dev main.py`.
+The backend accepts `postgres://` or `postgresql://` URLs and creates the `member`, `app_user` and `check_in` tables on start, and adds any columns an older `app_user` table is missing (the ban columns), keeping existing data. To use Supabase locally as well, set `DATABASE_URL` in your terminal before `fastapi dev main.py`.
 
 Free-tier Supabase projects pause after a week with no activity; open the dashboard and restore the project before a demo if needed.
 

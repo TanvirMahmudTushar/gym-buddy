@@ -3,7 +3,7 @@ from typing import Literal
 
 from sqlmodel import Session, col, delete, func, select
 
-from app.models import Member, MemberCreate, utc_now, utc_today
+from app.models import CheckIn, Member, MemberCreate, utc_now, utc_today
 
 MemberStatus = Literal["active", "expired", "frozen"]
 
@@ -75,12 +75,15 @@ def update_member(session: Session, member_id: int, changes: dict) -> Member:
 
 def delete_member(session: Session, member_id: int) -> None:
     member = get_member(session, member_id)
+    # Check-ins go first: the database cascades too, but SQLite does not enforce that by default.
+    session.exec(delete(CheckIn).where(col(CheckIn.member_id) == member_id))
     session.delete(member)
     session.commit()
 
 
 def bulk_delete_members(session: Session, ids: list[int]) -> int:
     """All in one transaction. An ID that no longer exists is skipped, so the count can be lower than len(ids)."""
+    session.exec(delete(CheckIn).where(col(CheckIn.member_id).in_(ids)))
     result = session.exec(delete(Member).where(col(Member.id).in_(ids)))
     session.commit()
     return result.rowcount
