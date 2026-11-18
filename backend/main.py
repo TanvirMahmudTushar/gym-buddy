@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse
 
 from app.database import create_db_and_tables
 from app.routers import members
+from app.services.member_service import InvalidExpiryError, MemberNotFoundError
 
 logger = logging.getLogger("gym_buddy")
 
@@ -21,6 +22,17 @@ app.include_router(members.router)
 
 # Run at import (not in a lifespan hook) so it also works on Vercel's serverless functions.
 create_db_and_tables()
+
+
+# The service layer raises these; they become the same 404 / 422 responses the routes used to send.
+@app.exception_handler(MemberNotFoundError)
+async def member_not_found(request: Request, exc: MemberNotFoundError) -> JSONResponse:
+    return JSONResponse(status_code=404, content={"detail": "Member not found"})
+
+
+@app.exception_handler(InvalidExpiryError)
+async def invalid_expiry(request: Request, exc: InvalidExpiryError) -> JSONResponse:
+    return JSONResponse(status_code=422, content={"detail": str(exc)})
 
 
 # Log the real error, but never send stack traces or database details to the client (NFR-07).
