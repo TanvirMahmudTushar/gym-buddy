@@ -36,18 +36,24 @@ Everyone who signs up is a **User**. Only an admin can change a role.
 
 | Role | Can do |
 |---|---|
-| User | Log in, see and rename their own account |
+| User | Log in, see and rename their own account, see their own membership and visits, book and cancel classes, change their password |
 | Gym Manager | Everything a User can, plus manage gym members (add, edit, renew, freeze, delete), record check-ins and run the class timetable |
 | Admin | Everything a Gym Manager can, plus list users and change their roles |
 
-Pages: `#/login`, `#/signup`, `#/dashboard` (Admin), `#/members` (Gym Manager, Admin), `#/classes` (Gym Manager, Admin), `#/users` (Admin), `#/account` (everyone). An admin lands on the Dashboard after logging in.
+Pages: `#/login`, `#/signup`, `#/dashboard` (Admin), `#/members` (Gym Manager, Admin), `#/classes` (Gym Manager, Admin), `#/users` (Admin), `#/membership` and `#/timetable` (User), `#/account` (everyone). After logging in, an Admin lands on the Dashboard, a Gym Manager on Members and a User on My membership.
 
 **Gym Manager features (also available to Admins)**
 - **Check in a member:** open a member on the Members page and click **Check in**. Frozen and expired members cannot be checked in (the page says why; renew or unfreeze first). The same member can check in more than once a day.
 - **Visit history:** each member's visits, newest first, with who recorded each one.
 - **Checked in today:** a card at the top of the Members page lists everyone who has arrived since midnight UTC. Click a name to open that member.
 - Deleting a member also deletes their check-ins and class bookings.
-- **Classes:** the **Classes** page lists upcoming classes (or all of them), in start-time order. Add a class with a name, start time, length (15 to 240 minutes) and places (1 to 200), plus an optional trainer and description. Edit or delete a class, and open **Bookings** to see who has booked it. Capacity cannot be lowered below the bookings already made, and deleting a class deletes its bookings. Members booking a class comes with the User features.
+- **Classes:** the **Classes** page lists upcoming classes (or all of them), in start-time order. Add a class with a name, start time, length (15 to 240 minutes) and places (1 to 200), plus an optional trainer and description. Edit or delete a class, and open **Bookings** to see who has booked it. Capacity cannot be lowered below the bookings already made, and deleting a class deletes its bookings. A member's bookings are made by the member (see **User features**).
+- **Link an account to a member:** in a member's details, **Linked account** takes the person's account email and links it, so that person can see their own membership and book classes. One account can be linked to only one member. Unlink at any time. Without a link, a User sees "Your account is not linked to a gym membership yet".
+
+**User features**
+- **My membership:** plan, status, joined and expiry dates, and the person's own visits, newest first. A User can only ever see their own record.
+- **Classes:** upcoming classes with places left. **Book** takes a place, **Cancel booking** frees it. Booking needs a valid membership (not frozen or expired) and a class that has not started; a full class or one you already booked is refused with a clear message. Two people booking the last place at the same moment cannot both get it.
+- **My account:** change your name, and change your password. After a password change every earlier login stops working and you log in again with the new password.
 
 **Admin features**
 - **Dashboard:** members (total, active, expired, frozen, new in the last 7 days), check-ins (today, last 7 days), classes (total, upcoming) and accounts (total, users, gym managers, admins, banned).
@@ -78,6 +84,13 @@ Interactive docs: `/api/docs` (for example http://localhost:8000/api/docs).
 | Edit a class | `PATCH /api/v1/classes/{id}` | `200` class | `403`, `404`, `422` (including capacity below the bookings) |
 | Delete a class | `DELETE /api/v1/classes/{id}` | `204` | `403`, `404` |
 | Class bookings | `GET /api/v1/classes/{id}/bookings` | `200` `{items, total, offset, limit}` with member name and time | `403`, `404` |
+| Book a class | `POST /api/v1/classes/{id}/bookings` (for the logged-in account's own member) | `201` booking | `400` (membership not valid or class started), `404` (no linked membership or class), `409` (full or already booked) |
+| Cancel my booking | `DELETE /api/v1/classes/{id}/bookings` | `204` | `404` |
+| Link an account | `PATCH /api/v1/members/{id}` with `{"user_id": 5}` (`null` unlinks) | `200` member | `409` (account already linked), `422` (no such account) |
+| Find an account (staff) | `GET /api/v1/users/lookup?email=...` or `?id=...` | `200` `{id, name, email}` | `403`, `404`, `422` |
+| My membership | `GET /api/v1/users/me/membership` | `200` member | `401`, `404` (nothing linked) |
+| My visits | `GET /api/v1/users/me/check-ins?offset=0&limit=20` | `200` `{items, total, offset, limit}`, newest first | `401`, `404` |
+| Change my password | `POST /api/v1/users/me/password` `{current_password, new_password}` | `204` | `400` (wrong current password), `401`, `422` |
 | Health | `GET /api/health` | `200` `{"status": "ok"}` | |
 | Sign up | `POST /api/v1/auth/signup` `{email, name, password}` | `201` user (role `user`) | `409`, `422` |
 | Log in | `POST /api/v1/auth/login` `{email, password}` | `200` `{access_token, token_type, user}` | `401`, `422` |

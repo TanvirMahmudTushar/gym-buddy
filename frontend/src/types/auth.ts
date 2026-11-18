@@ -9,6 +9,13 @@ export interface User {
   created_at: string
 }
 
+/** Just enough about an account for staff to link it to a member. */
+export interface AccountLookup {
+  id: number
+  name: string
+  email: string
+}
+
 export interface LoginResult {
   access_token: string
   token_type: "bearer"

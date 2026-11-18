@@ -11,6 +11,8 @@ export interface Member {
   expires_on: string
   is_active: boolean
   notes: string | null
+  /** The login account linked to this member, if any. */
+  user_id: number | null
   created_at: string
   updated_at: string
 }
@@ -31,7 +33,7 @@ export interface MemberCreate {
 }
 
 /** PATCH body: only the fields sent change. */
-export type MemberUpdate = Partial<Pick<Member, "full_name" | "phone" | "plan" | "expires_on" | "is_active" | "notes">>
+export type MemberUpdate = Partial<Pick<Member, "full_name" | "phone" | "plan" | "expires_on" | "is_active" | "notes" | "user_id">>
 
 export interface MemberBulkDeleteResult {
   deleted: number

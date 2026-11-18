@@ -8,6 +8,8 @@ export interface GymClass {
   duration_minutes: number
   capacity: number
   booked_count: number
+  /** True when the logged-in person's linked member booked this class. */
+  is_booked_by_me: boolean
   created_at: string
   updated_at: string
 }

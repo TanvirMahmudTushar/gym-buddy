@@ -1,9 +1,10 @@
 # Member business rules and database queries, used by the routes in app/routers/members.py (TDD 4).
 from typing import Literal
 
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, col, delete, func, select
 
-from app.models import CheckIn, ClassBooking, Member, MemberCreate, utc_now, utc_today
+from app.models import CheckIn, ClassBooking, Member, MemberCreate, User, utc_now, utc_today
 
 MemberStatus = Literal["active", "expired", "frozen"]
 
@@ -16,11 +17,54 @@ class InvalidExpiryError(Exception):
     """expires_on is before the member's joined_on date."""
 
 
+class AccountNotFoundError(Exception):
+    """user_id does not match any account."""
+
+
+class AccountAlreadyLinkedError(Exception):
+    """That account is already linked to a different member."""
+
+
+class NoMembershipLinkedError(Exception):
+    """The logged-in user's account is not linked to any member record."""
+
+
+def _check_account_link(session: Session, user_id: int, member_id: int | None) -> None:
+    if session.get(User, user_id) is None:
+        raise AccountNotFoundError(user_id)
+    other = session.exec(select(Member).where(col(Member.user_id) == user_id)).first()
+    if other is not None and other.id != member_id:
+        raise AccountAlreadyLinkedError(user_id)
+
+
+def _commit_link(session: Session) -> None:
+    try:
+        session.commit()
+    except IntegrityError as exc:
+        # Two staff linking the same account at the same moment: the unique index lets only one through.
+        session.rollback()
+        raise AccountAlreadyLinkedError from exc
+
+
+def get_own_member(session: Session, user: User) -> Member:
+    """The member record linked to this account. A user can only ever reach their own."""
+    member = session.exec(select(Member).where(col(Member.user_id) == user.id)).first()
+    if member is None:
+        raise NoMembershipLinkedError
+    return member
+
+
+def own_member_id(session: Session, user: User) -> int | None:
+    return session.exec(select(Member.id).where(col(Member.user_id) == user.id)).first()
+
+
 def create_member(session: Session, data: MemberCreate) -> Member:
     # Fields left out (such as joined_on) fall back to the table defaults.
+    if data.user_id is not None:
+        _check_account_link(session, data.user_id, None)
     member = Member(**data.model_dump(exclude_none=True))
     session.add(member)
-    session.commit()
+    _commit_link(session)
     session.refresh(member)
     return member
 
@@ -65,10 +109,12 @@ def update_member(session: Session, member_id: int, changes: dict) -> Member:
     member = get_member(session, member_id)
     if "expires_on" in changes and changes["expires_on"] < member.joined_on:
         raise InvalidExpiryError("expires_on must be on or after joined_on")
+    if changes.get("user_id") is not None:
+        _check_account_link(session, changes["user_id"], member.id)
     member.sqlmodel_update(changes)
     member.updated_at = utc_now()
     session.add(member)
-    session.commit()
+    _commit_link(session)
     session.refresh(member)
     return member
 

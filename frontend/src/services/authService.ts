@@ -12,3 +12,9 @@ export const getMe = () => request<User>("/api/v1/users/me")
 
 export const renameMe = (name: string) =>
   request<User>("/api/v1/users/me", { method: "PATCH", body: JSON.stringify({ name }) })
+
+export const changePassword = (currentPassword: string, newPassword: string) =>
+  request<void>("/api/v1/users/me/password", {
+    method: "POST",
+    body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+  })

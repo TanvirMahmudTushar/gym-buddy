@@ -11,10 +11,24 @@ from app.services.auth_service import (
     AccountBannedError,
     EmailTakenError,
     InvalidCredentialsError,
+    WrongPasswordError,
 )
 from app.services.checkin_service import MembershipNotValidError
-from app.services.class_service import CapacityBelowBookingsError, ClassNotFoundError
-from app.services.member_service import InvalidExpiryError, MemberNotFoundError
+from app.services.class_service import (
+    AlreadyBookedError,
+    BookingNotFoundError,
+    CapacityBelowBookingsError,
+    ClassFullError,
+    ClassNotFoundError,
+    ClassStartedError,
+)
+from app.services.member_service import (
+    AccountAlreadyLinkedError,
+    AccountNotFoundError,
+    InvalidExpiryError,
+    MemberNotFoundError,
+    NoMembershipLinkedError,
+)
 from app.services.user_service import CannotBanError, CannotChangeOwnRoleError, UserNotFoundError
 
 logger = logging.getLogger("gym_buddy")
@@ -62,6 +76,25 @@ async def class_not_found(request: Request, exc: ClassNotFoundError) -> JSONResp
 @app.exception_handler(CapacityBelowBookingsError)
 async def capacity_below_bookings(request: Request, exc: CapacityBelowBookingsError) -> JSONResponse:
     return JSONResponse(status_code=422, content={"detail": str(exc)})
+
+
+def _plain_error(exc_type: type[Exception], status_code: int, detail: str) -> None:
+    """Register a handler that answers with a fixed status and message."""
+
+    async def handler(request: Request, exc: Exception) -> JSONResponse:
+        return JSONResponse(status_code=status_code, content={"detail": detail})
+
+    app.add_exception_handler(exc_type, handler)
+
+
+_plain_error(AccountNotFoundError, 422, "No account has that ID")
+_plain_error(AccountAlreadyLinkedError, 409, "That account is already linked to another member")
+_plain_error(NoMembershipLinkedError, 404, "No membership is linked to your account")
+_plain_error(WrongPasswordError, 400, "Current password is wrong")
+_plain_error(ClassStartedError, 400, "This class has already started")
+_plain_error(ClassFullError, 409, "This class is full")
+_plain_error(AlreadyBookedError, 409, "You have already booked this class")
+_plain_error(BookingNotFoundError, 404, "You have not booked this class")
 
 
 @app.exception_handler(EmailTakenError)

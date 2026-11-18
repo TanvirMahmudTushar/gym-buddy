@@ -28,6 +28,16 @@ export function setSessionExpiredHandler(handler: (() => void) | null): void {
 // The text the API sends when an admin has banned the account (must match the backend).
 const ACCOUNT_BANNED = "Account banned"
 
+/** An error from the API, with the HTTP status so a page can react to a 404 or 409. */
+export class ApiError extends Error {
+  status: number
+
+  constructor(message: string, status: number) {
+    super(message)
+    this.status = status
+  }
+}
+
 interface ValidationError {
   loc: (string | number)[]
   msg: string
@@ -65,7 +75,7 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
     const message = await errorMessage(res)
     // A ban also ends the login, so the person is sent back to Log in with a clear reason on their next try.
     if (token && (res.status === 401 || (res.status === 403 && message === ACCOUNT_BANNED))) onSessionExpired?.()
-    throw new Error(message)
+    throw new ApiError(message, res.status)
   }
   return (res.status === 204 ? undefined : await res.json()) as T
 }

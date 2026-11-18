@@ -671,6 +671,16 @@ button.linklike {
   grid-column: 1 / -1;
 }
 
+/* User: membership and booking */
+.narrow-card {
+  max-width: 520px;
+  margin-top: 8px;
+}
+
+.narrow-wide {
+  max-width: 760px;
+}
+
 @media (max-width: 860px) {
   .layout {
     grid-template-columns: 1fr;
