@@ -681,6 +681,28 @@ button.linklike {
   max-width: 760px;
 }
 
+/* Payments */
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ink);
+}
+
+.checkbox-row input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--accent);
+}
+
+.stack.full {
+  width: 100%;
+}
+
 @media (max-width: 860px) {
   .layout {
     grid-template-columns: 1fr;

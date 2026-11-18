@@ -129,6 +129,7 @@ backend/
       admin.py         # /api/v1/admin/stats, /users (list, change role, ban, unban)
       check_ins.py     # /api/v1/check-ins/today
       classes.py       # /api/v1/classes (read: anyone logged in; change and bookings: gym manager, admin)
+      plans.py         # /api/v1/plans (anyone logged in)
       classes.py       # (Beta) /api/v1/classes/* (classes and bookings)
     services/
       __init__.py
@@ -136,6 +137,7 @@ backend/
       auth_service.py    # sign up (always role user) and log in; raises EmailTakenError / InvalidCredentialsError
       user_service.py    # list users, change role, rename, ban / unban; raises UserNotFoundError / CannotChangeOwnRoleError / CannotBanError
       stats_service.py   # member, check-in, class and user counts for the admin dashboard
+      payment_service.py # plan prices, record a payment (and renew), a member's payment history
       class_service.py   # classes and bookings: create, list, edit, delete, who booked; raises ClassNotFoundError / CapacityBelowBookingsError
       checkin_service.py # record a check-in (membership must be valid), history, today's list; raises MembershipNotValidError
   alembic/             # (Beta) migration scripts
@@ -255,6 +257,32 @@ erDiagram
 | `member_id` | integer | PK part, FK → `member.id`, on delete cascade |
 | `booked_at` | timestamp (UTC) | Not null |
 
+**`plan_price`**
+
+| Column | Type | Rules |
+|---|---|---|
+| `plan` | varchar(10) | Primary key: `monthly`, `quarterly` or `yearly` |
+| `price` | integer | Whole taka |
+| `duration_days` | integer | Days a renewal adds |
+| `updated_at` | timestamp (UTC) | Not null |
+
+Filled with monthly 1,500 / 30, quarterly 4,000 / 90 and yearly 14,000 / 365 when the table is first created; existing rows are never overwritten.
+
+**`payment`**
+
+| Column | Type | Rules |
+|---|---|---|
+| `id` | integer | Primary key |
+| `member_id` | integer | FK → `member.id`, nullable, on delete set null (the service sets it to null before deleting a member, since SQLite does not enforce it) |
+| `member_name` | varchar(100) | The member's name when the payment was taken |
+| `amount` | integer | Whole taka, 1 to 10,000,000 |
+| `method` | varchar(20) | `cash`, `card`, `bank_transfer` or `mobile_banking` |
+| `plan` | varchar(10) | Nullable: the plan renewed by this payment |
+| `note` | varchar(200) | Nullable |
+| `paid_at` | timestamp (UTC) | Not null, indexed |
+| `renewed_until` | date | Nullable: the new expiry when the payment renewed the membership |
+| `recorded_by` | integer | FK → `app_user.id` |
+
 **`check_in`**
 
 > Built so far: all four columns, with indexes on `member_id` and `checked_in_at`. The service deletes a member's check-ins before deleting the member, because SQLite (local development) does not enforce `on delete cascade` by default.
@@ -357,6 +385,8 @@ erDiagram
 | `ClassRead` | Class responses | all class columns except `created_by` + `booked_count` (`is_booked_by_me` comes with member booking); times are UTC with a trailing `Z` | Beta |
 | `ClassPage` / `BookingPage` | Class and booking lists | `items`, `total`, `offset`, `limit` | Beta |
 | `BookingRead` | Booking responses | `class_id`, `member_id`, `member_name`, `booked_at` | Beta |
+| `PaymentCreate` / `PaymentRead` / `PaymentPage` | Record and list payments | create: `amount`, `method`, `note?`, `renew_plan?`; read: `id`, `member_id?`, `member_name`, `amount`, `method`, `plan?`, `note?`, `paid_at`, `renewed_until?`, `recorded_by_name?` | Beta |
+| `PlanRead` | Plan prices | `plan`, `price`, `duration_days` | Beta |
 | `CheckInRead` | Check-in responses | `id`, `member_id`, `member_name`, `checked_in_at`, `recorded_by_name` | Beta |
 | `CheckInPage` | Check-in lists | `items: CheckInRead[]`, `total`, `offset`, `limit` | Beta |
 
@@ -465,6 +495,14 @@ In the MVP no login is needed. In the Beta the member endpoints become admin-onl
 `GET /api/v1/admin/stats` returns `{members: {total, active, expired, frozen, new_last_7_days}, users: {total, users, gym_managers, admins, banned}}`. "Active", "expired" and "frozen" use the same rules as the member list. Class and check-in numbers are added with those features.
 
 Ban rules: banning is idempotent (banning a banned user changes nothing), an admin cannot ban themself or another admin (`400`), and unbanning clears `banned_at` and `ban_reason` but keeps the role. `get_current_user` returns `403 Account banned` for a banned user on every request, and `/auth/login` does the same after the password is checked, so a stranger cannot find out who is banned.
+
+**Plans and payments**
+
+| Method | Path | Who | Body | Success | Errors | FR |
+|---|---|---|---|---|---|---|
+| `GET` | `/api/v1/plans` | Any logged-in user | — | `200` `PlanRead[]` (monthly, quarterly, yearly) | `401` | FR-43 |
+| `POST` | `/api/v1/members/{id}/payments` | Gym Manager, Admin | `PaymentCreate` | `201` `PaymentRead` (with `renew_plan`, the member's expiry and plan change too) | `403`, `404`, `422` | FR-44, FR-45 |
+| `GET` | `/api/v1/members/{id}/payments?offset&limit` | Gym Manager, Admin | — | `200` `PaymentPage` (newest first) | `403`, `404`, `422` | FR-46 |
 
 **Classes and bookings**
 

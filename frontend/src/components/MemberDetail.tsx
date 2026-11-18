@@ -5,6 +5,7 @@ import { errorText, formatDate, memberStatus, planLabel } from "../utils/member"
 import CheckInSection from "./CheckInSection"
 import EditMemberForm from "./EditMemberForm"
 import LinkedAccount from "./LinkedAccount"
+import PaymentSection from "./PaymentSection"
 import StatusPill from "./StatusPill"
 
 interface Props {
@@ -63,6 +64,19 @@ export default function MemberDetail({ memberId, onChanged, onDeleted, onChecked
       setActionError(errorText(err))
     } finally {
       setBusy(false)
+    }
+  }
+
+  // A payment that renewed the membership changed the expiry (and plan), so load the member again.
+  async function refreshMember() {
+    if (!member) return
+    try {
+      const fresh = await getMember(member.id)
+      setMember(fresh)
+      setRenewDate(fresh.expires_on)
+      onChanged(fresh)
+    } catch {
+      // The old details stay on screen; the next reload shows the new ones.
     }
   }
 
@@ -155,6 +169,8 @@ export default function MemberDetail({ memberId, onChanged, onDeleted, onChecked
       />
       <hr className="separator" />
       <CheckInSection key={member.id} member={member} onCheckedIn={onCheckedIn} />
+      <hr className="separator" />
+      <PaymentSection key={`pay-${member.id}`} member={member} onRecorded={(renewed) => renewed && refreshMember()} />
       <hr className="separator" />
       <div className="inline">
         <div className="field">

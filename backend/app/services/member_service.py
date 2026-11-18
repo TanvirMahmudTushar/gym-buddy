@@ -2,9 +2,9 @@
 from typing import Literal
 
 from sqlalchemy.exc import IntegrityError
-from sqlmodel import Session, col, delete, func, select
+from sqlmodel import Session, col, delete, func, select, update
 
-from app.models import CheckIn, ClassBooking, Member, MemberCreate, User, utc_now, utc_today
+from app.models import CheckIn, ClassBooking, Member, MemberCreate, Payment, User, utc_now, utc_today
 
 MemberStatus = Literal["active", "expired", "frozen"]
 
@@ -124,6 +124,8 @@ def delete_member(session: Session, member_id: int) -> None:
     # Check-ins go first: the database cascades too, but SQLite does not enforce that by default.
     session.exec(delete(CheckIn).where(col(CheckIn.member_id) == member_id))
     session.exec(delete(ClassBooking).where(col(ClassBooking.member_id) == member_id))
+    # Payments are kept (the revenue is real), only detached from the deleted member.
+    session.exec(update(Payment).where(col(Payment.member_id) == member_id).values(member_id=None))
     session.delete(member)
     session.commit()
 
@@ -132,6 +134,7 @@ def bulk_delete_members(session: Session, ids: list[int]) -> int:
     """All in one transaction. An ID that no longer exists is skipped, so the count can be lower than len(ids)."""
     session.exec(delete(CheckIn).where(col(CheckIn.member_id).in_(ids)))
     session.exec(delete(ClassBooking).where(col(ClassBooking.member_id).in_(ids)))
+    session.exec(update(Payment).where(col(Payment.member_id).in_(ids)).values(member_id=None))
     result = session.exec(delete(Member).where(col(Member.id).in_(ids)))
     session.commit()
     return result.rowcount

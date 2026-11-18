@@ -7,6 +7,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from fastapi import Depends
 from sqlalchemy import inspect, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.pool import NullPool
 from sqlmodel import Session, SQLModel, create_engine
 
@@ -73,12 +74,27 @@ def _add_missing_columns() -> None:
             conn.execute(text(f"CREATE UNIQUE INDEX IF NOT EXISTS {name} ON {table} ({column})"))
 
 
+def _seed_plan_prices() -> None:
+    """Give a new database the default plan prices. Existing prices are never changed."""
+    from app.models import DEFAULT_PLAN_PRICES, PlanPrice
+
+    with Session(engine) as session:
+        for plan, (price, days) in DEFAULT_PLAN_PRICES.items():
+            if session.get(PlanPrice, plan) is None:
+                session.add(PlanPrice(plan=plan, price=price, duration_days=days))
+        try:
+            session.commit()
+        except IntegrityError:
+            session.rollback()  # another serverless instance seeded at the same moment
+
+
 def create_db_and_tables() -> None:
     """Create missing tables and columns; existing data is kept."""
     from app import models  # noqa: F401  (registers the tables on SQLModel.metadata)
 
     SQLModel.metadata.create_all(engine)
     _add_missing_columns()
+    _seed_plan_prices()
 
 
 def get_session() -> Iterator[Session]:

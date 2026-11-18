@@ -15,8 +15,11 @@ from app.models import (
     MemberPage,
     MemberRead,
     MemberUpdate,
+    PaymentCreate,
+    PaymentPage,
+    PaymentRead,
 )
-from app.services import checkin_service, member_service
+from app.services import checkin_service, member_service, payment_service
 from app.services.member_service import MemberStatus
 
 # Only gym managers and admins may touch member records (SRS FR-19).
@@ -76,6 +79,24 @@ def list_member_check_ins(
 ) -> dict:
     """This member's visits, newest first."""
     items, total = checkin_service.list_member_check_ins(session, member_id, offset, limit)
+    return {"items": items, "total": total, "offset": offset, "limit": limit}
+
+
+@router.post("/{member_id}/payments", status_code=201, response_model=PaymentRead)
+def record_payment(member_id: int, body: PaymentCreate, session: SessionDep, user: CurrentUser) -> dict:
+    """Records a payment. With renew_plan the membership is extended by that plan's days in the same step."""
+    return payment_service.record_payment(session, member_id, body, user)
+
+
+@router.get("/{member_id}/payments", response_model=PaymentPage)
+def list_member_payments(
+    member_id: int,
+    session: SessionDep,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+) -> dict:
+    """This member's payments, newest first."""
+    items, total = payment_service.list_member_payments(session, member_id, offset, limit)
     return {"items": items, "total": total, "offset": offset, "limit": limit}
 
 
