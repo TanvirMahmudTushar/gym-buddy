@@ -12,7 +12,7 @@ backend/          FastAPI app (routes under /api)
   app/security.py password hashing (Argon2) and login tokens (JWT)
   app/deps.py     who is calling, and the role check
   app/routers/    members.py, auth.py, users.py, admin.py: the endpoints (HTTP only)
-  app/services/   member_service.py, auth_service.py, user_service.py: rules and database queries
+  app/services/   member_service.py, auth_service.py, user_service.py, stats_service.py: rules and database queries
 frontend/         Vite + React + TypeScript, one page (src/pages/HomePage/index.tsx)
   src/components/ add form, member list, details panel
   src/context/    AuthContext.tsx: who is logged in
@@ -40,7 +40,11 @@ Everyone who signs up is a **User**. Only an admin can change a role.
 | Gym Manager | Everything a User can, plus manage gym members (add, edit, renew, freeze, delete) |
 | Admin | Everything a Gym Manager can, plus list users and change their roles |
 
-Pages: `#/login`, `#/signup`, `#/members` (Gym Manager, Admin), `#/users` (Admin), `#/account` (everyone).
+Pages: `#/login`, `#/signup`, `#/dashboard` (Admin), `#/members` (Gym Manager, Admin), `#/users` (Admin), `#/account` (everyone). An admin lands on the Dashboard after logging in.
+
+**Admin features**
+- **Dashboard:** members (total, active, expired, frozen, new in the last 7 days) and accounts (total, users, gym managers, admins, banned).
+- **Ban / unban:** on the **Users** page, an admin can ban a User or Gym Manager with an optional reason. A banned person gets `403 Account banned` when logging in and on every request, even with a token that has not expired, and the app logs them out. Unbanning restores access with their role and data unchanged. An admin cannot ban themself or another admin; change the other admin's role first.
 
 **First admin.** Nobody can make themselves an admin. Sign up in the app, then in Supabase → **Table Editor** → `app_user`, set that row's `role` to `admin` (or run `update app_user set role = 'admin' where email = 'you@example.com';` in the SQL editor). Log in again. From then on, change roles on the **Users** page.
 
@@ -62,8 +66,11 @@ Interactive docs: `/api/docs` (for example http://localhost:8000/api/docs).
 | Sign up | `POST /api/v1/auth/signup` `{email, name, password}` | `201` user (role `user`) | `409`, `422` |
 | Log in | `POST /api/v1/auth/login` `{email, password}` | `200` `{access_token, token_type, user}` | `401`, `422` |
 | My account | `GET` / `PATCH /api/v1/users/me` | `200` user | `401`, `422` |
-| List users (admin) | `GET /api/v1/admin/users?offset=0&limit=20` | `200` `{items, total, offset, limit}` | `401`, `403` |
+| Dashboard stats (admin) | `GET /api/v1/admin/stats` | `200` `{members, users}` counts | `401`, `403` |
+| List users (admin) | `GET /api/v1/admin/users?offset=0&limit=20` | `200` `{items, total, offset, limit}`; each user has `is_banned`, `banned_at`, `ban_reason` | `401`, `403` |
 | Change role (admin) | `PATCH /api/v1/admin/users/{id}/role` `{"role": "gym_manager"}` | `200` user | `400` (own role), `403`, `404`, `422` |
+| Ban (admin) | `POST /api/v1/admin/users/{id}/ban` `{"reason": "optional"}` | `200` user | `400` (self or another admin), `403`, `404`, `422` |
+| Unban (admin) | `POST /api/v1/admin/users/{id}/unban` | `200` user | `403`, `404` |
 
 - Every `/api/v1/members` endpoint needs `Authorization: Bearer <access_token>` from a Gym Manager or Admin: `401` without a token, `403` for a User.
 - `status` filter: `active` (valid), `expired` (expiry date passed) or `frozen` (`is_active = false`).
@@ -122,7 +129,7 @@ vercel dev -L
 2. **Connect** → **Transaction pooler** → copy the URI (port `6543`).
 3. In Vercel → Project → **Settings** → **Environment Variables**, add it as `DATABASE_URL`, then redeploy.
 
-The backend accepts `postgres://` or `postgresql://` URLs and creates the `member` and `app_user` tables on start. To use Supabase locally as well, set `DATABASE_URL` in your terminal before `fastapi dev main.py`.
+The backend accepts `postgres://` or `postgresql://` URLs and creates the `member` and `app_user` tables on start, and adds any columns an older `app_user` table is missing (the ban columns), keeping existing data. To use Supabase locally as well, set `DATABASE_URL` in your terminal before `fastapi dev main.py`.
 
 Free-tier Supabase projects pause after a week with no activity; open the dashboard and restore the project before a demo if needed.
 

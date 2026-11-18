@@ -10,6 +10,13 @@ class EmailTakenError(Exception):
     """An account with this email already exists."""
 
 
+ACCOUNT_BANNED_MESSAGE = "Account banned"
+
+
+class AccountBannedError(Exception):
+    """The password is right but an admin has banned this account."""
+
+
 class InvalidCredentialsError(Exception):
     """Wrong email or wrong password; the two are deliberately not told apart."""
 
@@ -40,4 +47,7 @@ def authenticate(session: Session, data: LoginRequest) -> User:
     password_ok = verify_password(data.password, user.password_hash if user else None)
     if user is None or not password_ok:
         raise InvalidCredentialsError
+    # Checked only after the password, so a stranger cannot find out who is banned.
+    if user.is_banned:
+        raise AccountBannedError
     return user

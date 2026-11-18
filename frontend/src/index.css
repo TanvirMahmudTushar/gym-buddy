@@ -525,6 +525,69 @@ a:focus-visible {
   padding: 5px 8px;
 }
 
+/* Admin dashboard and ban / unban */
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 12px;
+  margin: 0;
+}
+
+.stat {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.stat dt {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.stat dd {
+  margin: 0;
+  font-family: var(--display);
+  font-size: 28px;
+  font-weight: 600;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+
+.stat.alert dd {
+  color: var(--bad);
+}
+
+.pill.banned {
+  background: var(--bad-bg);
+  color: var(--bad);
+}
+
+td.wrap {
+  white-space: normal;
+  min-width: 140px;
+}
+
+.ban-row td {
+  background: var(--bad-bg);
+  white-space: normal;
+}
+
+.ban-form {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+
+.ban-form .field {
+  flex: 1 1 220px;
+}
+
 @media (max-width: 860px) {
   .layout {
     grid-template-columns: 1fr;

@@ -2,13 +2,15 @@ import { useEffect, useState } from "react"
 import { useAuth } from "./context/AuthContext"
 import AppLayout from "./layouts/AppLayout"
 import AccountPage from "./pages/AccountPage"
+import DashboardPage from "./pages/DashboardPage"
 import HomePage from "./pages/HomePage"
 import LoginPage from "./pages/LoginPage"
 import SignupPage from "./pages/SignupPage"
 import UsersPage from "./pages/UsersPage"
-import { type Page, canOpen, homePage } from "./utils/auth"
+import { type Page, type ProtectedPage, canOpen, homePage } from "./utils/auth"
 
-const PAGES: Page[] = ["login", "signup", "members", "account", "users"]
+const PAGES: Page[] = ["login", "signup", "dashboard", "members", "account", "users"]
+const isProtected = (page: Page | null): page is ProtectedPage => page !== null && page !== "login" && page !== "signup"
 
 /** The page named in the URL hash (#/members), or null when there is none. */
 function readHash(): Page | null {
@@ -30,8 +32,7 @@ export default function App() {
   // Only pages this person may open: logged-out visitors get login / sign up, everyone else their allowed pages.
   let page: Page
   if (!user) page = requested === "signup" ? "signup" : "login"
-  else if (requested === "members" || requested === "account" || requested === "users")
-    page = canOpen(user.role, requested) ? requested : homePage(user.role)
+  else if (isProtected(requested)) page = canOpen(user.role, requested) ? requested : homePage(user.role)
   else page = homePage(user.role)
 
   // Keep the address bar in step with the page shown (for example after a redirect to login).
@@ -48,6 +49,7 @@ export default function App() {
     <AppLayout page={page}>
       {page === "login" && <LoginPage />}
       {page === "signup" && <SignupPage />}
+      {page === "dashboard" && <DashboardPage />}
       {page === "members" && <HomePage />}
       {page === "account" && <AccountPage />}
       {page === "users" && <UsersPage />}
