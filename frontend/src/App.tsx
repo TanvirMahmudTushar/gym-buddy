@@ -7,12 +7,13 @@ import DashboardPage from "./pages/DashboardPage"
 import HomePage from "./pages/HomePage"
 import LoginPage from "./pages/LoginPage"
 import MembershipPage from "./pages/MembershipPage"
+import PlansPage from "./pages/PlansPage"
 import SignupPage from "./pages/SignupPage"
 import TimetablePage from "./pages/TimetablePage"
 import UsersPage from "./pages/UsersPage"
 import { type Page, type ProtectedPage, canOpen, homePage } from "./utils/auth"
 
-const PAGES: Page[] = ["login", "signup", "dashboard", "members", "classes", "membership", "timetable", "account", "users"]
+const PAGES: Page[] = ["login", "signup", "dashboard", "members", "classes", "membership", "timetable", "plans", "account", "users"]
 const isProtected = (page: Page | null): page is ProtectedPage => page !== null && page !== "login" && page !== "signup"
 
 /** The page named in the URL hash (#/members), or null when there is none. */
@@ -57,6 +58,7 @@ export default function App() {
       {page === "classes" && <ClassesPage />}
       {page === "membership" && <MembershipPage />}
       {page === "timetable" && <TimetablePage />}
+      {page === "plans" && <PlansPage />}
       {page === "account" && <AccountPage />}
       {page === "users" && <UsersPage />}
     </AppLayout>

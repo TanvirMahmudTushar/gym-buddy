@@ -425,3 +425,10 @@ class PlanRead(SQLModel):
     plan: Plan
     price: int
     duration_days: int
+
+
+class PlanUpdate(SQLModel):
+    """Both values are sent together, so a plan always has a price and a length."""
+
+    price: Annotated[int, Field(ge=1, le=10_000_000)]
+    duration_days: Annotated[int, Field(ge=1, le=3_660)]

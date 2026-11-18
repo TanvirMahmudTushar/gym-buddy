@@ -126,7 +126,7 @@ backend/
       members.py       # /api/v1/members (+ check-ins in Beta)
       auth.py          # /api/v1/auth/signup, /login
       users.py         # /api/v1/users/me (profile, change name); (Beta) change password
-      admin.py         # /api/v1/admin/stats, /users (list, change role, ban, unban)
+      admin.py         # /api/v1/admin/stats, /users (list, change role, ban, unban), /plans (set prices)
       check_ins.py     # /api/v1/check-ins/today
       classes.py       # /api/v1/classes (read: anyone logged in; change and bookings: gym manager, admin)
       plans.py         # /api/v1/plans (anyone logged in)
@@ -149,7 +149,7 @@ frontend/
     components/        # add form, member list, details panel
     context/           # AuthContext: who is logged in, login / signup / logout
     layouts/           # AppLayout: header, and the pages each role may open
-    pages/             # HomePage (members), LoginPage, SignupPage, AccountPage, DashboardPage (admin), UsersPage (admin), ClassesPage (gym manager, admin), MembershipPage and TimetablePage (user); (Later) AboutPage, MemberDetailsPage; (Beta, Could) MyMembership, Classes, AdminDashboard
+    pages/             # HomePage (members), LoginPage, SignupPage, AccountPage, DashboardPage (admin), UsersPage (admin), ClassesPage (gym manager, admin), MembershipPage and TimetablePage (user), PlansPage (admin); (Later) AboutPage, MemberDetailsPage; (Beta, Could) MyMembership, Classes, AdminDashboard
     services/          # fetch calls to the API
     types/             # TypeScript types
     utils/             # display helpers
@@ -387,6 +387,7 @@ erDiagram
 | `BookingRead` | Booking responses | `class_id`, `member_id`, `member_name`, `booked_at` | Beta |
 | `PaymentCreate` / `PaymentRead` / `PaymentPage` | Record and list payments | create: `amount`, `method`, `note?`, `renew_plan?`; read: `id`, `member_id?`, `member_name`, `amount`, `method`, `plan?`, `note?`, `paid_at`, `renewed_until?`, `recorded_by_name?` | Beta |
 | `PlanRead` | Plan prices | `plan`, `price`, `duration_days` | Beta |
+| `PlanUpdate` | Change a plan | `price` (1 to 10,000,000), `duration_days` (1 to 3,660), both required | Beta |
 | `CheckInRead` | Check-in responses | `id`, `member_id`, `member_name`, `checked_in_at`, `recorded_by_name` | Beta |
 | `CheckInPage` | Check-in lists | `items: CheckInRead[]`, `total`, `offset`, `limit` | Beta |
 
@@ -501,6 +502,7 @@ Ban rules: banning is idempotent (banning a banned user changes nothing), an adm
 | Method | Path | Who | Body | Success | Errors | FR |
 |---|---|---|---|---|---|---|
 | `GET` | `/api/v1/plans` | Any logged-in user | — | `200` `PlanRead[]` (monthly, quarterly, yearly) | `401` | FR-43 |
+| `PUT` | `/api/v1/admin/plans/{plan}` | Admin | `PlanUpdate` | `200` `PlanRead` | `401`, `403`, `422` (unknown plan or out-of-range value) | FR-47 |
 | `POST` | `/api/v1/members/{id}/payments` | Gym Manager, Admin | `PaymentCreate` | `201` `PaymentRead` (with `renew_plan`, the member's expiry and plan change too) | `403`, `404`, `422` | FR-44, FR-45 |
 | `GET` | `/api/v1/members/{id}/payments?offset&limit` | Gym Manager, Admin | — | `200` `PaymentPage` (newest first) | `403`, `404`, `422` | FR-46 |
 

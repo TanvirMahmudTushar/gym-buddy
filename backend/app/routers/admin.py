@@ -1,12 +1,23 @@
-# Admin-only endpoints under /api/v1/admin: stats, user list, roles, ban / unban (TDD 6.2).
+# Admin-only endpoints under /api/v1/admin: stats, user list, roles, ban / unban, plan prices (TDD 6.2).
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
 
 from app.database import SessionDep
 from app.deps import require_roles
-from app.models import AdminStats, AdminUserPage, AdminUserRead, BanRequest, User, UserRoleUpdate
-from app.services import stats_service, user_service
+from app.models import (
+    AdminStats,
+    AdminUserPage,
+    AdminUserRead,
+    BanRequest,
+    Plan,
+    PlanPrice,
+    PlanRead,
+    PlanUpdate,
+    User,
+    UserRoleUpdate,
+)
+from app.services import payment_service, stats_service, user_service
 
 # Every route here is for admins only (403 for everyone else).
 router = APIRouter(
@@ -48,3 +59,9 @@ def ban_user(user_id: int, session: SessionDep, admin: AdminUser, body: BanReque
 @router.post("/users/{user_id}/unban", response_model=AdminUserRead)
 def unban_user(user_id: int, session: SessionDep) -> User:
     return user_service.unban_user(session, user_id)
+
+
+@router.put("/plans/{plan}", response_model=PlanRead)
+def update_plan(plan: Plan, body: PlanUpdate, session: SessionDep) -> PlanPrice:
+    """Sets the price (whole taka) and the number of days a renewal adds. The three plans cannot be added to or removed."""
+    return payment_service.update_plan_price(session, plan, body.price, body.duration_days)

@@ -40,7 +40,7 @@ Everyone who signs up is a **User**. Only an admin can change a role.
 | Gym Manager | Everything a User can, plus manage gym members (add, edit, renew, freeze, delete), record check-ins and run the class timetable |
 | Admin | Everything a Gym Manager can, plus list users and change their roles |
 
-Pages: `#/login`, `#/signup`, `#/dashboard` (Admin), `#/members` (Gym Manager, Admin), `#/classes` (Gym Manager, Admin), `#/users` (Admin), `#/membership` and `#/timetable` (User), `#/account` (everyone). After logging in, an Admin lands on the Dashboard, a Gym Manager on Members and a User on My membership.
+Pages: `#/login`, `#/signup`, `#/dashboard` (Admin), `#/members` (Gym Manager, Admin), `#/classes` (Gym Manager, Admin), `#/users` (Admin), `#/plans` (Admin), `#/membership` and `#/timetable` (User), `#/account` (everyone). After logging in, an Admin lands on the Dashboard, a Gym Manager on Members and a User on My membership.
 
 **Gym Manager features (also available to Admins)**
 - **Check in a member:** open a member on the Members page and click **Check in**. Frozen and expired members cannot be checked in (the page says why; renew or unfreeze first). The same member can check in more than once a day.
@@ -59,6 +59,7 @@ Pages: `#/login`, `#/signup`, `#/dashboard` (Admin), `#/members` (Gym Manager, A
 
 **Admin features**
 - **Dashboard:** members (total, active, expired, frozen, new in the last 7 days), check-ins (today, last 7 days), classes (total, upcoming) and accounts (total, users, gym managers, admins, banned).
+- **Plans and prices:** the **Plans** page sets the price (whole taka) and the number of days a renewal adds for the monthly, quarterly and yearly plans. The price fills in the amount when staff take a payment, and the days decide how far a renewal extends a membership. Payments already taken are not changed.
 - **Ban / unban:** on the **Users** page, an admin can ban a User or Gym Manager with an optional reason. A banned person gets `403 Account banned` when logging in and on every request, even with a token that has not expired, and the app logs them out. Unbanning restores access with their role and data unchanged. An admin cannot ban themself or another admin; change the other admin's role first.
 
 **First admin.** Nobody can make themselves an admin. Sign up in the app, then in Supabase → **Table Editor** → `app_user`, set that row's `role` to `admin` (or run `update app_user set role = 'admin' where email = 'you@example.com';` in the SQL editor). Log in again. From then on, change roles on the **Users** page.
@@ -80,6 +81,7 @@ Interactive docs: `/api/docs` (for example http://localhost:8000/api/docs).
 | Record a payment | `POST /api/v1/members/{id}/payments` `{amount, method, note?, renew_plan?}` | `201` payment | `403`, `404`, `422` |
 | Member's payments | `GET /api/v1/members/{id}/payments?offset=0&limit=20` | `200` `{items, total, offset, limit}`, newest first | `403`, `404`, `422` |
 | Plan prices | `GET /api/v1/plans` (any logged-in user) | `200` list of `{plan, price, duration_days}` | `401` |
+| Change a plan (admin) | `PUT /api/v1/admin/plans/{plan}` `{price, duration_days}` | `200` plan | `403`, `422` |
 | Check in a member | `POST /api/v1/members/{id}/check-ins` | `201` check-in | `400` (frozen or expired), `403`, `404` |
 | Member's visits | `GET /api/v1/members/{id}/check-ins?offset=0&limit=20` | `200` `{items, total, offset, limit}`, newest first | `403`, `404`, `422` |
 | Checked in today | `GET /api/v1/check-ins/today?offset=0&limit=50` | `200` `{items, total, offset, limit}`, newest first | `401`, `403` |
