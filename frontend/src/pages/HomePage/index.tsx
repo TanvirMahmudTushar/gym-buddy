@@ -6,8 +6,8 @@ import MemberList, { type Filter } from "../../components/MemberList"
 import type { Member } from "../../types/member"
 import { errorText } from "../../utils/member"
 
-// The whole MVP is this one page: add form and member list on the left, details of the selected member on the right.
-export default function App() {
+// The members page: add form and member list on the left, details of the selected member on the right.
+export default function HomePage() {
   const [members, setMembers] = useState<Member[]>([])
   const [filter, setFilter] = useState<Filter>("all")
   const [selectedId, setSelectedId] = useState<number | null>(null)
@@ -78,38 +78,32 @@ export default function App() {
   }
 
   return (
-    <div className="page">
-      <header>
-        <h1>Gym Buddy</h1>
-        <span className="tagline">Member records for the front desk</span>
-      </header>
-      <div className="layout">
-        <div className="column">
-          <AddMemberForm onCreated={handleCreated} />
-          <MemberList
-            members={members}
-            filter={filter}
-            onFilterChange={handleFilterChange}
-            selectedId={selectedId}
-            onSelect={setSelectedId}
-            loading={loading}
-            error={error}
-            total={total}
-            loadingMore={loadingMore}
-            onLoadMore={loadMore}
-            checkedIds={checkedIds}
-            onCheckedChange={setCheckedIds}
-            onBulkDeleted={handleBulkDeleted}
-          />
-        </div>
-        <aside className="column">
-          <MemberDetail
-            memberId={selectedId}
-            onChanged={() => setReloadKey((k) => k + 1)}
-            onDeleted={handleDeleted}
-          />
-        </aside>
+    <div className="layout">
+      <div className="column">
+        <AddMemberForm onCreated={handleCreated} />
+        <MemberList
+          members={members}
+          filter={filter}
+          onFilterChange={handleFilterChange}
+          selectedId={selectedId}
+          onSelect={setSelectedId}
+          loading={loading}
+          error={error}
+          total={total}
+          loadingMore={loadingMore}
+          onLoadMore={loadMore}
+          checkedIds={checkedIds}
+          onCheckedChange={setCheckedIds}
+          onBulkDeleted={handleBulkDeleted}
+        />
       </div>
+      <aside className="column">
+        <MemberDetail
+          memberId={selectedId}
+          onChanged={() => setReloadKey((k) => k + 1)}
+          onDeleted={handleDeleted}
+        />
+      </aside>
     </div>
   )
 }

@@ -6,4 +6,6 @@ dependencies = [
     "fastapi[standard]>=0.141.1",
     "sqlmodel>=0.0.24",
     "psycopg[binary]>=3.2",
+    "argon2-cffi>=23.1",
+    "PyJWT>=2.8",
 ]

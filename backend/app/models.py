@@ -2,7 +2,7 @@
 from datetime import date, datetime, timezone
 from typing import Annotated, Literal
 
-from pydantic import StringConstraints, model_validator
+from pydantic import EmailStr, StringConstraints, model_validator
 from sqlmodel import Field, SQLModel
 
 Plan = Literal["monthly", "quarterly", "yearly"]
@@ -93,3 +93,61 @@ class MemberBulkDelete(SQLModel):
 
 class MemberBulkDeleteResult(SQLModel):
     deleted: int
+
+
+# --- Accounts and roles ---
+
+Role = Literal["user", "gym_manager", "admin"]
+Password = Annotated[str, StringConstraints(min_length=8, max_length=128)]
+
+
+class User(SQLModel, table=True):
+    # "user" is a reserved word in PostgreSQL, so the table is called app_user.
+    __tablename__ = "app_user"
+
+    id: int | None = Field(default=None, primary_key=True)
+    email: str = Field(max_length=254, unique=True, index=True)
+    name: str = Field(max_length=100)
+    password_hash: str
+    role: str = Field(default="user", max_length=20)
+    created_at: datetime = Field(default_factory=utc_now)
+
+
+class SignupRequest(SQLModel):
+    email: EmailStr
+    name: FullName
+    password: Password
+
+
+class LoginRequest(SQLModel):
+    email: EmailStr
+    password: Annotated[str, StringConstraints(max_length=128)]
+
+
+class UserRead(SQLModel):
+    id: int
+    email: str
+    name: str
+    role: Role
+    created_at: datetime
+
+
+class TokenResponse(SQLModel):
+    access_token: str
+    token_type: Literal["bearer"] = "bearer"
+    user: UserRead
+
+
+class UserPage(SQLModel):
+    items: list[UserRead]
+    total: int
+    offset: int
+    limit: int
+
+
+class UserNameUpdate(SQLModel):
+    name: FullName
+
+
+class UserRoleUpdate(SQLModel):
+    role: Role

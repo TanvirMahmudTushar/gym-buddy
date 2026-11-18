@@ -66,10 +66,11 @@ flowchart LR
 |---|---|---|
 | Anonymous client | MVP | Anyone who can reach the API; full access to the shared member list |
 | Guest | Beta | Not logged in; can only sign up, log in, check health and read the API docs |
-| Member | Beta | Logged in with global role `member`; views their own membership and check-ins, browses classes, books and cancels their own bookings |
-| Admin | Beta | Gym staff with global role `admin`: manage all members, classes and check-ins, view bookings, view dashboard stats, list users, change roles, ban / unban users |
+| User | Beta | Logged in with global role `user` (everyone who signs up); edits their own profile, views their own membership and check-ins, browses classes, books and cancels their own bookings |
+| Gym Manager | Beta | Gym staff with global role `gym_manager`: manage all members, classes and check-ins and view bookings. Cannot list users, change roles or see the dashboard |
+| Admin | Beta | Global role `admin`: everything a Gym Manager can do, plus list users, change roles, view dashboard stats, ban / unban users |
 
-`member` and `admin` are **global** roles stored on the user account. A logged-in user is linked to at most one membership record (`member.user_id`). A logged-in `member` with no linked record can log in and edit their profile but gets `404` on membership and booking endpoints until staff link their account.
+`user`, `gym_manager` and `admin` are **global** roles stored on the user account. A logged-in user is linked to at most one membership record (`member.user_id`). A logged-in `user` with no linked record can log in and edit their profile but gets `404` on membership and booking endpoints until staff link their account.
 
 ### 2.3 Use cases
 
@@ -186,13 +187,15 @@ Every Admin is also a logged-in user, so they can log out, edit their profile an
 
 | ID | Requirement | Release | Story |
 |---|---|---|---|
-| FR-12 | The system shall let a guest sign up with `email`, `name` and `password`. Email is unique (case-insensitive); a duplicate returns `409`. New users get role `member`. Signing up does not create or link a membership record. | Beta | US-09 |
+| FR-12 | The system shall let a guest sign up with `email`, `name` and `password`. Email is unique (case-insensitive); a duplicate returns `409`. New users always get role `user`; the sign-up form cannot choose a role. Signing up does not create or link a membership record. | Beta | US-09 |
 | FR-13 | The system shall log a user in with email and password, returning an access token in the body and setting a refresh token cookie. Wrong email or password returns `401` with the same message for both. | Beta | US-10 |
 | FR-14 | The system shall issue a new access token when called with a valid refresh token cookie, and replace (rotate) the refresh token. | Beta | US-10 |
 | FR-15 | The system shall log a user out by revoking the refresh token and clearing the cookie. | Beta | US-10 |
 | FR-16 | The system shall return the logged-in user's profile (`id`, `email`, `name`, `role`). The password hash is never returned. | Beta | US-10 |
 | FR-40 | A user shall be able to change their own `name`. Email and role cannot be changed through the profile. | Beta | US-23, US-24 |
 | FR-41 | A user shall be able to change their password by sending the current and the new password. A wrong current password returns `400`. On success all the user's sessions (refresh tokens) are revoked and they log in again. | Beta | US-24 |
+
+> **Built so far:** sign up, log in, own profile and rename (FR-12, FR-13, FR-16, FR-40), with one access token valid for 8 hours and no refresh cookie. Refresh tokens (FR-14, FR-15), password change (FR-41) and the login attempt limit (FR-34) come later.
 
 ### 3.3 Own membership and check-ins — Beta
 
@@ -205,17 +208,17 @@ Every Admin is also a logged-in user, so they can log out, edit their profile an
 
 | ID | Requirement | Release | Story |
 |---|---|---|---|
-| FR-19 | In the Beta, the member endpoints (`/api/v1/members`) create, list, view, update and delete shall be available to admins only. A non-admin gets `403`. | Beta | US-13 |
+| FR-19 | In the Beta, the member endpoints (`/api/v1/members`) create, list, view, update and delete shall be available to gym managers and admins only. A caller who is not logged in gets `401`; a `user` gets `403`. | Beta | US-13 |
 | FR-23 | When creating or updating a member, an admin may set `user_id` to link the record to an existing account. A user can be linked to only one member (`409` otherwise); an unknown `user_id` returns `422`. | Beta | US-13 |
 
 ### 3.5 Roles (RBAC) and admin — Beta
 
 | ID | Requirement | Release | Story |
 |---|---|---|---|
-| FR-20 | Every user shall have exactly one global role: `member` or `admin`. | Beta | US-12 |
+| FR-20 | Every user shall have exactly one global role: `user`, `gym_manager` or `admin`. | Beta | US-12 |
 | FR-21 | An admin shall be able to list all users (paginated). | Beta | US-12 |
 | FR-22 | An admin shall be able to change another user's role. An admin cannot change their own role (`400`), so the system always keeps at least one admin. | Beta | US-12 |
-| FR-24 | A non-admin calling an admin-only endpoint shall get `403`. | Beta | US-12, US-13 |
+| FR-24 | A caller whose role is not allowed on an endpoint shall get `403` (admin-only endpoints: every role except `admin`). | Beta | US-12, US-13 |
 | FR-35 | An admin shall be able to view dashboard stats: total members, active members, expired members, new members in the last 7 days, total and upcoming classes, check-ins today and in the last 7 days, and total users, admins and banned users. | Beta | US-20 |
 | FR-36 | An admin shall be able to ban a user with an optional reason. Banning revokes all the user's refresh tokens. An admin cannot ban themself or another admin (`400`); demote the admin first. | Beta | US-21 |
 | FR-37 | A banned user shall get `403` ("Account banned") on login and on every authenticated request, even with an access token that has not expired yet. | Beta | US-21 |
@@ -292,20 +295,20 @@ A new member always starts as `Active` if `expires_on` is today or later. "Expir
 
 ### 3.11 Permission matrix — Beta
 
-| Action | Guest | Member | Admin |
-|---|---|---|---|
-| Sign up, log in | Yes | — | — |
-| Log out, view own profile, change own name and password | No | Yes | Yes |
-| View own membership and check-in history | No | Yes (`404` if no membership linked) | Only if linked |
-| Create, list, view, update, delete members | No | No (`403`) | Yes |
-| Link a member record to a user account | No | No (`403`) | Yes |
-| Record or list check-ins for a member | No | No (`403`) | Yes |
-| List and view classes | No | Yes | Yes |
-| Create, edit, delete classes | No | No (`403`) | Yes |
-| View a class's bookings | No | No (`403`) | Yes |
-| Book or cancel own class booking | No | Yes (valid membership needed to book) | Only if linked |
-| List users, change roles | No | No (`403`) | Yes |
-| View dashboard stats, ban / unban users | No | No (`403`) | Yes (not self, not other admins) |
+| Action | Guest | User | Gym Manager | Admin |
+|---|---|---|---|---|
+| Sign up, log in | Yes | — | — | — |
+| Log out, view own profile, change own name and password | No | Yes | Yes | Yes |
+| View own membership and check-in history | No | Yes (`404` if no membership linked) | Only if linked | Only if linked |
+| Create, list, view, update, delete members | No | No (`403`) | Yes | Yes |
+| Link a member record to a user account | No | No (`403`) | Yes | Yes |
+| Record or list check-ins for a member | No | No (`403`) | Yes | Yes |
+| List and view classes | No | Yes | Yes | Yes |
+| Create, edit, delete classes | No | No (`403`) | Yes | Yes |
+| View a class's bookings | No | No (`403`) | Yes | Yes |
+| Book or cancel own class booking | No | Yes (valid membership needed to book) | Only if linked | Only if linked |
+| List users, change roles | No | No (`403`) | No (`403`) | Yes |
+| View dashboard stats, ban / unban users | No | No (`403`) | No (`403`) | Yes (not self, not other admins) |
 
 Every endpoint except sign up, log in, refresh, health and the docs returns `401` when no valid token is sent.
 

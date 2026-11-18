@@ -1,9 +1,10 @@
 # Member CRUD endpoints under /api/v1/members (TDD 6.1). Routes only handle HTTP; the rules live in app/services/member_service.py.
 from typing import Annotated
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 
 from app.database import SessionDep
+from app.deps import require_roles
 from app.models import (
     Member,
     MemberBulkDelete,
@@ -16,7 +17,12 @@ from app.models import (
 from app.services import member_service
 from app.services.member_service import MemberStatus
 
-router = APIRouter(prefix="/api/v1/members", tags=["members"])
+# Only gym managers and admins may touch member records (SRS FR-19).
+router = APIRouter(
+    prefix="/api/v1/members",
+    tags=["members"],
+    dependencies=[Depends(require_roles("gym_manager", "admin"))],
+)
 
 
 @router.post("", status_code=201, response_model=MemberRead)
