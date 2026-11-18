@@ -1,8 +1,7 @@
-# Member CRUD endpoints under /api/v1/members (TDD 6.1).
-from typing import Annotated, Literal
+# Member CRUD endpoints under /api/v1/members (TDD 6.1). Routes only handle HTTP; the rules live in app/services/member_service.py.
+from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Query
-from sqlmodel import Session, col, delete, func, select
+from fastapi import APIRouter, Query
 
 from app.database import SessionDep
 from app.models import (
@@ -13,30 +12,16 @@ from app.models import (
     MemberPage,
     MemberRead,
     MemberUpdate,
-    utc_now,
-    utc_today,
 )
+from app.services import member_service
+from app.services.member_service import MemberStatus
 
 router = APIRouter(prefix="/api/v1/members", tags=["members"])
-
-MemberStatus = Literal["active", "expired", "frozen"]
-
-
-def get_member_or_404(session: Session, member_id: int) -> Member:
-    member = session.get(Member, member_id)
-    if member is None:
-        raise HTTPException(status_code=404, detail="Member not found")
-    return member
 
 
 @router.post("", status_code=201, response_model=MemberRead)
 def create_member(body: MemberCreate, session: SessionDep) -> Member:
-    # Fields left out (such as joined_on) fall back to the table defaults.
-    member = Member(**body.model_dump(exclude_none=True))
-    session.add(member)
-    session.commit()
-    session.refresh(member)
-    return member
+    return member_service.create_member(session, body)
 
 
 @router.get("", response_model=MemberPage)
@@ -47,55 +32,27 @@ def list_members(
     status: MemberStatus | None = None,
 ) -> dict:
     """Newest first. A frozen member counts as frozen whatever its expiry date."""
-    today = utc_today()
-    filters = []
-    if status == "active":
-        filters = [col(Member.is_active).is_(True), Member.expires_on >= today]
-    elif status == "expired":
-        filters = [col(Member.is_active).is_(True), Member.expires_on < today]
-    elif status == "frozen":
-        filters = [col(Member.is_active).is_(False)]
-    total = session.exec(select(func.count()).select_from(Member).where(*filters)).one()
-    query = (
-        select(Member)
-        .where(*filters)
-        .order_by(col(Member.created_at).desc(), col(Member.id).desc())
-        .offset(offset)
-        .limit(limit)
-    )
-    return {"items": session.exec(query).all(), "total": total, "offset": offset, "limit": limit}
+    items, total = member_service.list_members(session, status, offset, limit)
+    return {"items": items, "total": total, "offset": offset, "limit": limit}
 
 
 @router.post("/bulk-delete", response_model=MemberBulkDeleteResult)
 def bulk_delete_members(body: MemberBulkDelete, session: SessionDep) -> dict:
     """All in one transaction. An ID that no longer exists is skipped, so deleted can be lower than the IDs sent."""
-    result = session.exec(delete(Member).where(col(Member.id).in_(body.ids)))
-    session.commit()
-    return {"deleted": result.rowcount}
+    return {"deleted": member_service.bulk_delete_members(session, body.ids)}
 
 
 @router.get("/{member_id}", response_model=MemberRead)
 def get_member(member_id: int, session: SessionDep) -> Member:
-    return get_member_or_404(session, member_id)
+    return member_service.get_member(session, member_id)
 
 
 @router.patch("/{member_id}", response_model=MemberRead)
 def update_member(member_id: int, body: MemberUpdate, session: SessionDep) -> Member:
     """Only the fields sent change. A later expires_on renews; is_active false / true freezes / unfreezes."""
-    member = get_member_or_404(session, member_id)
-    changes = body.model_dump(exclude_unset=True)
-    if "expires_on" in changes and changes["expires_on"] < member.joined_on:
-        raise HTTPException(status_code=422, detail="expires_on must be on or after joined_on")
-    member.sqlmodel_update(changes)
-    member.updated_at = utc_now()
-    session.add(member)
-    session.commit()
-    session.refresh(member)
-    return member
+    return member_service.update_member(session, member_id, body.model_dump(exclude_unset=True))
 
 
 @router.delete("/{member_id}", status_code=204)
 def delete_member(member_id: int, session: SessionDep) -> None:
-    member = get_member_or_404(session, member_id)
-    session.delete(member)
-    session.commit()
+    member_service.delete_member(session, member_id)

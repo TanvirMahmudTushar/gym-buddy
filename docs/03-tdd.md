@@ -61,12 +61,15 @@ sequenceDiagram
     participant C as Client
     participant R as Router (members.py)
     participant S as Schemas (Pydantic)
+    participant V as Service (member_service.py)
     participant D as Database (SQLModel Session)
     C->>R: POST /api/v1/members {full_name, plan, expires_on}
     R->>S: validate MemberCreate
     S-->>R: valid / 422
-    R->>D: session.add(member), commit
-    D-->>R: member with id
+    R->>V: create_member(session, data)
+    V->>D: session.add(member), commit
+    D-->>V: member with id
+    V-->>R: member
     R-->>C: 201 MemberRead
 ```
 
@@ -125,6 +128,9 @@ backend/
       users.py         # (Beta) /api/v1/users/me (profile, change name, change password)
       admin.py         # (Beta) /api/v1/admin/*
       classes.py       # (Beta) /api/v1/classes/* (classes and bookings)
+    services/
+      __init__.py
+      member_service.py  # member rules and queries; raises MemberNotFoundError / InvalidExpiryError
   alembic/             # (Beta) migration scripts
   alembic.ini          # (Beta)
   requirements.txt
@@ -144,7 +150,7 @@ docs/
   03-tdd.md
 ```
 
-Keep routers thin: validate input, check permissions through dependencies, then read/write with the session. A separate service layer is not needed at this size.
+Keep routers thin: validate input, check permissions through dependencies, then call a function in `services/`. The service holds the business rules and the database queries and raises plain Python errors (`MemberNotFoundError`, `InvalidExpiryError`); `main.py` turns them into the 404 and 422 responses.
 
 ## 5. Data model
 

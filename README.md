@@ -9,7 +9,8 @@ backend/          FastAPI app (routes under /api)
   main.py         creates the app, error handler, health check
   app/database.py engine and session (Supabase or local SQLite)
   app/models.py   Member table and request / response schemas
-  app/routers/    members.py: the five CRUD endpoints
+  app/routers/    members.py: the CRUD endpoints (HTTP only)
+  app/services/   member_service.py: member rules and database queries
 frontend/         Vite + React + TypeScript, one page (src/pages/HomePage/index.tsx)
   src/components/ add form, member list, details panel
   src/services/   memberService.ts: fetch calls to the API
