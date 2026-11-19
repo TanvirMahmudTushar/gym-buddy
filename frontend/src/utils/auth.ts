@@ -2,8 +2,8 @@
 import type { Role } from "../types/auth"
 
 export const ROLES: { value: Role; label: string; description: string }[] = [
-  { value: "user", label: "User", description: "Can log in and manage their own account." },
-  { value: "gym_manager", label: "Gym Manager", description: "Manages gym members: add, edit, renew, freeze and delete." },
+  { value: "user", label: "User", description: "A gym member: sees their own membership and books classes." },
+  { value: "gym_manager", label: "Gym Manager", description: "Manages memberships: start, edit, renew and freeze them, and delete member accounts." },
   { value: "admin", label: "Admin", description: "Everything a Gym Manager can do, plus managing users and roles." },
 ]
 

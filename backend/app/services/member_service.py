@@ -1,16 +1,19 @@
 # Member business rules and database queries, used by the routes in app/routers/members.py (TDD 4).
+# A member is a user whose account has a membership (a plan); there is no separate member table.
 from typing import Literal
 
-from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, col, delete, func, select, update
 
-from app.models import CheckIn, ClassBooking, Member, MemberCreate, Payment, User, utc_now, utc_today
+from app.models import CheckIn, ClassBooking, GymClass, MemberCreate, Payment, User, utc_today
 
 MemberStatus = Literal["active", "expired", "frozen"]
 
+# The SQL condition "this account has a membership".
+IS_MEMBER = col(User.plan).is_not(None)
+
 
 class MemberNotFoundError(Exception):
-    """No member has the given ID."""
+    """No user with a membership has the given ID."""
 
 
 class InvalidExpiryError(Exception):
@@ -18,60 +21,54 @@ class InvalidExpiryError(Exception):
 
 
 class AccountNotFoundError(Exception):
-    """user_id does not match any account."""
+    """No account has the email a membership was started for."""
 
 
-class AccountAlreadyLinkedError(Exception):
-    """That account is already linked to a different member."""
+class AlreadyMemberError(Exception):
+    """That account already has a membership."""
 
 
-class NoMembershipLinkedError(Exception):
-    """The logged-in user's account is not linked to any member record."""
+class NoMembershipError(Exception):
+    """The logged-in user has no membership yet."""
 
 
-def _check_account_link(session: Session, user_id: int, member_id: int | None) -> None:
-    if session.get(User, user_id) is None:
-        raise AccountNotFoundError(user_id)
-    other = session.exec(select(Member).where(col(Member.user_id) == user_id)).first()
-    if other is not None and other.id != member_id:
-        raise AccountAlreadyLinkedError(user_id)
+class CannotDeleteAccountError(Exception):
+    """Only a plain User's account can be deleted from the members page. The message says why not."""
 
 
-def _commit_link(session: Session) -> None:
-    try:
-        session.commit()
-    except IntegrityError as exc:
-        # Two staff linking the same account at the same moment: the unique index lets only one through.
-        session.rollback()
-        raise AccountAlreadyLinkedError from exc
+def get_own_membership(user: User) -> User:
+    """The logged-in user, if they have a membership. A user can only ever reach their own."""
+    if user.plan is None:
+        raise NoMembershipError
+    return user
 
 
-def get_own_member(session: Session, user: User) -> Member:
-    """The member record linked to this account. A user can only ever reach their own."""
-    member = session.exec(select(Member).where(col(Member.user_id) == user.id)).first()
-    if member is None:
-        raise NoMembershipLinkedError
-    return member
+def own_member_id(user: User) -> int | None:
+    return user.id if user.plan is not None else None
 
 
-def own_member_id(session: Session, user: User) -> int | None:
-    return session.exec(select(Member.id).where(col(Member.user_id) == user.id)).first()
+def start_membership(session: Session, data: MemberCreate) -> User:
+    """Give an existing account a membership. The person signs up first; their name comes from the account."""
+    user = session.exec(select(User).where(User.email == data.email.lower())).first()
+    if user is None:
+        raise AccountNotFoundError(data.email)
+    if user.plan is not None:
+        raise AlreadyMemberError(user.id)
+    user.plan = data.plan
+    user.joined_on = data.joined_on or utc_today()
+    user.expires_on = data.expires_on
+    user.is_frozen = False
+    user.phone = data.phone
+    user.notes = data.notes
+    session.add(user)
+    session.commit()
+    session.refresh(user)
+    return user
 
 
-def create_member(session: Session, data: MemberCreate) -> Member:
-    # Fields left out (such as joined_on) fall back to the table defaults.
-    if data.user_id is not None:
-        _check_account_link(session, data.user_id, None)
-    member = Member(**data.model_dump(exclude_none=True))
-    session.add(member)
-    _commit_link(session)
-    session.refresh(member)
-    return member
-
-
-def get_member(session: Session, member_id: int) -> Member:
-    member = session.get(Member, member_id)
-    if member is None:
+def get_member(session: Session, member_id: int) -> User:
+    member = session.get(User, member_id)
+    if member is None or member.plan is None:
         raise MemberNotFoundError(member_id)
     return member
 
@@ -80,61 +77,74 @@ def _status_filters(status: MemberStatus | None) -> list:
     """A frozen member counts as frozen whatever its expiry date."""
     today = utc_today()
     if status == "active":
-        return [col(Member.is_active).is_(True), Member.expires_on >= today]
+        return [col(User.is_frozen).is_(False), col(User.expires_on) >= today]
     if status == "expired":
-        return [col(Member.is_active).is_(True), Member.expires_on < today]
+        return [col(User.is_frozen).is_(False), col(User.expires_on) < today]
     if status == "frozen":
-        return [col(Member.is_active).is_(False)]
+        return [col(User.is_frozen).is_(True)]
     return []
 
 
-def list_members(
-    session: Session, status: MemberStatus | None, offset: int, limit: int
-) -> tuple[list[Member], int]:
-    """One page of members, newest first, plus how many members match the filter in total."""
-    filters = _status_filters(status)
-    total = session.exec(select(func.count()).select_from(Member).where(*filters)).one()
+def list_members(session: Session, status: MemberStatus | None, offset: int, limit: int) -> tuple[list[User], int]:
+    """One page of members, newest membership first, plus how many members match the filter in total."""
+    filters = [IS_MEMBER, *_status_filters(status)]
+    total = session.exec(select(func.count()).select_from(User).where(*filters)).one()
     query = (
-        select(Member)
+        select(User)
         .where(*filters)
-        .order_by(col(Member.created_at).desc(), col(Member.id).desc())
+        .order_by(col(User.joined_on).desc(), col(User.id).desc())
         .offset(offset)
         .limit(limit)
     )
     return list(session.exec(query).all()), total
 
 
-def update_member(session: Session, member_id: int, changes: dict) -> Member:
-    """Apply only the given fields. A later expires_on renews; is_active false / true freezes / unfreezes."""
+def update_member(session: Session, member_id: int, changes: dict) -> User:
+    """Apply only the given fields. A later expires_on renews; is_frozen true / false freezes / unfreezes."""
     member = get_member(session, member_id)
     if "expires_on" in changes and changes["expires_on"] < member.joined_on:
         raise InvalidExpiryError("expires_on must be on or after joined_on")
-    if changes.get("user_id") is not None:
-        _check_account_link(session, changes["user_id"], member.id)
     member.sqlmodel_update(changes)
-    member.updated_at = utc_now()
     session.add(member)
-    _commit_link(session)
+    session.commit()
     session.refresh(member)
     return member
 
 
-def delete_member(session: Session, member_id: int) -> None:
-    member = get_member(session, member_id)
-    # Check-ins go first: the database cascades too, but SQLite does not enforce that by default.
-    session.exec(delete(CheckIn).where(col(CheckIn.member_id) == member_id))
-    session.exec(delete(ClassBooking).where(col(ClassBooking.member_id) == member_id))
+def _check_deletable(member: User) -> None:
+    # Staff accounts are never deleted here (this also stops anyone deleting themself): an admin changes the role first.
+    if member.role != "user":
+        raise CannotDeleteAccountError(f"{member.name} is staff; only a User's account can be deleted here")
+
+
+def _delete_accounts(session: Session, ids: list[int]) -> int:
+    """Delete these accounts and what belongs to them. The caller commits."""
+    # Check-ins and bookings go first: the database cascades too, but SQLite does not enforce that by default.
+    session.exec(delete(CheckIn).where(col(CheckIn.member_id).in_(ids)))
+    session.exec(delete(ClassBooking).where(col(ClassBooking.member_id).in_(ids)))
     # Payments are kept (the revenue is real), only detached from the deleted member.
-    session.exec(update(Payment).where(col(Payment.member_id) == member_id).values(member_id=None))
-    session.delete(member)
+    session.exec(update(Payment).where(col(Payment.member_id).in_(ids)).values(member_id=None))
+    # Someone demoted from staff may have recorded check-ins or payments or created classes; those stay, unattributed.
+    session.exec(update(CheckIn).where(col(CheckIn.recorded_by).in_(ids)).values(recorded_by=None))
+    session.exec(update(Payment).where(col(Payment.recorded_by).in_(ids)).values(recorded_by=None))
+    session.exec(update(GymClass).where(col(GymClass.created_by).in_(ids)).values(created_by=None))
+    return session.exec(delete(User).where(col(User.id).in_(ids))).rowcount
+
+
+def delete_member(session: Session, member_id: int) -> None:
+    """Deletes the member's whole account: they can no longer log in."""
+    member = get_member(session, member_id)
+    _check_deletable(member)
+    _delete_accounts(session, [member_id])
     session.commit()
 
 
 def bulk_delete_members(session: Session, ids: list[int]) -> int:
-    """All in one transaction. An ID that no longer exists is skipped, so the count can be lower than len(ids)."""
-    session.exec(delete(CheckIn).where(col(CheckIn.member_id).in_(ids)))
-    session.exec(delete(ClassBooking).where(col(ClassBooking.member_id).in_(ids)))
-    session.exec(update(Payment).where(col(Payment.member_id).in_(ids)).values(member_id=None))
-    result = session.exec(delete(Member).where(col(Member.id).in_(ids)))
+    """All in one transaction. An ID that is not a member is skipped, so the count can be lower than len(ids).
+    If any of them is a staff account, nothing is deleted."""
+    members = session.exec(select(User).where(col(User.id).in_(ids), IS_MEMBER)).all()
+    for member in members:
+        _check_deletable(member)
+    deleted = _delete_accounts(session, [m.id for m in members]) if members else 0
     session.commit()
-    return result.rowcount
+    return deleted

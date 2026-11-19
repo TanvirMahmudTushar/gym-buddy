@@ -48,7 +48,7 @@ export default function CheckInSection({ member, onCheckedIn }: Props) {
       const visit = await recordCheckIn(member.id)
       setVisits((prev) => [visit, ...prev])
       setTotal((n) => n + 1)
-      setMessage(`${member.full_name} checked in at ${formatTime(visit.checked_in_at)}.`)
+      setMessage(`${member.name} checked in at ${formatTime(visit.checked_in_at)}.`)
       onCheckedIn()
     } catch (err) {
       setError(errorText(err))

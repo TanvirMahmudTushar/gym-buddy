@@ -28,14 +28,14 @@ def list_classes(
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
 ) -> dict:
     """Ordered by start time. upcoming=true leaves out classes that have already started."""
-    # is_booked_by_me is true for the classes this user's linked member has booked.
-    items, total = class_service.list_classes(session, upcoming, offset, limit, member_service.own_member_id(session, user))
+    # is_booked_by_me is true for the classes this user has booked as a member.
+    items, total = class_service.list_classes(session, upcoming, offset, limit, member_service.own_member_id(user))
     return {"items": items, "total": total, "offset": offset, "limit": limit}
 
 
 @router.get("/{class_id}", response_model=ClassRead)
 def get_class(class_id: int, session: SessionDep, user: CurrentUser) -> dict:
-    return class_service.get_class(session, class_id, member_service.own_member_id(session, user))
+    return class_service.get_class(session, class_id, member_service.own_member_id(user))
 
 
 @router.patch("/{class_id}", response_model=ClassRead)
@@ -64,12 +64,12 @@ def list_bookings(
 
 @router.post("/{class_id}/bookings", status_code=201, response_model=BookingRead)
 def book_class(class_id: int, session: SessionDep, user: CurrentUser) -> dict:
-    """Books a place for the logged-in user's own member record (404 if none is linked).
+    """Books a place for the logged-in user (404 if they have no membership).
     400 if the membership is not valid or the class has started; 409 if it is full or already booked."""
-    return class_service.book_class(session, class_id, member_service.get_own_member(session, user))
+    return class_service.book_class(session, class_id, member_service.get_own_membership(user))
 
 
 @router.delete("/{class_id}/bookings", status_code=204)
 def cancel_booking(class_id: int, session: SessionDep, user: CurrentUser) -> None:
     """Cancels the logged-in user's own booking (404 if there is none)."""
-    class_service.cancel_booking(session, class_id, member_service.get_own_member(session, user))
+    class_service.cancel_booking(session, class_id, member_service.get_own_membership(user))

@@ -1,11 +1,11 @@
 # The logged-in user's own account under /api/v1/users (TDD 6.2).
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Query, Response
 
 from app.database import SessionDep
-from app.deps import CurrentUser, require_roles
-from app.models import AccountLookup, CheckInPage, Member, MemberRead, PasswordChange, User, UserNameUpdate, UserRead
+from app.deps import CurrentUser
+from app.models import CheckInPage, MemberRead, PasswordChange, User, UserNameUpdate, UserRead
 from app.services import auth_service, checkin_service, member_service, user_service
 
 router = APIRouter(prefix="/api/v1/users", tags=["users"])
@@ -23,9 +23,9 @@ def update_me(body: UserNameUpdate, user: CurrentUser, session: SessionDep) -> U
 
 
 @router.get("/me/membership", response_model=MemberRead)
-def get_my_membership(user: CurrentUser, session: SessionDep) -> Member:
-    """The member record linked to this account, and only that one. 404 if none is linked."""
-    return member_service.get_own_member(session, user)
+def get_my_membership(user: CurrentUser) -> User:
+    """This account's own membership. 404 until staff start one."""
+    return member_service.get_own_membership(user)
 
 
 @router.get("/me/check-ins", response_model=CheckInPage)
@@ -35,8 +35,8 @@ def list_my_check_ins(
     offset: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
 ) -> dict:
-    """My visits, newest first. 404 if no membership is linked."""
-    member = member_service.get_own_member(session, user)
+    """My visits, newest first. 404 if I have no membership."""
+    member = member_service.get_own_membership(user)
     items, total = checkin_service.list_member_check_ins(session, member.id, offset, limit)
     return {"items": items, "total": total, "offset": offset, "limit": limit}
 
@@ -46,19 +46,3 @@ def change_my_password(body: PasswordChange, user: CurrentUser, session: Session
     """400 if the current password is wrong. Logins made before the change stop working."""
     auth_service.change_password(session, user, body.current_password, body.new_password)
     return Response(status_code=204)
-
-
-@router.get(
-    "/lookup",
-    response_model=AccountLookup,
-    dependencies=[Depends(require_roles("gym_manager", "admin"))],
-)
-def lookup_account(
-    session: SessionDep,
-    email: str | None = None,
-    id: Annotated[int | None, Query(gt=0, le=2_147_483_647)] = None,
-) -> User:
-    """Gym managers and admins find an account by exact email or by ID, to link it to a member."""
-    if (email is None) == (id is None):
-        raise HTTPException(status_code=422, detail="Give either email or id")
-    return user_service.find_account(session, email, id)

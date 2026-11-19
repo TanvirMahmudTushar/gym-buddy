@@ -1,4 +1,5 @@
-# The member table and the request / response schemas built on it (TDD 5.1, 5.3).
+# The tables and the request / response schemas built on them (TDD 5.1, 5.3).
+# There is no separate member table: a member is a user whose account has a membership (a plan).
 from datetime import date, datetime, timezone
 from typing import Annotated, Literal
 
@@ -29,19 +30,31 @@ def utc_today() -> date:
     return utc_now().date()
 
 
-class Member(SQLModel, table=True):
+class User(SQLModel, table=True):
+    """A login account. Once staff start a membership (set a plan) the user is also a gym member."""
+
+    # "user" is a reserved word in PostgreSQL, so the table is called app_user.
+    __tablename__ = "app_user"
+
     id: int | None = Field(default=None, primary_key=True)
-    full_name: str = Field(max_length=100)
-    phone: str | None = Field(default=None, max_length=20)
-    plan: str = Field(max_length=10)
-    joined_on: date = Field(default_factory=utc_today)
-    expires_on: date
-    is_active: bool = True
-    notes: str | None = Field(default=None, max_length=500)
-    # The login account this record belongs to, if any. One account can be linked to only one member.
-    user_id: int | None = Field(default=None, foreign_key="app_user.id", unique=True, index=True)
+    email: str = Field(max_length=254, unique=True, index=True)
+    name: str = Field(max_length=100)
+    password_hash: str
+    role: str = Field(default="user", max_length=20)
+    is_banned: bool = False
+    banned_at: datetime | None = None
+    ban_reason: str | None = Field(default=None, max_length=500)
+    # Tokens issued before this moment stop working (set when the password is changed).
+    password_changed_at: datetime | None = None
     created_at: datetime = Field(default_factory=utc_now)
-    updated_at: datetime = Field(default_factory=utc_now)
+    # Membership. plan is None until staff start one; joined_on and expires_on are set together with it.
+    plan: str | None = Field(default=None, max_length=10)
+    joined_on: date | None = None
+    expires_on: date | None = None
+    # A frozen membership cannot check in or book, whatever its expiry date.
+    is_frozen: bool = False
+    phone: str | None = Field(default=None, max_length=20)
+    notes: str | None = Field(default=None, max_length=500)
 
 
 class CheckIn(SQLModel, table=True):
@@ -50,19 +63,21 @@ class CheckIn(SQLModel, table=True):
     __tablename__ = "check_in"
 
     id: int | None = Field(default=None, primary_key=True)
-    member_id: int = Field(foreign_key="member.id", ondelete="CASCADE", index=True)
+    # The member who arrived: the user's id.
+    member_id: int = Field(foreign_key="app_user.id", ondelete="CASCADE", index=True)
     checked_in_at: datetime = Field(default_factory=utc_now, index=True)
     recorded_by: int | None = Field(default=None, foreign_key="app_user.id")
 
 
 class MemberCreate(SQLModel):
-    full_name: FullName
+    """Start a membership on an account that already exists: the person signs up first."""
+
+    email: EmailStr
     phone: str | None = Field(default=None, max_length=20)
     plan: Plan
     joined_on: date | None = None
     expires_on: date
     notes: str | None = Field(default=None, max_length=500)
-    user_id: int | None = None
 
     @model_validator(mode="after")
     def check_dates(self) -> "MemberCreate":
@@ -72,36 +87,34 @@ class MemberCreate(SQLModel):
 
 
 class MemberUpdate(SQLModel):
-    full_name: FullName | None = None
+    name: FullName | None = None
     phone: str | None = Field(default=None, max_length=20)
     plan: Plan | None = None
     expires_on: date | None = None
-    is_active: bool | None = None
+    is_frozen: bool | None = None
     notes: str | None = Field(default=None, max_length=500)
-    # null unlinks the account
-    user_id: int | None = None
 
     @model_validator(mode="after")
     def check_required_not_null(self) -> "MemberUpdate":
-        # These columns are NOT NULL, so they may be left out but not sent as null.
-        for name in ("full_name", "plan", "expires_on", "is_active"):
+        # A member always has these, so they may be left out but not sent as null.
+        for name in ("name", "plan", "expires_on", "is_frozen"):
             if name in self.model_fields_set and getattr(self, name) is None:
                 raise ValueError(f"{name} cannot be null")
         return self
 
 
 class MemberRead(SQLModel):
+    """A member: the user's account details plus their membership. id is the user's id."""
+
     id: int
-    full_name: str
+    name: str
+    email: str
     phone: str | None
     plan: Plan
     joined_on: date
     expires_on: date
-    is_active: bool
+    is_frozen: bool
     notes: str | None
-    user_id: int | None
-    created_at: datetime
-    updated_at: datetime
 
 
 class MemberPage(SQLModel):
@@ -125,23 +138,6 @@ class MemberBulkDeleteResult(SQLModel):
 
 Role = Literal["user", "gym_manager", "admin"]
 Password = Annotated[str, StringConstraints(min_length=8, max_length=128)]
-
-
-class User(SQLModel, table=True):
-    # "user" is a reserved word in PostgreSQL, so the table is called app_user.
-    __tablename__ = "app_user"
-
-    id: int | None = Field(default=None, primary_key=True)
-    email: str = Field(max_length=254, unique=True, index=True)
-    name: str = Field(max_length=100)
-    password_hash: str
-    role: str = Field(default="user", max_length=20)
-    is_banned: bool = False
-    banned_at: datetime | None = None
-    ban_reason: str | None = Field(default=None, max_length=500)
-    # Tokens issued before this moment stop working (set when the password is changed).
-    password_changed_at: datetime | None = None
-    created_at: datetime = Field(default_factory=utc_now)
 
 
 class SignupRequest(SQLModel):
@@ -270,7 +266,8 @@ class ClassBooking(SQLModel, table=True):
     __tablename__ = "class_booking"
 
     class_id: int = Field(foreign_key="gym_class.id", ondelete="CASCADE", primary_key=True)
-    member_id: int = Field(foreign_key="member.id", ondelete="CASCADE", primary_key=True, index=True)
+    # The member who booked: the user's id.
+    member_id: int = Field(foreign_key="app_user.id", ondelete="CASCADE", primary_key=True, index=True)
     booked_at: datetime = Field(default_factory=utc_now)
 
 
@@ -345,13 +342,7 @@ class BookingPage(SQLModel):
     limit: int
 
 
-# --- Account lookup (for staff linking a member to an account) and password change ---
-
-
-class AccountLookup(SQLModel):
-    id: int
-    name: str
-    email: str
+# --- Password change ---
 
 
 class PasswordChange(SQLModel):
@@ -381,8 +372,8 @@ class Payment(SQLModel, table=True):
     __tablename__ = "payment"
 
     id: int | None = Field(default=None, primary_key=True)
-    # null once the member is deleted: the payment, and so the revenue, stays on record.
-    member_id: int | None = Field(default=None, foreign_key="member.id", ondelete="SET NULL", index=True)
+    # The member who paid (the user's id); null once their account is deleted, so the revenue stays on record.
+    member_id: int | None = Field(default=None, foreign_key="app_user.id", ondelete="SET NULL", index=True)
     member_name: str = Field(max_length=100)
     amount: int
     method: str = Field(max_length=20)

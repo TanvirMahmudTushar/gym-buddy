@@ -3,24 +3,26 @@ from datetime import timedelta
 
 from sqlmodel import Session, col, func, select
 
-from app.models import Member, User, utc_now, utc_today
+from app.models import User, utc_now, utc_today
 from app.services import checkin_service, class_service
+from app.services.member_service import IS_MEMBER
 
 
-def _count(session: Session, *filters) -> int:
-    return session.exec(select(func.count()).select_from(Member).where(*filters)).one()
+def _count_members(session: Session, *filters) -> int:
+    return session.exec(select(func.count()).select_from(User).where(IS_MEMBER, *filters)).one()
 
 
 def member_stats(session: Session) -> dict:
     """Same rules as the member list: a frozen member counts as frozen whatever its expiry date."""
     today = utc_today()
-    active = col(Member.is_active).is_(True)
+    not_frozen = col(User.is_frozen).is_(False)
     return {
-        "total": _count(session),
-        "active": _count(session, active, Member.expires_on >= today),
-        "expired": _count(session, active, Member.expires_on < today),
-        "frozen": _count(session, col(Member.is_active).is_(False)),
-        "new_last_7_days": _count(session, Member.created_at >= utc_now() - timedelta(days=7)),
+        "total": _count_members(session),
+        "active": _count_members(session, not_frozen, col(User.expires_on) >= today),
+        "expired": _count_members(session, not_frozen, col(User.expires_on) < today),
+        "frozen": _count_members(session, col(User.is_frozen).is_(True)),
+        # Memberships started in the last 7 days (joined_on is a date, so today counts as day one).
+        "new_last_7_days": _count_members(session, col(User.joined_on) > today - timedelta(days=7)),
     }
 
 

@@ -77,12 +77,11 @@ def record_payment(session: Session, member_id: int, data: PaymentCreate, record
         renewed_until = max(utc_today(), member.expires_on) + timedelta(days=days)
         member.expires_on = renewed_until
         member.plan = data.renew_plan
-        member.updated_at = utc_now()
         session.add(member)
     payment = Payment(
         member_id=member.id,
-        # Kept on the payment so the record still reads correctly after the member is deleted.
-        member_name=member.full_name,
+        # Kept on the payment so the record still reads correctly after the member's account is deleted.
+        member_name=member.name,
         amount=data.amount,
         method=data.method,
         plan=data.renew_plan,

@@ -1,9 +1,10 @@
 # Check-ins: a gym manager or admin records when a member arrives (SRS FR-30 to FR-32).
 from datetime import datetime, time, timezone
 
+from sqlalchemy.orm import aliased
 from sqlmodel import Session, col, func, select
 
-from app.models import CheckIn, Member, User, utc_today
+from app.models import CheckIn, User, utc_today
 from app.services import member_service
 
 
@@ -11,8 +12,12 @@ class MembershipNotValidError(Exception):
     """The member is frozen or expired, so they cannot be checked in. The message says which."""
 
 
-def check_membership_valid(member: Member) -> None:
-    if not member.is_active:
+# The user who recorded a check-in, joined next to the member (also a user) who arrived.
+Recorder = aliased(User)
+
+
+def check_membership_valid(member: User) -> None:
+    if member.is_frozen:
         raise MembershipNotValidError("Membership is frozen")
     if member.expires_on < utc_today():
         raise MembershipNotValidError(f"Membership expired on {member.expires_on.isoformat()}")
@@ -37,10 +42,10 @@ def _page(session: Session, filters: list, offset: int, limit: int) -> tuple[lis
     """Check-ins matching the filters, newest first, with the member's and the recorder's names."""
     total = session.exec(select(func.count()).select_from(CheckIn).where(*filters)).one()
     query = (
-        select(CheckIn, Member.full_name, User.name)
-        .join(Member, col(CheckIn.member_id) == col(Member.id))
+        select(CheckIn, User.name, Recorder.name)
+        .join(User, col(CheckIn.member_id) == col(User.id))
         # Outer join: the check-in stays listed even if the account that recorded it is gone.
-        .join(User, col(CheckIn.recorded_by) == col(User.id), isouter=True)
+        .join(Recorder, col(CheckIn.recorded_by) == col(Recorder.id), isouter=True)
         .where(*filters)
         .order_by(col(CheckIn.checked_in_at).desc(), col(CheckIn.id).desc())
         .offset(offset)
@@ -57,7 +62,7 @@ def record_check_in(session: Session, member_id: int, recorded_by: User) -> dict
     session.add(check_in)
     session.commit()
     session.refresh(check_in)
-    return _read(check_in, member.full_name, recorded_by.name)
+    return _read(check_in, member.name, recorded_by.name)
 
 
 def list_member_check_ins(session: Session, member_id: int, offset: int, limit: int) -> tuple[list[dict], int]:

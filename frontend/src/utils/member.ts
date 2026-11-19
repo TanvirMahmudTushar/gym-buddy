@@ -14,7 +14,7 @@ export const todayUtc = () => new Date().toISOString().slice(0, 10)
 
 /** Frozen wins over expired, matching the backend's status filter. */
 export function memberStatus(member: Member): MemberStatus {
-  if (!member.is_active) return "frozen"
+  if (member.is_frozen) return "frozen"
   return member.expires_on < todayUtc() ? "expired" : "active"
 }
 
