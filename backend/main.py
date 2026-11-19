@@ -23,11 +23,12 @@ from app.services.class_service import (
     ClassStartedError,
 )
 from app.services.member_service import (
-    AccountAlreadyLinkedError,
     AccountNotFoundError,
+    AlreadyMemberError,
+    CannotDeleteAccountError,
     InvalidExpiryError,
     MemberNotFoundError,
-    NoMembershipLinkedError,
+    NoMembershipError,
 )
 from app.services.user_service import CannotBanError, CannotChangeOwnRoleError, UserNotFoundError
 
@@ -64,6 +65,11 @@ async def invalid_expiry(request: Request, exc: InvalidExpiryError) -> JSONRespo
     return JSONResponse(status_code=422, content={"detail": str(exc)})
 
 
+@app.exception_handler(CannotDeleteAccountError)
+async def cannot_delete_account(request: Request, exc: CannotDeleteAccountError) -> JSONResponse:
+    return JSONResponse(status_code=400, content={"detail": str(exc)})
+
+
 @app.exception_handler(MembershipNotValidError)
 async def membership_not_valid(request: Request, exc: MembershipNotValidError) -> JSONResponse:
     return JSONResponse(status_code=400, content={"detail": str(exc)})
@@ -88,9 +94,9 @@ def _plain_error(exc_type: type[Exception], status_code: int, detail: str) -> No
     app.add_exception_handler(exc_type, handler)
 
 
-_plain_error(AccountNotFoundError, 422, "No account has that ID")
-_plain_error(AccountAlreadyLinkedError, 409, "That account is already linked to another member")
-_plain_error(NoMembershipLinkedError, 404, "No membership is linked to your account")
+_plain_error(AccountNotFoundError, 422, "No account has that email. Ask the person to sign up first.")
+_plain_error(AlreadyMemberError, 409, "That account already has a membership")
+_plain_error(NoMembershipError, 404, "You do not have a membership yet")
 _plain_error(WrongPasswordError, 400, "Current password is wrong")
 _plain_error(ClassStartedError, 400, "This class has already started")
 _plain_error(ClassFullError, 409, "This class is full")

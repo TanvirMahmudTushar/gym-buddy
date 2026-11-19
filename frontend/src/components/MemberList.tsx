@@ -87,12 +87,12 @@ export default function MemberList(props: Props) {
                 <td className="check" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
                   <input
                     type="checkbox"
-                    aria-label={`Select ${m.full_name}`}
+                    aria-label={`Select ${m.name}`}
                     checked={checkedIds.includes(m.id)}
                     onChange={() => toggleChecked(m.id)}
                   />
                 </td>
-                <td className="name">{m.full_name}</td>
+                <td className="name">{m.name}</td>
                 <td>{planLabel(m.plan)}</td>
                 <td>{formatDate(m.expires_on)}</td>
                 <td>

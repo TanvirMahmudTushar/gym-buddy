@@ -11,7 +11,7 @@ interface Props {
 
 export default function EditMemberForm({ member, saving, onSave, onCancel }: Props) {
   const [form, setForm] = useState({
-    full_name: member.full_name,
+    name: member.name,
     phone: member.phone ?? "",
     plan: member.plan,
     notes: member.notes ?? "",
@@ -20,13 +20,13 @@ export default function EditMemberForm({ member, saving, onSave, onCancel }: Pro
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault()
-    if (!form.full_name.trim()) {
+    if (!form.name.trim()) {
       setNameError("Enter the member's name.")
       return
     }
     setNameError("")
     onSave({
-      full_name: form.full_name.trim(),
+      name: form.name.trim(),
       phone: form.phone.trim() || null,
       plan: form.plan,
       notes: form.notes.trim() || null,
@@ -39,8 +39,8 @@ export default function EditMemberForm({ member, saving, onSave, onCancel }: Pro
         <label htmlFor="edit-name">Full name</label>
         <input
           id="edit-name"
-          value={form.full_name}
-          onChange={(e) => setForm({ ...form, full_name: e.target.value })}
+          value={form.name}
+          onChange={(e) => setForm({ ...form, name: e.target.value })}
           maxLength={100}
           autoComplete="off"
         />

@@ -1,5 +1,4 @@
 // fetch helpers for the member REST API (/api/v1/members); managers and admins only.
-import type { AccountLookup } from "../types/auth"
 import { request } from "./api"
 import type { Member, MemberBulkDeleteResult, MemberCreate, MemberPage, MemberStatus, MemberUpdate } from "../types/member"
 
@@ -14,19 +13,15 @@ export function listMembers(offset: number, status: MemberStatus | null): Promis
 
 export const getMember = (id: number) => request<Member>(`${BASE}/${id}`)
 
+/** Starts a membership on an existing account, found by its email. */
 export const createMember = (body: MemberCreate) =>
   request<Member>(BASE, { method: "POST", body: JSON.stringify(body) })
 
 export const updateMember = (id: number, body: MemberUpdate) =>
   request<Member>(`${BASE}/${id}`, { method: "PATCH", body: JSON.stringify(body) })
 
+/** Deletes the member's whole account. */
 export const deleteMember = (id: number) => request<void>(`${BASE}/${id}`, { method: "DELETE" })
 
 export const deleteMembers = (ids: number[]) =>
   request<MemberBulkDeleteResult>(`${BASE}/bulk-delete`, { method: "POST", body: JSON.stringify({ ids }) })
-
-// Staff find the account to link to a member by exact email or by ID.
-export const lookupAccountByEmail = (email: string) =>
-  request<AccountLookup>(`/api/v1/users/lookup?${new URLSearchParams({ email })}`)
-
-export const lookupAccountById = (id: number) => request<AccountLookup>(`/api/v1/users/lookup?id=${id}`)

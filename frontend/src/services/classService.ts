@@ -20,7 +20,7 @@ export const deleteClass = (id: number) => request<void>(`${BASE}/${id}`, { meth
 
 export const listBookings = (id: number): Promise<BookingPage> => request<BookingPage>(`${BASE}/${id}/bookings?limit=100`)
 
-// A member books or cancels for themself only; the API uses the logged-in account's linked member.
+// A member books or cancels for themself only; the API uses the logged-in account's own membership.
 export const bookClass = (id: number) => request<Booking>(`${BASE}/${id}/bookings`, { method: "POST" })
 
 export const cancelBooking = (id: number) => request<void>(`${BASE}/${id}/bookings`, { method: "DELETE" })

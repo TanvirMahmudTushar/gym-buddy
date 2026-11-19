@@ -3,7 +3,7 @@ from sqlalchemy import exists, false
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, col, delete, func, select
 
-from app.models import ClassBooking, ClassCreate, GymClass, Member, User, as_utc, utc_now
+from app.models import ClassBooking, ClassCreate, GymClass, User, as_utc, utc_now
 from app.services import checkin_service
 
 
@@ -129,8 +129,8 @@ def list_bookings(session: Session, class_id: int, offset: int, limit: int) -> t
     _get(session, class_id)
     total = _count_bookings(session, class_id)
     query = (
-        select(ClassBooking, Member.full_name)
-        .join(Member, col(ClassBooking.member_id) == col(Member.id))
+        select(ClassBooking, User.name)
+        .join(User, col(ClassBooking.member_id) == col(User.id))
         .where(col(ClassBooking.class_id) == class_id)
         .order_by(col(ClassBooking.booked_at), col(ClassBooking.member_id))
         .offset(offset)
@@ -149,7 +149,7 @@ def class_stats(session: Session) -> dict:
     return {"total": total, "upcoming": upcoming}
 
 
-def book_class(session: Session, class_id: int, member: Member) -> dict:
+def book_class(session: Session, class_id: int, member: User) -> dict:
     """A member books a place (SRS FR-29)."""
     # Locking the class row (on PostgreSQL) makes two people booking the last place take turns,
     # so the capacity is never exceeded. SQLite ignores the lock but runs one write at a time.
@@ -174,12 +174,12 @@ def book_class(session: Session, class_id: int, member: Member) -> dict:
     return {
         "class_id": booking.class_id,
         "member_id": booking.member_id,
-        "member_name": member.full_name,
+        "member_name": member.name,
         "booked_at": booking.booked_at,
     }
 
 
-def cancel_booking(session: Session, class_id: int, member: Member) -> None:
+def cancel_booking(session: Session, class_id: int, member: User) -> None:
     """A member cancels their own booking; nobody can cancel for someone else."""
     _get(session, class_id)
     booking = session.get(ClassBooking, (class_id, member.id))

@@ -54,11 +54,29 @@ _ADDED_COLUMNS = [
     ("app_user", "banned_at", "TIMESTAMP"),
     ("app_user", "ban_reason", "VARCHAR(500)"),
     ("app_user", "password_changed_at", "TIMESTAMP"),
-    ("member", "user_id", "INTEGER REFERENCES app_user (id)"),
+    # The membership now lives on the account (there is no member table any more).
+    ("app_user", "plan", "VARCHAR(10)"),
+    ("app_user", "joined_on", "DATE"),
+    ("app_user", "expires_on", "DATE"),
+    ("app_user", "is_frozen", "BOOLEAN NOT NULL DEFAULT FALSE"),
+    ("app_user", "phone", "VARCHAR(20)"),
+    ("app_user", "notes", "VARCHAR(500)"),
 ]
 
-# One account can be linked to only one member. Same name as the index create_all() makes on a new database.
-_ADDED_UNIQUE_INDEXES = [("ix_member_user_id", "member", "user_id")]
+# Before members became users, these tables pointed at member.id. They are dropped (data and all) and
+# create_all() makes them again pointing at app_user.id. Dependent tables first, member last.
+_OLD_MEMBER_TABLES = ["check_in", "class_booking", "payment", "member"]
+
+
+def _drop_old_member_tables() -> None:
+    """Runs only on a database that still has the old member table; a no-op from then on."""
+    with engine.begin() as conn:
+        if not inspect(conn).has_table("member"):
+            return
+        # CASCADE also drops foreign keys other tables still hold on these (PostgreSQL only; SQLite has no CASCADE).
+        cascade = " CASCADE" if engine.dialect.name == "postgresql" else ""
+        for table in _OLD_MEMBER_TABLES:
+            conn.execute(text(f"DROP TABLE IF EXISTS {table}{cascade}"))
 
 
 def _add_missing_columns() -> None:
@@ -70,8 +88,6 @@ def _add_missing_columns() -> None:
         for table, column, definition in _ADDED_COLUMNS:
             if column not in existing[table]:
                 conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {guard}{column} {definition}"))
-        for name, table, column in _ADDED_UNIQUE_INDEXES:
-            conn.execute(text(f"CREATE UNIQUE INDEX IF NOT EXISTS {name} ON {table} ({column})"))
 
 
 def _seed_plan_prices() -> None:
@@ -89,9 +105,10 @@ def _seed_plan_prices() -> None:
 
 
 def create_db_and_tables() -> None:
-    """Create missing tables and columns; existing data is kept."""
+    """Create missing tables and columns; existing data is kept, except the old member data (see above)."""
     from app import models  # noqa: F401  (registers the tables on SQLModel.metadata)
 
+    _drop_old_member_tables()
     SQLModel.metadata.create_all(engine)
     _add_missing_columns()
     _seed_plan_prices()

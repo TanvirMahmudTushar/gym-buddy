@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react"
 import StatusPill from "../../components/StatusPill"
+import { useAuth } from "../../context/AuthContext"
 import { ApiError } from "../../services/api"
 import { getMyMembership, listMyCheckIns } from "../../services/meService"
 import type { CheckIn } from "../../types/checkIn"
@@ -21,8 +22,9 @@ function expiryNote(expiresOn: string): string {
 
 // A User's own membership and visits. They can only ever see their own record.
 export default function MembershipPage() {
+  const { user } = useAuth()
   const [member, setMember] = useState<Member | null>(null)
-  const [notLinked, setNotLinked] = useState(false)
+  const [noMembership, setNoMembership] = useState(false)
   const [visits, setVisits] = useState<CheckIn[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -40,7 +42,7 @@ export default function MembershipPage() {
       })
       .catch((err) => {
         if (ignore) return
-        if (err instanceof ApiError && err.status === 404) setNotLinked(true)
+        if (err instanceof ApiError && err.status === 404) setNoMembership(true)
         else setError(errorText(err))
       })
       .finally(() => !ignore && setLoading(false))
@@ -64,12 +66,15 @@ export default function MembershipPage() {
 
   if (loading) return <p className="empty">Loading your membership…</p>
 
-  if (notLinked)
+  if (noMembership)
     return (
       <section className="card narrow-card" aria-labelledby="membership-heading">
         <h2 id="membership-heading">My membership</h2>
-        <p>Your account is not linked to a gym membership yet.</p>
-        <p className="hint">Ask the front desk to link your account to your membership, then come back to this page.</p>
+        <p>You do not have a gym membership yet.</p>
+        <p className="hint">
+          Ask the front desk to start one for {user ? <strong>{user.email}</strong> : "your account"}, then come back to
+          this page.
+        </p>
       </section>
     )
 
@@ -90,7 +95,7 @@ export default function MembershipPage() {
         </div>
         <dl className="facts">
           <dt>Name</dt>
-          <dd>{member.full_name}</dd>
+          <dd>{member.name}</dd>
           <dt>Plan</dt>
           <dd>{planLabel(member.plan)}</dd>
           <dt>Joined</dt>

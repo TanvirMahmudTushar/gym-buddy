@@ -48,7 +48,9 @@ export default function BulkDeleteBar({ ids, onDeleted, onClear }: Props) {
       {tooMany && <p className="error">Select up to {MAX_AT_ONCE} members at a time.</p>}
       {confirming && !tooMany && (
         <div className="confirm" role="alertdialog" aria-labelledby="bulk-confirm-text">
-          <span id="bulk-confirm-text">Delete {label}? This cannot be undone.</span>
+          <span id="bulk-confirm-text">
+            Delete the accounts of {label}? Their logins, check-ins and bookings are removed. This cannot be undone.
+          </span>
           <div className="actions">
             <button type="button" className="danger solid" onClick={remove} disabled={busy}>
               {busy ? "Deleting…" : `Yes, delete ${label}`}

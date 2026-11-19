@@ -1,4 +1,5 @@
 # Member CRUD endpoints under /api/v1/members (TDD 6.1). Routes only handle HTTP; the rules live in app/services/member_service.py.
+# A member is a user with a membership, so {member_id} is the user's id.
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
@@ -8,7 +9,6 @@ from app.deps import CurrentUser, require_roles
 from app.models import (
     CheckInPage,
     CheckInRead,
-    Member,
     MemberBulkDelete,
     MemberBulkDeleteResult,
     MemberCreate,
@@ -18,6 +18,7 @@ from app.models import (
     PaymentCreate,
     PaymentPage,
     PaymentRead,
+    User,
 )
 from app.services import checkin_service, member_service, payment_service
 from app.services.member_service import MemberStatus
@@ -31,8 +32,10 @@ router = APIRouter(
 
 
 @router.post("", status_code=201, response_model=MemberRead)
-def create_member(body: MemberCreate, session: SessionDep) -> Member:
-    return member_service.create_member(session, body)
+def create_member(body: MemberCreate, session: SessionDep) -> User:
+    """Starts a membership on the account with this email (the person signs up first).
+    422 if no account has the email; 409 if that account already has a membership."""
+    return member_service.start_membership(session, body)
 
 
 @router.get("", response_model=MemberPage)
@@ -42,25 +45,26 @@ def list_members(
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
     status: MemberStatus | None = None,
 ) -> dict:
-    """Newest first. A frozen member counts as frozen whatever its expiry date."""
+    """Newest membership first. A frozen member counts as frozen whatever its expiry date."""
     items, total = member_service.list_members(session, status, offset, limit)
     return {"items": items, "total": total, "offset": offset, "limit": limit}
 
 
 @router.post("/bulk-delete", response_model=MemberBulkDeleteResult)
 def bulk_delete_members(body: MemberBulkDelete, session: SessionDep) -> dict:
-    """All in one transaction. An ID that no longer exists is skipped, so deleted can be lower than the IDs sent."""
+    """Deletes the members' accounts, all in one transaction. An ID that is not a member is skipped, so deleted can
+    be lower than the IDs sent. 400 (and nothing deleted) if any of them is a gym manager or admin."""
     return {"deleted": member_service.bulk_delete_members(session, body.ids)}
 
 
 @router.get("/{member_id}", response_model=MemberRead)
-def get_member(member_id: int, session: SessionDep) -> Member:
+def get_member(member_id: int, session: SessionDep) -> User:
     return member_service.get_member(session, member_id)
 
 
 @router.patch("/{member_id}", response_model=MemberRead)
-def update_member(member_id: int, body: MemberUpdate, session: SessionDep) -> Member:
-    """Only the fields sent change. A later expires_on renews; is_active false / true freezes / unfreezes."""
+def update_member(member_id: int, body: MemberUpdate, session: SessionDep) -> User:
+    """Only the fields sent change. A later expires_on renews; is_frozen true / false freezes / unfreezes."""
     return member_service.update_member(session, member_id, body.model_dump(exclude_unset=True))
 
 
@@ -102,4 +106,6 @@ def list_member_payments(
 
 @router.delete("/{member_id}", status_code=204)
 def delete_member(member_id: int, session: SessionDep) -> None:
+    """Deletes the member's account with their check-ins and bookings; payments stay on record.
+    400 for a gym manager or admin: change their role first."""
     member_service.delete_member(session, member_id)

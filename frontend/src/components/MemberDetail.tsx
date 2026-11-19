@@ -4,7 +4,6 @@ import type { Member, MemberUpdate } from "../types/member"
 import { errorText, formatDate, memberStatus, planLabel } from "../utils/member"
 import CheckInSection from "./CheckInSection"
 import EditMemberForm from "./EditMemberForm"
-import LinkedAccount from "./LinkedAccount"
 import PaymentSection from "./PaymentSection"
 import StatusPill from "./StatusPill"
 
@@ -142,12 +141,14 @@ export default function MemberDetail({ memberId, onChanged, onDeleted, onChecked
   return (
     <section className="card panel" aria-labelledby="detail-heading">
       <div className="detail-head">
-        <h2 id="detail-heading">{member.full_name}</h2>
+        <h2 id="detail-heading">{member.name}</h2>
         <StatusPill status={memberStatus(member)} />
       </div>
       <dl>
         <dt>ID</dt>
         <dd>{member.id}</dd>
+        <dt>Email</dt>
+        <dd>{member.email}</dd>
         <dt>Phone</dt>
         <dd>{member.phone || "Not provided"}</dd>
         <dt>Plan</dt>
@@ -159,14 +160,6 @@ export default function MemberDetail({ memberId, onChanged, onDeleted, onChecked
         <dt>Notes</dt>
         <dd>{member.notes || "None"}</dd>
       </dl>
-      <hr className="separator" />
-      <LinkedAccount
-        member={member}
-        onUpdated={(updated) => {
-          setMember(updated)
-          onChanged(updated)
-        }}
-      />
       <hr className="separator" />
       <CheckInSection key={member.id} member={member} onCheckedIn={onCheckedIn} />
       <hr className="separator" />
@@ -199,8 +192,8 @@ export default function MemberDetail({ memberId, onChanged, onDeleted, onChecked
         >
           Edit
         </button>
-        <button type="button" onClick={() => save({ is_active: !member.is_active })} disabled={busy}>
-          {member.is_active ? "Freeze" : "Unfreeze"}
+        <button type="button" onClick={() => save({ is_frozen: !member.is_frozen })} disabled={busy}>
+          {member.is_frozen ? "Unfreeze" : "Freeze"}
         </button>
         <button type="button" className="danger" onClick={() => setConfirmingDelete(true)} disabled={busy}>
           Delete
@@ -208,7 +201,10 @@ export default function MemberDetail({ memberId, onChanged, onDeleted, onChecked
       </div>
       {confirmingDelete && (
         <div className="confirm" role="alertdialog" aria-labelledby="confirm-text">
-          <span id="confirm-text">Delete {member.full_name}? This cannot be undone.</span>
+          <span id="confirm-text">
+            Delete {member.name}'s account? They can no longer log in, and their check-ins and bookings are removed.
+            Payments stay on record. This cannot be undone.
+          </span>
           <div className="actions">
             <button type="button" className="danger solid" onClick={remove} disabled={busy}>
               {busy ? "Deleting…" : "Yes, delete"}

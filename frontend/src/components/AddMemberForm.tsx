@@ -3,11 +3,12 @@ import { createMember } from "../services/memberService"
 import type { Member, Plan } from "../types/member"
 import { PLANS, errorText, formatDate, todayUtc } from "../utils/member"
 
-const EMPTY = { full_name: "", phone: "", plan: "monthly" as Plan, expires_on: "", notes: "" }
+const EMPTY = { email: "", phone: "", plan: "monthly" as Plan, expires_on: "", notes: "" }
 
+// Members are users: the person signs up first, then staff start a membership on that account by its email.
 export default function AddMemberForm({ onCreated }: { onCreated: (member: Member) => void }) {
   const [form, setForm] = useState(EMPTY)
-  const [fieldErrors, setFieldErrors] = useState<{ full_name?: string; expires_on?: string }>({})
+  const [fieldErrors, setFieldErrors] = useState<{ email?: string; expires_on?: string }>({})
   const [error, setError] = useState("")
   const [saving, setSaving] = useState(false)
 
@@ -15,7 +16,9 @@ export default function AddMemberForm({ onCreated }: { onCreated: (member: Membe
     e.preventDefault()
     const today = todayUtc()
     const errors: typeof fieldErrors = {}
-    if (!form.full_name.trim()) errors.full_name = "Enter the member's name."
+    const email = form.email.trim()
+    if (!email) errors.email = "Enter the email the person signed up with."
+    else if (!/^\S+@\S+\.\S+$/.test(email)) errors.email = "Enter a valid email address."
     if (!form.expires_on) errors.expires_on = "Pick an expiry date."
     else if (form.expires_on < today) errors.expires_on = `Expiry can't be before the joined date (${formatDate(today)}).`
     setFieldErrors(errors)
@@ -25,7 +28,7 @@ export default function AddMemberForm({ onCreated }: { onCreated: (member: Membe
     setSaving(true)
     try {
       const member = await createMember({
-        full_name: form.full_name.trim(),
+        email,
         phone: form.phone.trim() || null,
         plan: form.plan,
         expires_on: form.expires_on,
@@ -45,16 +48,17 @@ export default function AddMemberForm({ onCreated }: { onCreated: (member: Membe
       <h2 id="add-heading">Add member</h2>
       <form className="fields" onSubmit={handleSubmit} noValidate>
         <div className="field">
-          <label htmlFor="add-name">Full name</label>
+          <label htmlFor="add-email">Account email</label>
           <input
-            id="add-name"
-            value={form.full_name}
-            onChange={(e) => setForm({ ...form, full_name: e.target.value })}
-            maxLength={100}
-            placeholder="Rafi Ahmed"
+            id="add-email"
+            type="email"
+            value={form.email}
+            onChange={(e) => setForm({ ...form, email: e.target.value })}
+            maxLength={254}
+            placeholder="rafi@example.com"
             autoComplete="off"
           />
-          {fieldErrors.full_name && <span className="field-error">{fieldErrors.full_name}</span>}
+          {fieldErrors.email && <span className="field-error">{fieldErrors.email}</span>}
         </div>
         <div className="field">
           <label htmlFor="add-phone">Phone (optional)</label>
@@ -102,7 +106,7 @@ export default function AddMemberForm({ onCreated }: { onCreated: (member: Membe
           <button className="primary" type="submit" disabled={saving}>
             {saving ? "Adding…" : "Add member"}
           </button>
-          <span className="hint">Joined date is set to today.</span>
+          <span className="hint">The person signs up first; their name comes from their account. Joined date is set to today.</span>
         </div>
       </form>
       {error && <p className="error">{error}</p>}

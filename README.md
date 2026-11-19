@@ -8,7 +8,7 @@ This is the **MVP** (mid-term). The plan for the Beta (accounts, roles, class bo
 backend/          FastAPI app (routes under /api)
   main.py         creates the app, error handler, health check
   app/database.py engine and session (Supabase or local SQLite)
-  app/models.py   Member and user tables and request / response schemas
+  app/models.py   tables (a member is a user with a membership) and request / response schemas
   app/security.py password hashing (Argon2) and login tokens (JWT)
   app/deps.py     who is calling, and the role check
   app/routers/    members.py, auth.py, users.py, admin.py: the endpoints (HTTP only)
@@ -34,6 +34,8 @@ vercel.json       Vercel setup: /api/* goes to backend, everything else to front
 
 Everyone who signs up is a **User**. Only an admin can change a role.
 
+**Members are users.** There is no separate member table: a member is a user whose account has a membership (a plan, joined and expiry dates, a frozen flag, phone and notes). The person signs up first, then staff start their membership.
+
 | Role | Can do |
 |---|---|
 | User | Log in, see and rename their own account, see their own membership and visits, book and cancel classes, change their password |
@@ -46,14 +48,14 @@ Pages: `#/login`, `#/signup`, `#/dashboard` (Admin), `#/members` (Gym Manager, A
 - **Check in a member:** open a member on the Members page and click **Check in**. Frozen and expired members cannot be checked in (the page says why; renew or unfreeze first). The same member can check in more than once a day.
 - **Visit history:** each member's visits, newest first, with who recorded each one.
 - **Checked in today:** a card at the top of the Members page lists everyone who has arrived since midnight UTC. Click a name to open that member.
-- Deleting a member also deletes their check-ins and class bookings.
+- **Add a member:** the person signs up first. On the Members page, **Add member** takes the email they signed up with, plus plan, expiry date and optional phone and notes; their name comes from their account. An email with no account is refused ("Ask the person to sign up first"), and so is an account that already has a membership.
+- **Delete a member:** deletes the person's whole account. They can no longer log in, and their check-ins and class bookings are removed; their payments stay on record. Only a User's account can be deleted here: a Gym Manager or Admin who has a membership must have their role changed first.
 - **Classes:** the **Classes** page lists upcoming classes (or all of them), in start-time order. Add a class with a name, start time, length (15 to 240 minutes) and places (1 to 200), plus an optional trainer and description. Edit or delete a class, and open **Bookings** to see who has booked it. Capacity cannot be lowered below the bookings already made, and deleting a class deletes its bookings. A member's bookings are made by the member (see **User features**).
-- **Link an account to a member:** in a member's details, **Linked account** takes the person's account email and links it, so that person can see their own membership and book classes. One account can be linked to only one member. Unlink at any time. Without a link, a User sees "Your account is not linked to a gym membership yet".
 
-- **Payments:** in a member's details, **Payments** records what the member paid (amount in whole taka, and cash, card, bank transfer or mobile banking, with an optional note). Tick **Renew the membership with this payment**, pick the plan, and the amount fills in from the plan's price and the new expiry date is shown. An active member renews from their current expiry, so no paid days are lost; an expired member renews from today. The member's payments are listed below, newest first. A payment stays on record when its member is deleted.
+- **Payments:** in a member's details, **Payments** records what the member paid (amount in whole taka, and cash, card, bank transfer or mobile banking, with an optional note). Tick **Renew the membership with this payment**, pick the plan, and the amount fills in from the plan's price and the new expiry date is shown. An active member renews from their current expiry, so no paid days are lost; an expired member renews from today. The member's payments are listed below, newest first. A payment stays on record when its member's account is deleted.
 
 **User features**
-- **My membership:** plan, status, joined and expiry dates, and the person's own visits, newest first. A User can only ever see their own record.
+- **My membership:** plan, status, joined and expiry dates, and the person's own visits, newest first. A User can only ever see their own record. Before staff start a membership, the page says so and shows the email to give the front desk.
 - **Classes:** upcoming classes with places left. **Book** takes a place, **Cancel booking** frees it. Booking needs a valid membership (not frozen or expired) and a class that has not started; a full class or one you already booked is refused with a clear message. Two people booking the last place at the same moment cannot both get it.
 - **My account:** change your name, and change your password. After a password change every earlier login stops working and you log in again with the new password.
 
@@ -72,12 +74,12 @@ Interactive docs: `/api/docs` (for example http://localhost:8000/api/docs).
 
 | Operation | Method and path | Success | Errors |
 |---|---|---|---|
-| Create | `POST /api/v1/members` | `201` member | `422` |
+| Create (start a membership) | `POST /api/v1/members` `{email, plan, expires_on, phone?, notes?}` | `201` member | `409` (already a member), `422` (no account has that email) |
 | Read list | `GET /api/v1/members?offset=0&limit=20&status=active` | `200` `{items, total, offset, limit}`, newest first | `422` |
 | Read single | `GET /api/v1/members/{id}` | `200` member | `404` |
 | Update | `PATCH /api/v1/members/{id}` | `200` member | `404`, `422` |
-| Delete | `DELETE /api/v1/members/{id}` | `204` | `404` |
-| Delete several | `POST /api/v1/members/bulk-delete` with `{"ids": [1, 2, 3]}` | `200` `{"deleted": 3}` | `422` |
+| Delete (the account) | `DELETE /api/v1/members/{id}` | `204` | `400` (Gym Manager or Admin), `404` |
+| Delete several | `POST /api/v1/members/bulk-delete` with `{"ids": [1, 2, 3]}` | `200` `{"deleted": 3}` | `400` (one is a Gym Manager or Admin; nothing deleted), `422` |
 | Record a payment | `POST /api/v1/members/{id}/payments` `{amount, method, note?, renew_plan?}` | `201` payment | `403`, `404`, `422` |
 | Member's payments | `GET /api/v1/members/{id}/payments?offset=0&limit=20` | `200` `{items, total, offset, limit}`, newest first | `403`, `404`, `422` |
 | Plan prices | `GET /api/v1/plans` (any logged-in user) | `200` list of `{plan, price, duration_days}` | `401` |
@@ -91,11 +93,9 @@ Interactive docs: `/api/docs` (for example http://localhost:8000/api/docs).
 | Edit a class | `PATCH /api/v1/classes/{id}` | `200` class | `403`, `404`, `422` (including capacity below the bookings) |
 | Delete a class | `DELETE /api/v1/classes/{id}` | `204` | `403`, `404` |
 | Class bookings | `GET /api/v1/classes/{id}/bookings` | `200` `{items, total, offset, limit}` with member name and time | `403`, `404` |
-| Book a class | `POST /api/v1/classes/{id}/bookings` (for the logged-in account's own member) | `201` booking | `400` (membership not valid or class started), `404` (no linked membership or class), `409` (full or already booked) |
+| Book a class | `POST /api/v1/classes/{id}/bookings` (for the logged-in user) | `201` booking | `400` (membership not valid or class started), `404` (no membership, or no such class), `409` (full or already booked) |
 | Cancel my booking | `DELETE /api/v1/classes/{id}/bookings` | `204` | `404` |
-| Link an account | `PATCH /api/v1/members/{id}` with `{"user_id": 5}` (`null` unlinks) | `200` member | `409` (account already linked), `422` (no such account) |
-| Find an account (staff) | `GET /api/v1/users/lookup?email=...` or `?id=...` | `200` `{id, name, email}` | `403`, `404`, `422` |
-| My membership | `GET /api/v1/users/me/membership` | `200` member | `401`, `404` (nothing linked) |
+| My membership | `GET /api/v1/users/me/membership` | `200` member | `401`, `404` (no membership yet) |
 | My visits | `GET /api/v1/users/me/check-ins?offset=0&limit=20` | `200` `{items, total, offset, limit}`, newest first | `401`, `404` |
 | Change my password | `POST /api/v1/users/me/password` `{current_password, new_password}` | `204` | `400` (wrong current password), `401`, `422` |
 | Health | `GET /api/health` | `200` `{"status": "ok"}` | |
@@ -109,14 +109,15 @@ Interactive docs: `/api/docs` (for example http://localhost:8000/api/docs).
 | Unban (admin) | `POST /api/v1/admin/users/{id}/unban` | `200` user | `403`, `404` |
 
 - Every `/api/v1/members` endpoint needs `Authorization: Bearer <access_token>` from a Gym Manager or Admin: `401` without a token, `403` for a User.
-- `status` filter: `active` (valid), `expired` (expiry date passed) or `frozen` (`is_active = false`).
+- A member's `id` is their user id. A member is `{id, name, email, phone, plan, joined_on, expires_on, is_frozen, notes}`.
+- `status` filter: `active` (valid), `expired` (expiry date passed) or `frozen` (`is_frozen = true`).
 - `total` counts every member matching the filter, not just the page returned.
-- `PATCH` changes only the fields sent: a later `expires_on` renews, `is_active: false` freezes.
+- `PATCH` changes only the fields sent (`name`, `phone`, `plan`, `expires_on`, `is_frozen`, `notes`): a later `expires_on` renews, `is_frozen: true` freezes.
 
 Example body for `POST`:
 
 ```json
-{ "full_name": "Rafi Ahmed", "phone": "01700000000", "plan": "monthly", "expires_on": "2026-12-01", "notes": "Prefers morning sessions" }
+{ "email": "rafi@example.com", "phone": "01700000000", "plan": "monthly", "expires_on": "2026-12-01", "notes": "Prefers morning sessions" }
 ```
 
 ## Requirements
@@ -165,7 +166,9 @@ vercel dev -L
 2. **Connect** → **Transaction pooler** → copy the URI (port `6543`).
 3. In Vercel → Project → **Settings** → **Environment Variables**, add it as `DATABASE_URL`, then redeploy.
 
-The backend accepts `postgres://` or `postgresql://` URLs and creates the `member`, `app_user`, `check_in`, `gym_class`, `class_booking`, `plan_price` and `payment` tables on start (and fills `plan_price` with monthly 1,500 / 30 days, quarterly 4,000 / 90 days and yearly 14,000 / 365 days), and adds any columns an older `app_user` table is missing (the ban columns), keeping existing data. To use Supabase locally as well, set `DATABASE_URL` in your terminal before `fastapi dev main.py`.
+The backend accepts `postgres://` or `postgresql://` URLs and creates the `app_user`, `check_in`, `gym_class`, `class_booking`, `plan_price` and `payment` tables on start (and fills `plan_price` with monthly 1,500 / 30 days, quarterly 4,000 / 90 days and yearly 14,000 / 365 days), and adds any columns an older `app_user` table is missing (the ban and membership columns), keeping existing data.
+
+**Upgrading a database from before members became users:** on its first start the backend drops the old `member` table together with `check_in`, `class_booking` and `payment` (all of their rows are deleted) and creates the last three again, pointing at `app_user`. Accounts, classes and plan prices are kept. Staff then start memberships again for the people who need one. To use Supabase locally as well, set `DATABASE_URL` in your terminal before `fastapi dev main.py`.
 
 Free-tier Supabase projects pause after a week with no activity; open the dashboard and restore the project before a demo if needed.
 
