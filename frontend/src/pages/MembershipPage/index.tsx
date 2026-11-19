@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import MyPayments from "../../components/MyPayments"
 import StatusPill from "../../components/StatusPill"
 import { useAuth } from "../../context/AuthContext"
 import { ApiError } from "../../services/api"
@@ -132,6 +133,7 @@ export default function MembershipPage() {
           </button>
         )}
       </section>
+      <MyPayments />
     </div>
   )
 }

@@ -5,7 +5,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from app.database import create_db_and_tables
-from app.routers import admin, auth, check_ins, classes, members, plans, users
+from app.routers import admin, auth, check_ins, classes, members, payments, plans, users
 from app.services.auth_service import (
     ACCOUNT_BANNED_MESSAGE,
     AccountBannedError,
@@ -30,6 +30,7 @@ from app.services.member_service import (
     MemberNotFoundError,
     NoMembershipError,
 )
+from app.services.payment_service import PaymentNotFoundError
 from app.services.user_service import CannotBanError, CannotChangeOwnRoleError, UserNotFoundError
 
 logger = logging.getLogger("gym_buddy")
@@ -49,6 +50,7 @@ app.include_router(members.router)
 app.include_router(check_ins.router)
 app.include_router(classes.router)
 app.include_router(plans.router)
+app.include_router(payments.router)
 
 # Run at import (not in a lifespan hook) so it also works on Vercel's serverless functions.
 create_db_and_tables()
@@ -102,6 +104,7 @@ _plain_error(ClassStartedError, 400, "This class has already started")
 _plain_error(ClassFullError, 409, "This class is full")
 _plain_error(AlreadyBookedError, 409, "You have already booked this class")
 _plain_error(BookingNotFoundError, 404, "You have not booked this class")
+_plain_error(PaymentNotFoundError, 404, "Payment not found")
 
 
 @app.exception_handler(EmailTakenError)

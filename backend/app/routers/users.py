@@ -5,8 +5,8 @@ from fastapi import APIRouter, Query, Response
 
 from app.database import SessionDep
 from app.deps import CurrentUser
-from app.models import CheckInPage, MemberRead, PasswordChange, User, UserNameUpdate, UserRead
-from app.services import auth_service, checkin_service, member_service, user_service
+from app.models import CheckInPage, MemberRead, PasswordChange, PaymentPage, User, UserNameUpdate, UserRead
+from app.services import auth_service, checkin_service, member_service, payment_service, user_service
 
 router = APIRouter(prefix="/api/v1/users", tags=["users"])
 
@@ -38,6 +38,18 @@ def list_my_check_ins(
     """My visits, newest first. 404 if I have no membership."""
     member = member_service.get_own_membership(user)
     items, total = checkin_service.list_member_check_ins(session, member.id, offset, limit)
+    return {"items": items, "total": total, "offset": offset, "limit": limit}
+
+
+@router.get("/me/payments", response_model=PaymentPage)
+def list_my_payments(
+    user: CurrentUser,
+    session: SessionDep,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+) -> dict:
+    """My own payments, newest first, voided ones included (they show as voided). Empty if I have none."""
+    items, total = payment_service.list_own_payments(session, user, offset, limit)
     return {"items": items, "total": total, "offset": offset, "limit": limit}
 
 

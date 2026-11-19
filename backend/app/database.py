@@ -61,6 +61,10 @@ _ADDED_COLUMNS = [
     ("app_user", "is_frozen", "BOOLEAN NOT NULL DEFAULT FALSE"),
     ("app_user", "phone", "VARCHAR(20)"),
     ("app_user", "notes", "VARCHAR(500)"),
+    # Voiding a mistaken payment.
+    ("payment", "voided_at", "TIMESTAMP"),
+    ("payment", "void_reason", "VARCHAR(200)"),
+    ("payment", "voided_by", "INTEGER REFERENCES app_user (id)"),
 ]
 
 # Before members became users, these tables pointed at member.id. They are dropped (data and all) and

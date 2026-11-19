@@ -21,6 +21,10 @@ export interface Payment {
   paid_at: string
   renewed_until: string | null
   recorded_by_name: string | null
+  /** Set when an admin voided the payment: it stays on record but is left out of every total. */
+  voided_at: string | null
+  void_reason: string | null
+  voided_by_name: string | null
 }
 
 export interface PaymentPage {
@@ -28,6 +32,20 @@ export interface PaymentPage {
   total: number
   offset: number
   limit: number
+}
+
+/** The all-payments list: total_amount adds up every matching payment that is not voided, not just this page. */
+export interface PaymentListPage extends PaymentPage {
+  total_amount: number
+}
+
+/** Filters for the payments list and the CSV export. Empty strings mean "any". Dates are YYYY-MM-DD (UTC). */
+export interface PaymentFilters {
+  date_from: string
+  date_to: string
+  method: PaymentMethod | ""
+  member: string
+  include_voided: boolean
 }
 
 export interface PaymentBody {

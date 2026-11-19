@@ -12,6 +12,18 @@ export const methodLabel = (method: PaymentMethod) => METHODS.find((m) => m.valu
 
 export const formatMoney = (amount: number) => `৳${amount.toLocaleString("en-US")}`
 
+/** Hand a downloaded file to the browser's Save dialog. */
+export function saveFile(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement("a")
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
+}
+
 /** A YYYY-MM-DD date plus a number of days, in UTC (the same calendar the API uses). */
 export function addDays(isoDate: string, days: number): string {
   const d = new Date(`${isoDate}T00:00:00Z`)

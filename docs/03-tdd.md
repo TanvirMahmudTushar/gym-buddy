@@ -130,6 +130,7 @@ backend/
       check_ins.py     # /api/v1/check-ins/today
       classes.py       # /api/v1/classes (read: anyone logged in; change and bookings: gym manager, admin)
       plans.py         # /api/v1/plans (anyone logged in)
+      payments.py      # /api/v1/payments (list: gym manager, admin; void and CSV export: admin)
       classes.py       # (Beta) /api/v1/classes/* (classes and bookings)
     services/
       __init__.py
@@ -137,7 +138,7 @@ backend/
       auth_service.py    # sign up (always role user) and log in; raises EmailTakenError / InvalidCredentialsError
       user_service.py    # list users, change role, rename, ban / unban; raises UserNotFoundError / CannotChangeOwnRoleError / CannotBanError
       stats_service.py   # member, check-in, class and user counts for the admin dashboard
-      payment_service.py # plan prices, record a payment (and renew), a member's payment history
+      payment_service.py # plan prices, record a payment (and renew), payment lists and total, void, CSV export; raises PaymentNotFoundError
       class_service.py   # classes and bookings: create, list, edit, delete, who booked; raises ClassNotFoundError / CapacityBelowBookingsError
       checkin_service.py # record a check-in (membership must be valid), history, today's list; raises MembershipNotValidError
   alembic/             # (Beta) migration scripts
@@ -149,7 +150,7 @@ frontend/
     components/        # add form, member list, details panel
     context/           # AuthContext: who is logged in, login / signup / logout
     layouts/           # AppLayout: header, and the pages each role may open
-    pages/             # HomePage (members), LoginPage, SignupPage, AccountPage, DashboardPage (admin), UsersPage (admin), ClassesPage (gym manager, admin), MembershipPage and TimetablePage (user), PlansPage (admin); (Later) AboutPage, MemberDetailsPage; (Beta, Could) MyMembership, Classes, AdminDashboard
+    pages/             # HomePage (members), LoginPage, SignupPage, AccountPage, DashboardPage (admin), UsersPage (admin), ClassesPage (gym manager, admin), PaymentsPage (gym manager, admin), MembershipPage and TimetablePage (user), PlansPage (admin); (Later) AboutPage, MemberDetailsPage; (Beta, Could) MyMembership, Classes, AdminDashboard
     services/          # fetch calls to the API
     types/             # TypeScript types
     utils/             # display helpers
@@ -273,7 +274,7 @@ Filled with monthly 1,500 / 30, quarterly 4,000 / 90 and yearly 14,000 / 365 whe
 | Column | Type | Rules |
 |---|---|---|
 | `id` | integer | Primary key |
-| `member_id` | integer | FK → `member.id`, nullable, on delete set null (the service sets it to null before deleting a member, since SQLite does not enforce it) |
+| `member_id` | integer | FK → `app_user.id` (the member who paid), nullable, on delete set null (the service sets it to null before deleting the account, since SQLite does not enforce it) |
 | `member_name` | varchar(100) | The member's name when the payment was taken |
 | `amount` | integer | Whole taka, 1 to 10,000,000 |
 | `method` | varchar(20) | `cash`, `card`, `bank_transfer` or `mobile_banking` |
@@ -282,6 +283,11 @@ Filled with monthly 1,500 / 30, quarterly 4,000 / 90 and yearly 14,000 / 365 whe
 | `paid_at` | timestamp (UTC) | Not null, indexed |
 | `renewed_until` | date | Nullable: the new expiry when the payment renewed the membership |
 | `recorded_by` | integer | FK → `app_user.id` |
+| `voided_at` | timestamp (UTC) | Nullable: set when an admin voids the payment; a voided payment is left out of every total |
+| `void_reason` | varchar(200) | Nullable: required when voiding |
+| `voided_by` | integer | FK → `app_user.id`, nullable: the admin who voided it |
+
+Voiding is a conditional `UPDATE ... WHERE voided_at IS NULL`, so voiding twice (or two admins at once) keeps the first time and reason. The three void columns are added to an existing table on start.
 
 **`check_in`**
 
@@ -385,7 +391,10 @@ erDiagram
 | `ClassRead` | Class responses | all class columns except `created_by` + `booked_count` (`is_booked_by_me` comes with member booking); times are UTC with a trailing `Z` | Beta |
 | `ClassPage` / `BookingPage` | Class and booking lists | `items`, `total`, `offset`, `limit` | Beta |
 | `BookingRead` | Booking responses | `class_id`, `member_id`, `member_name`, `booked_at` | Beta |
-| `PaymentCreate` / `PaymentRead` / `PaymentPage` | Record and list payments | create: `amount`, `method`, `note?`, `renew_plan?`; read: `id`, `member_id?`, `member_name`, `amount`, `method`, `plan?`, `note?`, `paid_at`, `renewed_until?`, `recorded_by_name?` | Beta |
+| `PaymentCreate` / `PaymentRead` / `PaymentPage` | Record and list payments | create: `amount`, `method`, `note?`, `renew_plan?`; read: `id`, `member_id?`, `member_name`, `amount`, `method`, `plan?`, `note?`, `paid_at`, `renewed_until?`, `recorded_by_name?`, `voided_at?`, `void_reason?`, `voided_by_name?` | Beta |
+| `PaymentListPage` | All payments | `PaymentPage` + `total_amount` (sum of the matching payments that are not voided, across all pages) | Beta |
+| `PaymentFilter` | Query filters for the list and the CSV | `date_from?`, `date_to?` (UTC days, inclusive; `date_from` after `date_to` is `422`), `method?`, `member?` (part of the name, any case), `include_voided` (default false) | Beta |
+| `VoidRequest` | Void a payment | `reason` (1 to 200 characters, required) | Beta |
 | `PlanRead` | Plan prices | `plan`, `price`, `duration_days` | Beta |
 | `PlanUpdate` | Change a plan | `price` (1 to 10,000,000), `duration_days` (1 to 3,660), both required | Beta |
 | `CheckInRead` | Check-in responses | `id`, `member_id`, `member_name`, `checked_in_at`, `recorded_by_name` | Beta |
@@ -504,7 +513,11 @@ Ban rules: banning is idempotent (banning a banned user changes nothing), an adm
 | `GET` | `/api/v1/plans` | Any logged-in user | — | `200` `PlanRead[]` (monthly, quarterly, yearly) | `401` | FR-43 |
 | `PUT` | `/api/v1/admin/plans/{plan}` | Admin | `PlanUpdate` | `200` `PlanRead` | `401`, `403`, `422` (unknown plan or out-of-range value) | FR-47 |
 | `POST` | `/api/v1/members/{id}/payments` | Gym Manager, Admin | `PaymentCreate` | `201` `PaymentRead` (with `renew_plan`, the member's expiry and plan change too) | `403`, `404`, `422` | FR-44, FR-45 |
-| `GET` | `/api/v1/members/{id}/payments?offset&limit` | Gym Manager, Admin | — | `200` `PaymentPage` (newest first) | `403`, `404`, `422` | FR-46 |
+| `GET` | `/api/v1/members/{id}/payments?offset&limit` | Gym Manager, Admin | — | `200` `PaymentPage` (newest first, voided included) | `403`, `404`, `422` | FR-46 |
+| `GET` | `/api/v1/payments?date_from&date_to&method&member&include_voided&offset&limit` | Gym Manager, Admin | — | `200` `PaymentListPage` (newest first) | `401`, `403`, `422` | FR-48 |
+| `GET` | `/api/v1/users/me/payments?offset&limit` | Any logged-in user | — | `200` `PaymentPage` (own payments only, voided included) | `401` | FR-49 |
+| `POST` | `/api/v1/payments/{id}/void` | Admin | `VoidRequest` | `200` `PaymentRead` (voiding again: unchanged) | `401`, `403`, `404`, `422` | FR-50 |
+| `GET` | `/api/v1/payments/export.csv?date_from&date_to&method&member&include_voided` | Admin | — | `200` `text/csv` attachment `payments-YYYY-MM-DD.csv` | `401`, `403`, `422` | FR-51 |
 
 **Classes and bookings**
 
@@ -757,7 +770,8 @@ stats = AdminStats(
 | CORS | Not enabled: frontend and API share the Vercel origin; locally Vite proxies `/api` |
 | Security headers | Added for all routes in `vercel.json` (below) |
 | Brute force | Login lockout (section 10.2) |
-| Injection | SQLModel/SQLAlchemy parameterised queries only |
+| Injection | SQLModel/SQLAlchemy parameterised queries only; the member-name filter escapes `%` and `_` |
+| CSV export | Text cells starting with `=`, `+`, `-`, `@`, tab or carriage return get a leading `'` (formula injection); UTF-8 with a byte order mark so Excel reads Bengali names correctly; admins only |
 | Errors | Catch-all handler returns a generic `500`; details only in logs |
 | Data exposure | Response schemas (`UserRead`, `MemberRead`) list fields explicitly; `password_hash` and token hashes are never in a response schema. Member phone numbers and notes are returned only to admins and the member themself |
 

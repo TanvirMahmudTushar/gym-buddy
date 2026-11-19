@@ -6,6 +6,7 @@ const LINKS: { page: ProtectedPage; label: string }[] = [
   { page: "dashboard", label: "Dashboard" },
   { page: "members", label: "Members" },
   { page: "classes", label: "Classes" },
+  { page: "payments", label: "Payments" },
   { page: "users", label: "Users" },
   { page: "plans", label: "Plans" },
   { page: "membership", label: "My membership" },
