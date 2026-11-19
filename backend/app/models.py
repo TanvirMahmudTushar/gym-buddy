@@ -382,6 +382,10 @@ class Payment(SQLModel, table=True):
     paid_at: datetime = Field(default_factory=utc_now, index=True)
     renewed_until: date | None = None
     recorded_by: int | None = Field(default=None, foreign_key="app_user.id")
+    # Set when an admin voids a mistaken payment. It stays on record but is left out of every total.
+    voided_at: datetime | None = None
+    void_reason: str | None = Field(default=None, max_length=200)
+    voided_by: int | None = Field(default=None, foreign_key="app_user.id")
 
 
 class PaymentCreate(SQLModel):
@@ -403,6 +407,9 @@ class PaymentRead(SQLModel):
     paid_at: UtcDateTime
     renewed_until: date | None
     recorded_by_name: str | None
+    voided_at: UtcDateTime | None
+    void_reason: str | None
+    voided_by_name: str | None
 
 
 class PaymentPage(SQLModel):
@@ -410,6 +417,33 @@ class PaymentPage(SQLModel):
     total: int
     offset: int
     limit: int
+
+
+class PaymentListPage(PaymentPage):
+    """The all-payments list. total_amount adds up every matching payment that is not voided, not just this page."""
+
+    total_amount: int
+
+
+class PaymentFilter(SQLModel):
+    """Query filters shared by the payments list and the CSV export. Dates are UTC calendar days, both inclusive."""
+
+    date_from: date | None = None
+    date_to: date | None = None
+    method: PaymentMethod | None = None
+    # Part of the member's name, any case.
+    member: Annotated[str, StringConstraints(strip_whitespace=True, max_length=100)] | None = None
+    include_voided: bool = False
+
+    @model_validator(mode="after")
+    def check_range(self) -> "PaymentFilter":
+        if self.date_from and self.date_to and self.date_from > self.date_to:
+            raise ValueError("date_from must be on or before date_to")
+        return self
+
+
+class VoidRequest(SQLModel):
+    reason: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
 
 
 class PlanRead(SQLModel):

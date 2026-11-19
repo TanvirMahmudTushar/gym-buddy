@@ -264,8 +264,12 @@ Every Admin is also a logged-in user, so they can log out, edit their profile an
 | FR-45 | When a payment names a `renew_plan`, the member's `expires_on` shall become the later of today and the current expiry, plus that plan's days, and the member's `plan` shall become that plan. A frozen member's expiry is extended but they stay frozen. | Beta | US-25 |
 | FR-46 | A gym manager or admin shall be able to list a member's payments, newest first, paginated. Each payment keeps the member's name, so it still reads correctly if the member is deleted; deleting a member never deletes their payments. | Beta | US-25 |
 | FR-47 | An admin shall be able to change a plan's `price` (1 to 10,000,000) and `duration_days` (1 to 3,660). Both are sent together, and the three plans cannot be added or removed. Other roles get `403`. New values apply to later payments only; payments already taken are not changed. | Beta | US-26 |
+| FR-48 | A gym manager or admin shall be able to list all payments, newest first, paginated, filtered by date range (`date_from`, `date_to`: UTC calendar days, both inclusive), `method` and part of the member's name (any case). Voided payments are left out unless `include_voided=true`. The response includes `total_amount`: the sum of every matching payment that is not voided, across all pages. A User gets `403`; `date_from` after `date_to` gives `422`. | Beta | US-25 |
+| FR-49 | A logged-in user shall be able to list their own payments, newest first, paginated, with voided payments included and marked. Nobody can list another person's payments this way. | Beta | US-25 |
+| FR-50 | An admin shall be able to void a payment with a required `reason` (1 to 200 characters). The payment stays on record with `voided_at`, `void_reason` and who voided it, but is left out of every total and of revenue. Voiding an already voided payment changes nothing. Voiding does not change the member's expiry date. A gym manager gets `403`, an unknown payment `404`. | Beta | US-25 |
+| FR-51 | An admin shall be able to download the payments matching the FR-48 filters as a CSV file (UTF-8 with a byte order mark, one header row, newest first). A text cell starting with `=`, `+`, `-`, `@`, a tab or a carriage return is saved with a leading `'`, so a spreadsheet shows it as text instead of running it as a formula. A gym manager gets `403`. | Beta | US-25 |
 
-> **Built so far (payments):** FR-43 to FR-47. The all-payments list, a member's own payments, voiding and CSV export (#35), and the revenue numbers (#36) are separate issues.
+> **Built so far (payments):** FR-43 to FR-51. The revenue numbers and the expiring-soon list (#36) are a separate issue.
 
 ### 3.8 Account security — Beta
 
@@ -332,6 +336,9 @@ A new member always starts as `Active` if `expires_on` is today or later. "Expir
 | Book or cancel own class booking | No | Yes (valid membership needed to book) | Only if linked | Only if linked |
 | List users, change roles | No | No (`403`) | No (`403`) | Yes |
 | View dashboard stats, ban / unban users | No | No (`403`) | No (`403`) | Yes (not self, not other admins) |
+| View own payments | No | Yes | Yes | Yes |
+| Record payments, list a member's payments and all payments | No | No (`403`) | Yes | Yes |
+| Void a payment, export payments as CSV | No | No (`403`) | No (`403`) | Yes |
 
 Every endpoint except sign up, log in, refresh, health and the docs returns `401` when no valid token is sent.
 
@@ -529,6 +536,24 @@ Every endpoint except sign up, log in, refresh, health and the docs returns `401
 - When a user sends the wrong `current_password`, the response is `400`.
 - When they send the right one and a valid `new_password`, the response is `204`, their refresh fails, and they can log in only with the new password.
 
+**AC-30 List all payments (FR-48)**
+- Given payments of 1,500 (cash, 10 days ago), 4,000 (card, today) and 700 (mobile banking, today)
+- When a gym manager sends `GET /api/v1/payments`, the response is `200` with all three, newest first, and `total_amount` 6,200.
+- With `date_from` and `date_to` set to today, only the two from today are listed and `total_amount` is 4,700; with `method=card` it is 4,000.
+- With `limit=1`, one payment is returned but `total` is 3 and `total_amount` is still 6,200.
+- A User gets `403`, and `date_from` after `date_to` gives `422`.
+
+**AC-31 Void a payment (FR-50)**
+- When a gym manager sends `POST /api/v1/payments/{id}/void`, the response is `403`; with no reason an admin gets `422`.
+- When an admin sends `{"reason": "Entered twice"}`, the response is `200` with `voided_at`, `void_reason` and `voided_by_name` set.
+- The payment is no longer in `GET /api/v1/payments` and `total_amount` drops by its amount; with `include_voided=true` it is listed again but `total_amount` does not change.
+- Voiding it again returns `200` with the first `voided_at` and reason unchanged.
+
+**AC-32 Own payments and CSV export (FR-49, FR-51)**
+- When member A sends `GET /api/v1/users/me/payments`, only A's payments are returned, voided ones marked.
+- When an admin sends `GET /api/v1/payments/export.csv?method=card`, the response is `200` `text/csv` with a header row and only card payments; a gym manager gets `403`.
+- A note `=1+2` is saved in the CSV as `'=1+2`.
+
 ## 6. Traceability
 
 | Story | Requirements | Endpoint (see [TDD, section 6](03-tdd.md#6-rest-api-design)) | Release |
@@ -555,3 +580,4 @@ Every endpoint except sign up, log in, refresh, health and the docs returns `401
 | US-21 | FR-36, FR-37, FR-39 | `POST /api/v1/admin/users/{id}/ban`, `GET /api/v1/admin/users` | Beta |
 | US-22 | FR-38 | `POST /api/v1/admin/users/{id}/unban` | Beta |
 | US-23, US-24 | FR-16, FR-40, FR-41 | `GET` / `PATCH /api/v1/users/me`, `POST /api/v1/users/me/password` | Beta |
+| US-25, US-26 | FR-43 – FR-51 | `/api/v1/plans`, `/api/v1/members/{id}/payments`, `/api/v1/payments`, `/api/v1/payments/{id}/void`, `/api/v1/payments/export.csv`, `/api/v1/users/me/payments`, `PUT /api/v1/admin/plans/{plan}` | Beta |

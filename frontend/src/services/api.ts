@@ -63,7 +63,8 @@ async function errorMessage(res: Response): Promise<string> {
   return `Request failed: ${res.status}`
 }
 
-export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+/** Send a request with the login token; throws ApiError for any error status. */
+async function send(path: string, init: RequestInit): Promise<Response> {
   const headers: Record<string, string> = {}
   if (init.body) headers["Content-Type"] = "application/json"
   const token = getToken()
@@ -77,5 +78,16 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
     if (token && (res.status === 401 || (res.status === 403 && message === ACCOUNT_BANNED))) onSessionExpired?.()
     throw new ApiError(message, res.status)
   }
+  return res
+}
+
+export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const res = await send(path, init)
   return (res.status === 204 ? undefined : await res.json()) as T
+}
+
+/** For a file download (such as a CSV) that needs the login token, so a plain link would not work. */
+export async function requestBlob(path: string): Promise<Blob> {
+  const res = await send(path, {})
+  return res.blob()
 }

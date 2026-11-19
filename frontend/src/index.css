@@ -572,20 +572,28 @@ td.wrap {
   min-width: 140px;
 }
 
-.ban-row td {
+.ban-row td,
+.void-row td {
   background: var(--bad-bg);
   white-space: normal;
 }
 
-.ban-form {
+.ban-form,
+.void-form {
   display: flex;
   gap: 8px;
   align-items: flex-end;
   flex-wrap: wrap;
 }
 
-.ban-form .field {
+.ban-form .field,
+.void-form .field {
   flex: 1 1 220px;
+}
+
+.void-row .hint,
+.void-row .error {
+  margin: 8px 0 0;
 }
 
 /* Check-ins (gym manager) */
@@ -706,6 +714,37 @@ button.linklike {
 .plan-name {
   min-width: 100px;
   align-self: center;
+}
+
+/* Payments list */
+.filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+  align-items: end;
+}
+
+.filters .checkbox-row {
+  min-height: 36px;
+}
+
+.summary {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.summary strong {
+  font-size: 18px;
+}
+
+.pill.voided {
+  background: var(--bad-bg);
+  color: var(--bad);
+}
+
+.voided-amount {
+  text-decoration: line-through;
+  color: var(--muted);
 }
 
 @media (max-width: 860px) {

@@ -127,6 +127,7 @@ def _delete_accounts(session: Session, ids: list[int]) -> int:
     # Someone demoted from staff may have recorded check-ins or payments or created classes; those stay, unattributed.
     session.exec(update(CheckIn).where(col(CheckIn.recorded_by).in_(ids)).values(recorded_by=None))
     session.exec(update(Payment).where(col(Payment.recorded_by).in_(ids)).values(recorded_by=None))
+    session.exec(update(Payment).where(col(Payment.voided_by).in_(ids)).values(voided_by=None))
     session.exec(update(GymClass).where(col(GymClass.created_by).in_(ids)).values(created_by=None))
     return session.exec(delete(User).where(col(User.id).in_(ids))).rowcount
 

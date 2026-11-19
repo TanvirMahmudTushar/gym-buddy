@@ -2,8 +2,9 @@ import { type FormEvent, useEffect, useState } from "react"
 import { listMemberPayments, listPlans, recordPayment } from "../services/paymentService"
 import type { Member, Plan } from "../types/member"
 import type { Payment, PaymentMethod, PlanPrice } from "../types/payment"
-import { METHODS, addDays, formatMoney, methodLabel } from "../utils/payment"
-import { errorText, formatDate, formatDateTime, planLabel, todayUtc } from "../utils/member"
+import { METHODS, addDays, formatMoney } from "../utils/payment"
+import { errorText, formatDate, planLabel, todayUtc } from "../utils/member"
+import PaymentLine from "./PaymentLine"
 
 const PAGE_SIZE = 5
 
@@ -178,14 +179,7 @@ export default function PaymentSection({ member, onRecorded }: Props) {
       ) : (
         <ul className="visit-list">
           {payments.map((p) => (
-            <li key={p.id}>
-              <span>
-                <strong>{formatMoney(p.amount)}</strong> · {methodLabel(p.method)}
-                {p.renewed_until && <span className="hint"> · renewed to {formatDate(p.renewed_until)}</span>}
-                {p.note && <span className="hint"> · {p.note}</span>}
-              </span>
-              <span className="hint">{formatDateTime(p.paid_at)}</span>
-            </li>
+            <PaymentLine key={p.id} payment={p} />
           ))}
         </ul>
       )}
