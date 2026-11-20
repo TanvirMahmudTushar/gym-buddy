@@ -750,6 +750,17 @@ button.linklike {
   color: var(--muted);
 }
 
+/* Search boxes in list headers */
+input.search {
+  flex: 1 1 220px;
+  max-width: 320px;
+}
+
+.wrap-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 /* Dashboard: revenue and renewals */
 .stat dd a {
   color: inherit;

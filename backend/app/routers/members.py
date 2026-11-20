@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, Query
 from app.database import SessionDep
 from app.deps import CurrentUser, require_roles
 from app.models import (
+    AccountPage,
     CheckInPage,
     CheckInRead,
     MemberBulkDelete,
@@ -22,6 +23,9 @@ from app.models import (
 )
 from app.services import checkin_service, member_service, payment_service
 from app.services.member_service import MemberStatus
+
+# Part of a name, email or phone typed in a search box; surrounding spaces are ignored.
+Search = Annotated[str | None, Query(max_length=100)]
 
 # Only gym managers and admins may touch member records (SRS FR-19).
 router = APIRouter(
@@ -44,9 +48,24 @@ def list_members(
     offset: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
     status: MemberStatus | None = None,
+    q: Search = None,
 ) -> dict:
-    """Newest membership first. A frozen member counts as frozen whatever its expiry date."""
-    items, total = member_service.list_members(session, status, offset, limit)
+    """Newest membership first. A frozen member counts as frozen whatever its expiry date.
+    q finds members by part of the name, email or phone, in any case."""
+    items, total = member_service.list_members(session, status, offset, limit, (q or "").strip() or None)
+    return {"items": items, "total": total, "offset": offset, "limit": limit}
+
+
+@router.get("/waiting", response_model=AccountPage)
+def list_waiting(
+    session: SessionDep,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    q: Search = None,
+) -> dict:
+    """User accounts with no membership yet, newest sign-up first: the people to start a membership for.
+    Declared before /{member_id} so "waiting" is not read as an ID."""
+    items, total = member_service.list_waiting(session, offset, limit, (q or "").strip() or None)
     return {"items": items, "total": total, "offset": offset, "limit": limit}
 
 

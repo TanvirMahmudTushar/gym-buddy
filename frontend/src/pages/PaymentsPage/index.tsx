@@ -2,7 +2,7 @@ import { type FormEvent, Fragment, useEffect, useState } from "react"
 import { useAuth } from "../../context/AuthContext"
 import { exportPaymentsCsv, listPayments, voidPayment } from "../../services/paymentService"
 import type { Payment, PaymentFilters, PaymentMethod } from "../../types/payment"
-import { errorText, formatDate, formatDateTime, planLabel, todayUtc } from "../../utils/member"
+import { errorText, formatDate, formatDateTime, membersLink, planLabel, todayUtc } from "../../utils/member"
 import { METHODS, formatMoney, methodLabel, saveFile } from "../../utils/payment"
 
 const NO_FILTERS: PaymentFilters = { date_from: "", date_to: "", method: "", member: "", include_voided: false }
@@ -158,8 +158,14 @@ export default function PaymentsPage() {
                   <tr>
                     <td>{formatDateTime(p.paid_at)}</td>
                     <td className="name">
-                      {p.member_name}
-                      {p.member_id === null && <div className="hint">Account deleted</div>}
+                      {p.member_id === null ? (
+                        <>
+                          {p.member_name}
+                          <div className="hint">Account deleted</div>
+                        </>
+                      ) : (
+                        <a href={membersLink({ member: p.member_id })}>{p.member_name}</a>
+                      )}
                     </td>
                     <td className={p.voided_at ? "voided-amount" : undefined}>{formatMoney(p.amount)}</td>
                     <td>{methodLabel(p.method)}</td>

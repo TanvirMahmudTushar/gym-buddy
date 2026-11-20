@@ -15,7 +15,7 @@ export const FILTERS: { value: Filter; label: string }[] = [
 ]
 
 const EMPTY: Record<Filter, string> = {
-  all: "No members yet. Add the first one above.",
+  all: "No members yet. Start the first membership below.",
   active: "No active members.",
   expiring_soon: "No active membership ends in the next 7 days.",
   expired: "No expired members.",
@@ -26,6 +26,10 @@ interface Props {
   members: Member[]
   filter: Filter
   onFilterChange: (filter: Filter) => void
+  /** What is typed in the search box, and the search the list was loaded with. */
+  search: string
+  onSearchChange: (search: string) => void
+  query: string
   selectedId: number | null
   onSelect: (id: number) => void
   loading: boolean
@@ -59,7 +63,7 @@ export default function MemberList(props: Props) {
   if (loading && members.length === 0) body = <p className="empty">Loading members…</p>
   else if (error) body = <p className="error">{error}</p>
   else if (members.length === 0)
-    body = <p className="empty">{EMPTY[filter]}</p>
+    body = <p className="empty">{props.query ? `No members match "${props.query}".` : EMPTY[filter]}</p>
   else
     body = (
       <div className="table-wrap">
@@ -121,6 +125,17 @@ export default function MemberList(props: Props) {
     <section className="card" aria-labelledby="list-heading">
       <div className="toolbar">
         <h2 id="list-heading">Members</h2>
+        <input
+          type="search"
+          className="search"
+          aria-label="Search members by name, email or phone"
+          placeholder="Search name, email or phone"
+          value={props.search}
+          onChange={(e) => props.onSearchChange(e.target.value)}
+          maxLength={100}
+        />
+      </div>
+      <div className="toolbar">
         <div className="chips" role="group" aria-label="Filter by status">
           {FILTERS.map((f) => (
             <button

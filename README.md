@@ -49,7 +49,10 @@ Pages: `#/login`, `#/signup`, `#/dashboard` (Admin), `#/members` (Gym Manager, A
 - **Visit history:** each member's visits, newest first, with who recorded each one.
 - **Renewals due:** the **Expiring soon** chip on the Members page lists the active (not frozen) memberships that end today or within the next 7 days, soonest first, so staff know who to remind. Every member whose expiry is that close shows "today", "tomorrow" or "in 5 days" next to the date. The filter is kept in the address (`#/members?filter=expiring_soon`), so the Dashboard can link to it.
 - **Checked in today:** a card at the top of the Members page lists everyone who has arrived since midnight UTC. Click a name to open that member.
+- **Find a member:** the search box on the Members page finds members by part of their name, email or phone, in any case, together with the status chips.
+- **Waiting for a membership:** a card on the Members page lists the people who signed up in the app but have no membership yet, newest first, with its own search. **Start membership** fills their email into **Add member** and moves to the plan, so nobody types an email by hand.
 - **Add a member:** the person signs up first. On the Members page, **Add member** takes the email they signed up with, plus plan, expiry date and optional phone and notes; their name comes from their account. An email with no account is refused ("Ask the person to sign up first"), and so is an account that already has a membership.
+- **Open a member from anywhere:** every member's name in the Payments list, a class's bookings and Checked in today opens that member on the Members page. The address keeps the open member and the filter (`#/members?filter=expiring_soon&member=5`), so a reload or a shared link shows the same.
 - **Delete a member:** deletes the person's whole account. They can no longer log in, and their check-ins and class bookings are removed; their payments stay on record. Only a User's account can be deleted here: a Gym Manager or Admin who has a membership must have their role changed first.
 - **Classes:** the **Classes** page lists upcoming classes (or all of them), in start-time order. Add a class with a name, start time, length (15 to 240 minutes) and places (1 to 200), plus an optional trainer and description. Edit or delete a class, and open **Bookings** to see who has booked it. Capacity cannot be lowered below the bookings already made, and deleting a class deletes its bookings. A member's bookings are made by the member (see **User features**).
 
@@ -68,6 +71,7 @@ Pages: `#/login`, `#/signup`, `#/dashboard` (Admin), `#/members` (Gym Manager, A
 - **Plans and prices:** the **Plans** page sets the price (whole taka) and the number of days a renewal adds for the monthly, quarterly and yearly plans. The price fills in the amount when staff take a payment, and the days decide how far a renewal extends a membership. Payments already taken are not changed.
 - **Void a payment:** on the **Payments** page, **Void** marks a mistaken payment, with a reason that must be given. The payment stays on record (struck through, with who voided it, when and why) but is left out of every total. Voiding an already voided payment changes nothing. Voiding does not change the member's expiry date; edit it on the Members page if a renewal was wrong.
 - **Export CSV:** on the **Payments** page, **Export CSV** downloads every payment that matches the current filters (not just the rows loaded), newest first, with the columns `id`, `paid_at_utc`, `member`, `member_id`, `amount_taka`, `method`, `plan`, `renewed_until`, `note`, `recorded_by`, `voided_at_utc`, `void_reason` and `voided_by`. It opens in Excel or Google Sheets with Bengali names intact, and any text that a spreadsheet would run as a formula (starting with `=`, `+`, `-` or `@`) is saved with a leading `'` so it shows as plain text.
+- **Users and their memberships:** the **Users** page shows each account's membership (plan, status and expiry, linking to the member) or "None yet" with a link to start one, and has a search by name or email.
 - **Ban / unban:** on the **Users** page, an admin can ban a User or Gym Manager with an optional reason. A banned person gets `403 Account banned` when logging in and on every request, even with a token that has not expired, and the app logs them out. Unbanning restores access with their role and data unchanged. An admin cannot ban themself or another admin; change the other admin's role first.
 
 **First admin.** Nobody can make themselves an admin. Sign up in the app, then in Supabase → **Table Editor** → `app_user`, set that row's `role` to `admin` (or run `update app_user set role = 'admin' where email = 'you@example.com';` in the SQL editor). Log in again. From then on, change roles on the **Users** page.
@@ -83,7 +87,7 @@ Interactive docs: `/api/docs` (for example http://localhost:8000/api/docs).
 | Operation | Method and path | Success | Errors |
 |---|---|---|---|
 | Create (start a membership) | `POST /api/v1/members` `{email, plan, expires_on, phone?, notes?}` | `201` member | `409` (already a member), `422` (no account has that email) |
-| Read list | `GET /api/v1/members?offset=0&limit=20&status=active` | `200` `{items, total, offset, limit}`, newest first (`expiring_soon`: soonest expiry first) | `422` |
+| Read list | `GET /api/v1/members?offset=0&limit=20&status=active&q=rafi` (`q`: part of the name, email or phone) | `200` `{items, total, offset, limit}`, newest first (`expiring_soon`: soonest expiry first) | `422` |
 | Read single | `GET /api/v1/members/{id}` | `200` member | `404` |
 | Update | `PATCH /api/v1/members/{id}` | `200` member | `404`, `422` |
 | Delete (the account) | `DELETE /api/v1/members/{id}` | `204` | `400` (Gym Manager or Admin), `404` |
@@ -116,7 +120,8 @@ Interactive docs: `/api/docs` (for example http://localhost:8000/api/docs).
 | My account | `GET` / `PATCH /api/v1/users/me` | `200` user | `401`, `422` |
 | Dashboard stats (admin) | `GET /api/v1/admin/stats` | `200` `{members, users, check_ins, classes}` counts; `members.expiring_soon` included | `401`, `403` |
 | Revenue (admin) | `GET /api/v1/admin/revenue` | `200` `{today, this_month, last_30_days, last_30_days_from, by_method, months}` in whole taka, voided left out | `401`, `403` |
-| List users (admin) | `GET /api/v1/admin/users?offset=0&limit=20` | `200` `{items, total, offset, limit}`; each user has `is_banned`, `banned_at`, `ban_reason` | `401`, `403` |
+| Waiting for a membership | `GET /api/v1/members/waiting?offset=0&limit=20&q=` | `200` `{items, total, offset, limit}` of `{id, name, email, role, created_at}`: User accounts with no membership, newest first | `401`, `403` |
+| List users (admin) | `GET /api/v1/admin/users?offset=0&limit=20&q=` (`q`: part of the name or email) | `200` `{items, total, offset, limit}`; each user has `is_banned`, `banned_at`, `ban_reason`, `plan`, `expires_on`, `is_frozen` | `401`, `403` |
 | Change role (admin) | `PATCH /api/v1/admin/users/{id}/role` `{"role": "gym_manager"}` | `200` user | `400` (own role), `403`, `404`, `422` |
 | Ban (admin) | `POST /api/v1/admin/users/{id}/ban` `{"reason": "optional"}` | `200` user | `400` (self or another admin), `403`, `404`, `422` |
 | Unban (admin) | `POST /api/v1/admin/users/{id}/unban` | `200` user | `403`, `404` |
