@@ -1,6 +1,6 @@
 # Member CRUD endpoints under /api/v1/members (TDD 6.1). Routes only handle HTTP; the rules live in app/services/member_service.py.
 # A member is a user with a membership, so {member_id} is the user's id.
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Query
 
@@ -8,6 +8,7 @@ from app.database import SessionDep
 from app.deps import CurrentUser, require_roles
 from app.models import (
     AccountPage,
+    BookedClassPage,
     CheckInPage,
     CheckInRead,
     MemberBulkDelete,
@@ -21,7 +22,7 @@ from app.models import (
     PaymentRead,
     User,
 )
-from app.services import checkin_service, member_service, payment_service
+from app.services import checkin_service, class_service, member_service, payment_service
 from app.services.member_service import MemberStatus
 
 # Part of a name, email or phone typed in a search box; surrounding spaces are ignored.
@@ -121,6 +122,26 @@ def list_member_payments(
     """This member's payments, newest first."""
     items, total = payment_service.list_member_payments(session, member_id, offset, limit)
     return {"items": items, "total": total, "offset": offset, "limit": limit}
+
+
+@router.get("/{member_id}/bookings", response_model=BookedClassPage)
+def list_member_bookings(
+    member_id: int,
+    session: SessionDep,
+    when: Literal["upcoming", "past"] = "upcoming",
+    offset: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+) -> dict:
+    """This member's bookings: upcoming ones soonest first (the default), or past ones latest first."""
+    member_service.get_member(session, member_id)
+    items, total = class_service.list_member_bookings(session, member_id, when, offset, limit)
+    return {"items": items, "total": total, "offset": offset, "limit": limit}
+
+
+@router.delete("/{member_id}/bookings/{class_id}", status_code=204)
+def cancel_member_booking(member_id: int, class_id: int, session: SessionDep) -> None:
+    """The front desk cancels a booking for the member. 400 once the class has started; 404 if there is none."""
+    class_service.cancel_booking(session, class_id, member_service.get_member(session, member_id))
 
 
 @router.delete("/{member_id}", status_code=204)

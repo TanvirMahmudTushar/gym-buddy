@@ -1,9 +1,12 @@
 import { useEffect, useState } from "react"
+import BookingsSection from "../../components/BookingsSection"
 import MyPayments from "../../components/MyPayments"
+import PlansCard from "../../components/PlansCard"
 import StatusPill from "../../components/StatusPill"
 import { useAuth } from "../../context/AuthContext"
 import { ApiError } from "../../services/api"
-import { getMyMembership, listMyCheckIns } from "../../services/meService"
+import { cancelBooking } from "../../services/classService"
+import { getMyMembership, listMyBookings, listMyCheckIns } from "../../services/meService"
 import type { CheckIn } from "../../types/checkIn"
 import type { Member } from "../../types/member"
 import { errorText, formatDate, formatDateTime, memberStatus, planLabel, todayUtc } from "../../utils/member"
@@ -111,7 +114,7 @@ export default function MembershipPage() {
           )}
         </dl>
         {status === "active" && <p className="hint">{expiryNote(member.expires_on)}.</p>}
-        {status === "expired" && <p className="hint">Your membership has expired. Ask the front desk to renew it to book classes.</p>}
+        {status === "expired" && <p className="hint">Your membership has expired. Renew it at the front desk to book classes; the prices are below.</p>}
         {status === "frozen" && <p className="hint">Your membership is frozen. Ask the front desk to unfreeze it to book classes.</p>}
       </section>
       <section className="card" aria-labelledby="visits-heading">
@@ -133,6 +136,19 @@ export default function MembershipPage() {
           </button>
         )}
       </section>
+      <BookingsSection
+        variant="card"
+        title="My bookings"
+        load={listMyBookings}
+        cancel={cancelBooking}
+        emptyText="You have no upcoming classes."
+        footer={
+          <p className="hint">
+            <a href="#/timetable">Book a class</a>
+          </p>
+        }
+      />
+      <PlansCard currentPlan={member.plan} />
       <MyPayments />
     </div>
   )

@@ -1,4 +1,6 @@
 # Classes and their bookings: what a gym manager runs (SRS FR-25 to FR-28).
+from typing import Literal
+
 from sqlalchemy import exists, false
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, col, delete, func, select
@@ -16,7 +18,7 @@ class CapacityBelowBookingsError(Exception):
 
 
 class ClassStartedError(Exception):
-    """The class has already started, so it cannot be booked."""
+    """The class has already started, so it can no longer be booked or cancelled."""
 
 
 class ClassFullError(Exception):
@@ -179,9 +181,47 @@ def book_class(session: Session, class_id: int, member: User) -> dict:
     }
 
 
+def list_member_bookings(
+    session: Session, member_id: int, when: Literal["upcoming", "past"], offset: int, limit: int
+) -> tuple[list[dict], int]:
+    """A member's bookings with their classes: upcoming ones soonest first, or past ones latest first."""
+    now = utc_now()
+    upcoming = when == "upcoming"
+    filters = [
+        col(ClassBooking.member_id) == member_id,
+        col(GymClass.starts_at) >= now if upcoming else col(GymClass.starts_at) < now,
+    ]
+    joined = col(ClassBooking.class_id) == col(GymClass.id)
+    total = session.exec(select(func.count()).select_from(ClassBooking).join(GymClass, joined).where(*filters)).one()
+    order = col(GymClass.starts_at) if upcoming else col(GymClass.starts_at).desc()
+    rows = session.exec(
+        select(ClassBooking, GymClass)
+        .join(GymClass, joined)
+        .where(*filters)
+        .order_by(order, col(GymClass.id))
+        .offset(offset)
+        .limit(limit)
+    ).all()
+    items = [
+        {
+            "class_id": c.id,
+            "class_name": c.name,
+            "starts_at": c.starts_at,
+            "duration_minutes": c.duration_minutes,
+            "trainer_name": c.trainer_name,
+            "booked_at": b.booked_at,
+        }
+        for b, c in rows
+    ]
+    return items, total
+
+
 def cancel_booking(session: Session, class_id: int, member: User) -> None:
-    """A member cancels their own booking; nobody can cancel for someone else."""
-    _get(session, class_id)
+    """Cancel a member's booking: the member themself, or staff at the front desk for them.
+    A class that has started is history, so its booking can no longer be cancelled."""
+    gym_class = _get(session, class_id)
+    if as_utc(gym_class.starts_at) <= utc_now():
+        raise ClassStartedError
     booking = session.get(ClassBooking, (class_id, member.id))
     if booking is None:
         raise BookingNotFoundError

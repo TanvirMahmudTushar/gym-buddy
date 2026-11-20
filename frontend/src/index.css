@@ -977,3 +977,15 @@ input.search {
       border-color 0.12s;
   }
 }
+
+/* Bookings and plans on the member pages */
+.subhead {
+  margin: 4px 0 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.plan-current {
+  margin-left: 8px;
+}

@@ -1,12 +1,21 @@
 # The logged-in user's own account under /api/v1/users (TDD 6.2).
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Query, Response
 
 from app.database import SessionDep
 from app.deps import CurrentUser
-from app.models import CheckInPage, MemberRead, PasswordChange, PaymentPage, User, UserNameUpdate, UserRead
-from app.services import auth_service, checkin_service, member_service, payment_service, user_service
+from app.models import (
+    BookedClassPage,
+    CheckInPage,
+    MemberRead,
+    PasswordChange,
+    PaymentPage,
+    User,
+    UserNameUpdate,
+    UserRead,
+)
+from app.services import auth_service, checkin_service, class_service, member_service, payment_service, user_service
 
 router = APIRouter(prefix="/api/v1/users", tags=["users"])
 
@@ -38,6 +47,19 @@ def list_my_check_ins(
     """My visits, newest first. 404 if I have no membership."""
     member = member_service.get_own_membership(user)
     items, total = checkin_service.list_member_check_ins(session, member.id, offset, limit)
+    return {"items": items, "total": total, "offset": offset, "limit": limit}
+
+
+@router.get("/me/bookings", response_model=BookedClassPage)
+def list_my_bookings(
+    user: CurrentUser,
+    session: SessionDep,
+    when: Literal["upcoming", "past"] = "upcoming",
+    offset: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+) -> dict:
+    """My own bookings: upcoming ones soonest first (the default), or past ones latest first. Empty if I have none."""
+    items, total = class_service.list_member_bookings(session, user.id, when, offset, limit)
     return {"items": items, "total": total, "offset": offset, "limit": limit}
 
 
