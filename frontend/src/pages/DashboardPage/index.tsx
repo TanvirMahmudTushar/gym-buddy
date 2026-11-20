@@ -1,13 +1,23 @@
 import { useCallback, useEffect, useState } from "react"
-import { getStats } from "../../services/adminService"
+import RevenueCard from "../../components/RevenueCard"
+import { getRevenue, getStats } from "../../services/adminService"
 import type { AdminStats } from "../../types/auth"
+import type { RevenueStats } from "../../types/payment"
 import { errorText } from "../../utils/member"
 
-function Stat({ label, value, alert = false }: { label: string; value: number; alert?: boolean }) {
+interface StatProps {
+  label: string
+  value: number
+  alert?: boolean
+  /** Makes the number a link to the list it counts. */
+  href?: string
+}
+
+function Stat({ label, value, alert = false, href }: StatProps) {
   return (
     <div className={alert && value > 0 ? "stat alert" : "stat"}>
       <dt>{label}</dt>
-      <dd>{value}</dd>
+      <dd>{href ? <a href={href}>{value}</a> : value}</dd>
     </div>
   )
 }
@@ -15,6 +25,7 @@ function Stat({ label, value, alert = false }: { label: string; value: number; a
 // Admins only: how the gym and the app are being used.
 export default function DashboardPage() {
   const [stats, setStats] = useState<AdminStats | null>(null)
+  const [revenue, setRevenue] = useState<RevenueStats | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
 
@@ -22,7 +33,9 @@ export default function DashboardPage() {
     setLoading(true)
     setError("")
     try {
-      setStats(await getStats())
+      const [s, r] = await Promise.all([getStats(), getRevenue()])
+      setStats(s)
+      setRevenue(r)
     } catch (err) {
       setError(errorText(err))
     } finally {
@@ -58,11 +71,13 @@ export default function DashboardPage() {
               <Stat label="Expired" value={stats.members.expired} />
               <Stat label="Frozen" value={stats.members.frozen} />
               <Stat label="New in the last 7 days" value={stats.members.new_last_7_days} />
+              <Stat label="Expiring in 7 days" value={stats.members.expiring_soon} href="#/members?filter=expiring_soon" />
             </dl>
             <p className="hint">
               <a href="#/members">Open the members page</a>
             </p>
           </section>
+          {revenue && <RevenueCard revenue={revenue} />}
           <section className="card" aria-labelledby="stats-checkins">
             <h2 id="stats-checkins">Check-ins</h2>
             <dl className="stats">

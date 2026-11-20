@@ -48,6 +48,19 @@ export interface PaymentFilters {
   include_voided: boolean
 }
 
+/** Money taken, by UTC calendar day; voided payments are never counted. */
+export interface RevenueStats {
+  today: number
+  this_month: number
+  /** The last 30 days, today included, starting on last_30_days_from (YYYY-MM-DD). */
+  last_30_days: number
+  last_30_days_from: string
+  /** The last 30 days by method: all four methods, zero when unused. */
+  by_method: { method: PaymentMethod; amount: number; count: number }[]
+  /** The last 6 months, oldest first, as YYYY-MM; the last is this month so far. */
+  months: { month: string; amount: number }[]
+}
+
 export interface PaymentBody {
   amount: number
   method: PaymentMethod

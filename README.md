@@ -12,7 +12,7 @@ backend/          FastAPI app (routes under /api)
   app/security.py password hashing (Argon2) and login tokens (JWT)
   app/deps.py     who is calling, and the role check
   app/routers/    members.py, auth.py, users.py, admin.py, check_ins.py, classes.py, plans.py, payments.py: the endpoints (HTTP only)
-  app/services/   member_service.py, auth_service.py, user_service.py, checkin_service.py, class_service.py, payment_service.py, stats_service.py: rules and database queries
+  app/services/   member_service.py, auth_service.py, user_service.py, checkin_service.py, class_service.py, payment_service.py, stats_service.py, revenue_service.py: rules and database queries
 frontend/         Vite + React + TypeScript, one page (src/pages/HomePage/index.tsx)
   src/components/ add form, member list, details panel
   src/context/    AuthContext.tsx: who is logged in
@@ -47,6 +47,7 @@ Pages: `#/login`, `#/signup`, `#/dashboard` (Admin), `#/members` (Gym Manager, A
 **Gym Manager features (also available to Admins)**
 - **Check in a member:** open a member on the Members page and click **Check in**. Frozen and expired members cannot be checked in (the page says why; renew or unfreeze first). The same member can check in more than once a day.
 - **Visit history:** each member's visits, newest first, with who recorded each one.
+- **Renewals due:** the **Expiring soon** chip on the Members page lists the active (not frozen) memberships that end today or within the next 7 days, soonest first, so staff know who to remind. Every member whose expiry is that close shows "today", "tomorrow" or "in 5 days" next to the date. The filter is kept in the address (`#/members?filter=expiring_soon`), so the Dashboard can link to it.
 - **Checked in today:** a card at the top of the Members page lists everyone who has arrived since midnight UTC. Click a name to open that member.
 - **Add a member:** the person signs up first. On the Members page, **Add member** takes the email they signed up with, plus plan, expiry date and optional phone and notes; their name comes from their account. An email with no account is refused ("Ask the person to sign up first"), and so is an account that already has a membership.
 - **Delete a member:** deletes the person's whole account. They can no longer log in, and their check-ins and class bookings are removed; their payments stay on record. Only a User's account can be deleted here: a Gym Manager or Admin who has a membership must have their role changed first.
@@ -62,7 +63,8 @@ Pages: `#/login`, `#/signup`, `#/dashboard` (Admin), `#/members` (Gym Manager, A
 - **My account:** change your name, and change your password. After a password change every earlier login stops working and you log in again with the new password.
 
 **Admin features**
-- **Dashboard:** members (total, active, expired, frozen, new in the last 7 days), check-ins (today, last 7 days), classes (total, upcoming) and accounts (total, users, gym managers, admins, banned).
+- **Dashboard:** members (total, active, expired, frozen, new in the last 7 days, and **Expiring in 7 days**, which links to that list), check-ins (today, last 7 days), classes (total, upcoming) and accounts (total, users, gym managers, admins, banned).
+- **Revenue:** a card on the Dashboard with the money taken today, this month and in the last 30 days (today included), the last 30 days split by payment method, and a column chart of the last 6 months (hover or focus a column for its amount; **Show as a table** lists every month). Days are UTC days, the same as the Payments page filters, so each number matches the Payments page total for the same dates. Voided payments are never counted.
 - **Plans and prices:** the **Plans** page sets the price (whole taka) and the number of days a renewal adds for the monthly, quarterly and yearly plans. The price fills in the amount when staff take a payment, and the days decide how far a renewal extends a membership. Payments already taken are not changed.
 - **Void a payment:** on the **Payments** page, **Void** marks a mistaken payment, with a reason that must be given. The payment stays on record (struck through, with who voided it, when and why) but is left out of every total. Voiding an already voided payment changes nothing. Voiding does not change the member's expiry date; edit it on the Members page if a renewal was wrong.
 - **Export CSV:** on the **Payments** page, **Export CSV** downloads every payment that matches the current filters (not just the rows loaded), newest first, with the columns `id`, `paid_at_utc`, `member`, `member_id`, `amount_taka`, `method`, `plan`, `renewed_until`, `note`, `recorded_by`, `voided_at_utc`, `void_reason` and `voided_by`. It opens in Excel or Google Sheets with Bengali names intact, and any text that a spreadsheet would run as a formula (starting with `=`, `+`, `-` or `@`) is saved with a leading `'` so it shows as plain text.
@@ -79,7 +81,7 @@ Interactive docs: `/api/docs` (for example http://localhost:8000/api/docs).
 | Operation | Method and path | Success | Errors |
 |---|---|---|---|
 | Create (start a membership) | `POST /api/v1/members` `{email, plan, expires_on, phone?, notes?}` | `201` member | `409` (already a member), `422` (no account has that email) |
-| Read list | `GET /api/v1/members?offset=0&limit=20&status=active` | `200` `{items, total, offset, limit}`, newest first | `422` |
+| Read list | `GET /api/v1/members?offset=0&limit=20&status=active` | `200` `{items, total, offset, limit}`, newest first (`expiring_soon`: soonest expiry first) | `422` |
 | Read single | `GET /api/v1/members/{id}` | `200` member | `404` |
 | Update | `PATCH /api/v1/members/{id}` | `200` member | `404`, `422` |
 | Delete (the account) | `DELETE /api/v1/members/{id}` | `204` | `400` (Gym Manager or Admin), `404` |
@@ -110,7 +112,8 @@ Interactive docs: `/api/docs` (for example http://localhost:8000/api/docs).
 | Sign up | `POST /api/v1/auth/signup` `{email, name, password}` | `201` user (role `user`) | `409`, `422` |
 | Log in | `POST /api/v1/auth/login` `{email, password}` | `200` `{access_token, token_type, user}` | `401`, `422` |
 | My account | `GET` / `PATCH /api/v1/users/me` | `200` user | `401`, `422` |
-| Dashboard stats (admin) | `GET /api/v1/admin/stats` | `200` `{members, users}` counts | `401`, `403` |
+| Dashboard stats (admin) | `GET /api/v1/admin/stats` | `200` `{members, users, check_ins, classes}` counts; `members.expiring_soon` included | `401`, `403` |
+| Revenue (admin) | `GET /api/v1/admin/revenue` | `200` `{today, this_month, last_30_days, last_30_days_from, by_method, months}` in whole taka, voided left out | `401`, `403` |
 | List users (admin) | `GET /api/v1/admin/users?offset=0&limit=20` | `200` `{items, total, offset, limit}`; each user has `is_banned`, `banned_at`, `ban_reason` | `401`, `403` |
 | Change role (admin) | `PATCH /api/v1/admin/users/{id}/role` `{"role": "gym_manager"}` | `200` user | `400` (own role), `403`, `404`, `422` |
 | Ban (admin) | `POST /api/v1/admin/users/{id}/ban` `{"reason": "optional"}` | `200` user | `400` (self or another admin), `403`, `404`, `422` |
@@ -118,7 +121,7 @@ Interactive docs: `/api/docs` (for example http://localhost:8000/api/docs).
 
 - Every `/api/v1/members` endpoint needs `Authorization: Bearer <access_token>` from a Gym Manager or Admin: `401` without a token, `403` for a User.
 - A member's `id` is their user id. A member is `{id, name, email, phone, plan, joined_on, expires_on, is_frozen, notes}`.
-- `status` filter: `active` (valid), `expired` (expiry date passed) or `frozen` (`is_frozen = true`).
+- `status` filter: `active` (valid), `expired` (expiry date passed), `frozen` (`is_frozen = true`) or `expiring_soon` (not frozen, expiring from today to 7 days from today, both included).
 - `total` counts every member matching the filter, not just the page returned.
 - `PATCH` changes only the fields sent (`name`, `phone`, `plan`, `expires_on`, `is_frozen`, `notes`): a later `expires_on` renews, `is_frozen: true` freezes.
 

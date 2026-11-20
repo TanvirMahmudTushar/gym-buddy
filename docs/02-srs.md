@@ -171,7 +171,7 @@ Every Admin is also a logged-in user, so they can log out, edit their profile an
 | ID | Requirement | Release | Story |
 |---|---|---|---|
 | FR-01 | The system shall create a member from a JSON body with `full_name`, `plan`, `expires_on` (required) and `phone`, `joined_on`, `notes` (optional). `joined_on` defaults to today. New members have `is_active = true`. | MVP | US-01 |
-| FR-02 | The system shall return the list of members, newest first. The list can be filtered by `status`: `active` (valid), `expired` or `frozen`. | MVP | US-02 |
+| FR-02 | The system shall return the list of members, newest first. The list can be filtered by `status`: `active` (valid), `expired` or `frozen`; (Beta) also `expiring_soon` (FR-53). | MVP | US-02 |
 | FR-03 | The list shall support `offset` (default 0) and `limit` (default 20, max 100) query parameters. | MVP | US-02 |
 | FR-04 | The system shall return one member by their ID. | MVP | US-03 |
 | FR-05 | The system shall update any of `full_name`, `phone`, `plan`, `expires_on`, `is_active`, `notes` on an existing member. Fields not sent stay unchanged. Setting a later `expires_on` renews the membership; setting `is_active = false` freezes it. | MVP | US-04, US-05 |
@@ -219,7 +219,7 @@ Every Admin is also a logged-in user, so they can log out, edit their profile an
 | FR-21 | An admin shall be able to list all users (paginated). | Beta | US-12 |
 | FR-22 | An admin shall be able to change another user's role. An admin cannot change their own role (`400`), so the system always keeps at least one admin. | Beta | US-12 |
 | FR-24 | A caller whose role is not allowed on an endpoint shall get `403` (admin-only endpoints: every role except `admin`). | Beta | US-12, US-13 |
-| FR-35 | An admin shall be able to view dashboard stats: total members, active members, expired members, new members in the last 7 days, total and upcoming classes, check-ins today and in the last 7 days, and total users, admins and banned users. | Beta | US-20 |
+| FR-35 | An admin shall be able to view dashboard stats: total members, active members, expired members, new members in the last 7 days, memberships expiring soon (FR-53), total and upcoming classes, check-ins today and in the last 7 days, and total users, admins and banned users. | Beta | US-20 |
 | FR-36 | An admin shall be able to ban a user with an optional reason. Banning revokes all the user's refresh tokens. An admin cannot ban themself or another admin (`400`); demote the admin first. | Beta | US-21 |
 | FR-37 | A banned user shall get `403` ("Account banned") on login and on every authenticated request, even with an access token that has not expired yet. | Beta | US-21 |
 | FR-38 | An admin shall be able to unban a user; the user can then log in again. The user's linked membership and bookings are kept while banned. | Beta | US-22 |
@@ -268,8 +268,10 @@ Every Admin is also a logged-in user, so they can log out, edit their profile an
 | FR-49 | A logged-in user shall be able to list their own payments, newest first, paginated, with voided payments included and marked. Nobody can list another person's payments this way. | Beta | US-25 |
 | FR-50 | An admin shall be able to void a payment with a required `reason` (1 to 200 characters). The payment stays on record with `voided_at`, `void_reason` and who voided it, but is left out of every total and of revenue. Voiding an already voided payment changes nothing. Voiding does not change the member's expiry date. A gym manager gets `403`, an unknown payment `404`. | Beta | US-25 |
 | FR-51 | An admin shall be able to download the payments matching the FR-48 filters as a CSV file (UTF-8 with a byte order mark, one header row, newest first). A text cell starting with `=`, `+`, `-`, `@`, a tab or a carriage return is saved with a leading `'`, so a spreadsheet shows it as text instead of running it as a formula. A gym manager gets `403`. | Beta | US-25 |
+| FR-52 | An admin shall be able to view revenue in whole taka: today, this month, the last 30 days (today included, with its start date), the last 30 days split by payment method (all four methods, zero when unused, with the number of payments), and each of the last 6 months (oldest first, this month last). Days and months are UTC calendar days, the same as the FR-48 date filters, so each number equals the FR-48 `total_amount` for the same dates. Voided payments are never counted. A gym manager or user gets `403`. | Beta | US-20 |
+| FR-53 | A gym manager or admin shall be able to list the memberships that are expiring soon: not frozen, with `expires_on` from today to today + 7 days (both included), soonest first. The dashboard's `expiring_soon` count uses the same rule, so it always equals the length of this list. | Beta | US-25 |
 
-> **Built so far (payments):** FR-43 to FR-51. The revenue numbers and the expiring-soon list (#36) are a separate issue.
+> **Built so far (payments):** FR-43 to FR-53.
 
 ### 3.8 Account security — Beta
 
@@ -335,7 +337,8 @@ A new member always starts as `Active` if `expires_on` is today or later. "Expir
 | View a class's bookings | No | No (`403`) | Yes | Yes |
 | Book or cancel own class booking | No | Yes (valid membership needed to book) | Only if linked | Only if linked |
 | List users, change roles | No | No (`403`) | No (`403`) | Yes |
-| View dashboard stats, ban / unban users | No | No (`403`) | No (`403`) | Yes (not self, not other admins) |
+| View dashboard stats and revenue, ban / unban users | No | No (`403`) | No (`403`) | Yes (not self, not other admins) |
+| List members expiring soon | No | No (`403`) | Yes | Yes |
 | View own payments | No | Yes | Yes | Yes |
 | Record payments, list a member's payments and all payments | No | No (`403`) | Yes | Yes |
 | Void a payment, export payments as CSV | No | No (`403`) | No (`403`) | Yes |
@@ -554,6 +557,17 @@ Every endpoint except sign up, log in, refresh, health and the docs returns `401
 - When an admin sends `GET /api/v1/payments/export.csv?method=card`, the response is `200` `text/csv` with a header row and only card payments; a gym manager gets `403`.
 - A note `=1+2` is saved in the CSV as `'=1+2`.
 
+**AC-33 Revenue (FR-52)**
+- Given payments of 1,000 cash today, 500 card today (voided), 2,000 card 10 days ago, 300 mobile banking 29 days ago and 400 cash 30 days ago
+- When an admin sends `GET /api/v1/admin/revenue`, the response is `200` with `today = 1000` and `last_30_days = 3300`; `by_method` lists cash 1,000, card 2,000, bank transfer 0 and mobile banking 300.
+- Each total equals `total_amount` from `GET /api/v1/payments` with the same `date_from` and `date_to`, including each of the 6 months.
+- A gym manager gets `403`.
+
+**AC-34 Expiring soon (FR-53)**
+- Given active members expiring today, in 5 days, in 7 days and in 8 days, one expired yesterday and one frozen expiring in 3 days
+- When a gym manager sends `GET /api/v1/members?status=expiring_soon`, the response lists the three expiring today, in 5 days and in 7 days, in that order.
+- `GET /api/v1/admin/stats` returns `members.expiring_soon = 3`.
+
 ## 6. Traceability
 
 | Story | Requirements | Endpoint (see [TDD, section 6](03-tdd.md#6-rest-api-design)) | Release |
@@ -576,8 +590,8 @@ Every endpoint except sign up, log in, refresh, health and the docs returns `401
 | US-17 | FR-28 | `GET /api/v1/classes/{id}/bookings` | Beta |
 | US-18 | FR-30 – FR-32 | `POST` / `GET /api/v1/members/{id}/check-ins` | Beta |
 | US-19 | FR-34, NFR-11 – NFR-14 | `POST /api/v1/auth/login` | Beta |
-| US-20 | FR-35 | `GET /api/v1/admin/stats` | Beta |
+| US-20 | FR-35, FR-52 | `GET /api/v1/admin/stats`, `GET /api/v1/admin/revenue` | Beta |
 | US-21 | FR-36, FR-37, FR-39 | `POST /api/v1/admin/users/{id}/ban`, `GET /api/v1/admin/users` | Beta |
 | US-22 | FR-38 | `POST /api/v1/admin/users/{id}/unban` | Beta |
 | US-23, US-24 | FR-16, FR-40, FR-41 | `GET` / `PATCH /api/v1/users/me`, `POST /api/v1/users/me/password` | Beta |
-| US-25, US-26 | FR-43 – FR-51 | `/api/v1/plans`, `/api/v1/members/{id}/payments`, `/api/v1/payments`, `/api/v1/payments/{id}/void`, `/api/v1/payments/export.csv`, `/api/v1/users/me/payments`, `PUT /api/v1/admin/plans/{plan}` | Beta |
+| US-25, US-26 | FR-43 – FR-51, FR-53 | `GET /api/v1/members?status=expiring_soon`, `/api/v1/plans`, `/api/v1/members/{id}/payments`, `/api/v1/payments`, `/api/v1/payments/{id}/void`, `/api/v1/payments/export.csv`, `/api/v1/users/me/payments`, `PUT /api/v1/admin/plans/{plan}` | Beta |

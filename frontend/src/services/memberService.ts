@@ -1,11 +1,11 @@
 // fetch helpers for the member REST API (/api/v1/members); managers and admins only.
 import { request } from "./api"
-import type { Member, MemberBulkDeleteResult, MemberCreate, MemberPage, MemberStatus, MemberUpdate } from "../types/member"
+import type { Member, MemberBulkDeleteResult, MemberCreate, MemberFilter, MemberPage, MemberUpdate } from "../types/member"
 
 const BASE = "/api/v1/members"
 const PAGE_SIZE = 20
 
-export function listMembers(offset: number, status: MemberStatus | null): Promise<MemberPage> {
+export function listMembers(offset: number, status: MemberFilter | null): Promise<MemberPage> {
   const params = new URLSearchParams({ offset: String(offset), limit: String(PAGE_SIZE) })
   if (status) params.set("status", status)
   return request<MemberPage>(`${BASE}?${params}`)

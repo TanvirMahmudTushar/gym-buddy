@@ -5,7 +5,7 @@ from sqlmodel import Session, col, func, select
 
 from app.models import User, utc_now, utc_today
 from app.services import checkin_service, class_service
-from app.services.member_service import IS_MEMBER
+from app.services.member_service import IS_MEMBER, status_filters
 
 
 def _count_members(session: Session, *filters) -> int:
@@ -13,16 +13,16 @@ def _count_members(session: Session, *filters) -> int:
 
 
 def member_stats(session: Session) -> dict:
-    """Same rules as the member list: a frozen member counts as frozen whatever its expiry date."""
+    """The member list's own filters, so each number matches the list with that filter chip."""
     today = utc_today()
-    not_frozen = col(User.is_frozen).is_(False)
     return {
         "total": _count_members(session),
-        "active": _count_members(session, not_frozen, col(User.expires_on) >= today),
-        "expired": _count_members(session, not_frozen, col(User.expires_on) < today),
-        "frozen": _count_members(session, col(User.is_frozen).is_(True)),
+        "active": _count_members(session, *status_filters("active")),
+        "expired": _count_members(session, *status_filters("expired")),
+        "frozen": _count_members(session, *status_filters("frozen")),
         # Memberships started in the last 7 days (joined_on is a date, so today counts as day one).
         "new_last_7_days": _count_members(session, col(User.joined_on) > today - timedelta(days=7)),
+        "expiring_soon": _count_members(session, *status_filters("expiring_soon")),
     }
 
 

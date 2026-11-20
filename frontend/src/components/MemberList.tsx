@@ -1,17 +1,26 @@
 import { type KeyboardEvent } from "react"
-import type { Member, MemberStatus } from "../types/member"
-import { formatDate, memberStatus, planLabel } from "../utils/member"
+import type { Member, MemberFilter } from "../types/member"
+import { expiresSoonNote, formatDate, memberStatus, planLabel } from "../utils/member"
 import BulkDeleteBar from "./BulkDeleteBar"
 import StatusPill from "./StatusPill"
 
-export type Filter = MemberStatus | "all"
+export type Filter = MemberFilter | "all"
 
-const FILTERS: { value: Filter; label: string }[] = [
+export const FILTERS: { value: Filter; label: string }[] = [
   { value: "all", label: "All" },
   { value: "active", label: "Active" },
+  { value: "expiring_soon", label: "Expiring soon" },
   { value: "expired", label: "Expired" },
   { value: "frozen", label: "Frozen" },
 ]
+
+const EMPTY: Record<Filter, string> = {
+  all: "No members yet. Add the first one above.",
+  active: "No active members.",
+  expiring_soon: "No active membership ends in the next 7 days.",
+  expired: "No expired members.",
+  frozen: "No frozen members.",
+}
 
 interface Props {
   members: Member[]
@@ -50,7 +59,7 @@ export default function MemberList(props: Props) {
   if (loading && members.length === 0) body = <p className="empty">Loading members…</p>
   else if (error) body = <p className="error">{error}</p>
   else if (members.length === 0)
-    body = <p className="empty">{filter === "all" ? "No members yet. Add the first one above." : `No ${filter} members.`}</p>
+    body = <p className="empty">{EMPTY[filter]}</p>
   else
     body = (
       <div className="table-wrap">
@@ -94,7 +103,10 @@ export default function MemberList(props: Props) {
                 </td>
                 <td className="name">{m.name}</td>
                 <td>{planLabel(m.plan)}</td>
-                <td>{formatDate(m.expires_on)}</td>
+                <td>
+                  {formatDate(m.expires_on)}
+                  {expiresSoonNote(m) && <span className="hint"> · {expiresSoonNote(m)}</span>}
+                </td>
                 <td>
                   <StatusPill status={memberStatus(m)} />
                 </td>
