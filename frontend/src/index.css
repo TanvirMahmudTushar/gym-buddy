@@ -989,3 +989,31 @@ input.search {
 .plan-current {
   margin-left: 8px;
 }
+
+/* Admin password reset: the temporary password, shown once */
+.reset-row td {
+  background: var(--info-bg);
+  white-space: normal;
+}
+
+.reset-result {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.temp-password {
+  padding: 4px 10px;
+  font-family: ui-monospace, Consolas, "Courier New", monospace;
+  font-size: 16px;
+  letter-spacing: 1px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  user-select: all;
+}
+
+.reset-row .hint {
+  margin: 8px 0 0;
+}

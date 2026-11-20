@@ -4,8 +4,11 @@ from datetime import timedelta
 from sqlmodel import Session, col, func, select
 
 from app.models import User, utc_now, utc_today
-from app.services import checkin_service, class_service
-from app.services.member_service import IS_MEMBER, status_filters
+from app.services import checkin_service, class_service, payment_service
+from app.services.member_service import IS_MEMBER, WAITING, status_filters
+
+# How many of the next classes the overview shows.
+NEXT_CLASSES = 5
 
 
 def _count_members(session: Session, *filters) -> int:
@@ -51,4 +54,18 @@ def admin_stats(session: Session) -> dict:
         "users": user_stats(session),
         "check_ins": check_in_stats(session),
         "classes": class_service.class_stats(session),
+    }
+
+
+def staff_overview(session: Session) -> dict:
+    """The Gym Manager's start page. Each number is computed the way the page it links to computes its list:
+    Checked in today, the Expiring soon filter, the waiting list and the payments list for today."""
+    count, amount = payment_service.totals_since(session, utc_today())
+    next_classes, _ = class_service.list_classes(session, upcoming=True, offset=0, limit=NEXT_CLASSES)
+    return {
+        "check_ins_today": checkin_service.count_since(session, checkin_service.start_of_today()),
+        "expiring_soon": _count_members(session, *status_filters("expiring_soon")),
+        "waiting": session.exec(select(func.count()).select_from(User).where(*WAITING)).one(),
+        "payments_today": {"count": count, "amount": amount},
+        "next_classes": next_classes,
     }

@@ -12,6 +12,7 @@ export const roleLabel = (role: Role) => ROLES.find((r) => r.value === role)?.la
 export type Page = "login" | "signup" | ProtectedPage
 export type ProtectedPage =
   | "dashboard"
+  | "overview"
   | "members"
   | "classes"
   | "payments"
@@ -24,6 +25,7 @@ export type ProtectedPage =
 /** Pages that need a login, and the roles allowed to open them. */
 const ALLOWED: Record<ProtectedPage, Role[]> = {
   dashboard: ["admin"],
+  overview: ["gym_manager", "admin"],
   members: ["gym_manager", "admin"],
   classes: ["gym_manager", "admin"],
   payments: ["gym_manager", "admin"],
@@ -37,4 +39,5 @@ const ALLOWED: Record<ProtectedPage, Role[]> = {
 export const canOpen = (role: Role, page: ProtectedPage) => ALLOWED[page].includes(role)
 
 /** Where a person lands after logging in. */
-export const homePage = (role: Role): ProtectedPage => (role === "admin" ? "dashboard" : canOpen(role, "members") ? "members" : "membership")
+export const homePage = (role: Role): ProtectedPage =>
+  role === "admin" ? "dashboard" : role === "gym_manager" ? "overview" : "membership"

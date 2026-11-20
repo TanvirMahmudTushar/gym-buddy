@@ -2,11 +2,13 @@ import { useEffect, useState } from "react"
 import { useAuth } from "./context/AuthContext"
 import AppLayout from "./layouts/AppLayout"
 import AccountPage from "./pages/AccountPage"
+import ChoosePasswordPage from "./pages/ChoosePasswordPage"
 import ClassesPage from "./pages/ClassesPage"
 import DashboardPage from "./pages/DashboardPage"
 import HomePage from "./pages/HomePage"
 import LoginPage from "./pages/LoginPage"
 import MembershipPage from "./pages/MembershipPage"
+import OverviewPage from "./pages/OverviewPage"
 import PaymentsPage from "./pages/PaymentsPage"
 import PlansPage from "./pages/PlansPage"
 import SignupPage from "./pages/SignupPage"
@@ -14,7 +16,7 @@ import TimetablePage from "./pages/TimetablePage"
 import UsersPage from "./pages/UsersPage"
 import { type Page, type ProtectedPage, canOpen, homePage } from "./utils/auth"
 
-const PAGES: Page[] = ["login", "signup", "dashboard", "members", "classes", "payments", "membership", "timetable", "plans", "account", "users"]
+const PAGES: Page[] = ["login", "signup", "dashboard", "overview", "members", "classes", "payments", "membership", "timetable", "plans", "account", "users"]
 const isProtected = (page: Page | null): page is ProtectedPage => page !== null && page !== "login" && page !== "signup"
 
 /** The page part of the URL hash: "members" for #/members?filter=expiring_soon. */
@@ -54,11 +56,20 @@ export default function App() {
 
   if (loading) return <p className="empty">Loading…</p>
 
+  // After an admin reset the password, nothing else opens until a new one is chosen (the API refuses it too).
+  if (user?.must_change_password)
+    return (
+      <AppLayout page="account" locked>
+        <ChoosePasswordPage />
+      </AppLayout>
+    )
+
   return (
     <AppLayout page={page}>
       {page === "login" && <LoginPage />}
       {page === "signup" && <SignupPage />}
       {page === "dashboard" && <DashboardPage />}
+      {page === "overview" && <OverviewPage />}
       {page === "members" && <HomePage />}
       {page === "classes" && <ClassesPage />}
       {page === "payments" && <PaymentsPage />}

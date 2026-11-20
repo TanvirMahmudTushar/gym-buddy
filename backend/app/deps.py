@@ -8,7 +8,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from app.database import SessionDep
 from app.models import Role, User, as_utc
 from app.security import InvalidTokenError, read_access_token
-from app.services.auth_service import ACCOUNT_BANNED_MESSAGE
+from app.services.auth_service import ACCOUNT_BANNED_MESSAGE, MUST_CHANGE_PASSWORD_MESSAGE
 
 # auto_error is off so a missing token gives our own 401 (HTTPBearer alone would answer 403).
 _bearer = HTTPBearer(auto_error=False)
@@ -18,7 +18,7 @@ def _unauthorized() -> HTTPException:
     return HTTPException(status_code=401, detail="Please log in", headers={"WWW-Authenticate": "Bearer"})
 
 
-def get_current_user(
+def get_logged_in_user(
     session: SessionDep,
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
 ) -> User:
@@ -33,11 +33,23 @@ def get_current_user(
     if user is None:
         raise _unauthorized()
     # A password change ends every login made before it.
-    if user.password_changed_at is not None and issued_at < int(as_utc(user.password_changed_at).timestamp()):
+    if user.password_changed_at is not None and issued_at < as_utc(user.password_changed_at).timestamp():
         raise _unauthorized()
     # Even a token that has not expired yet stops working the moment an admin bans the account.
     if user.is_banned:
         raise HTTPException(status_code=403, detail=ACCOUNT_BANNED_MESSAGE)
+    return user
+
+
+# Any valid login, even one that must choose a new password first: only GET /users/me and
+# POST /users/me/password use this, so a reset account can see who it is and set its password.
+LoggedInUser = Annotated[User, Depends(get_logged_in_user)]
+
+
+def get_current_user(user: LoggedInUser) -> User:
+    """Every other route: an account whose password an admin reset can do nothing until it chooses a new one."""
+    if user.must_change_password:
+        raise HTTPException(status_code=403, detail=MUST_CHANGE_PASSWORD_MESSAGE)
     return user
 
 

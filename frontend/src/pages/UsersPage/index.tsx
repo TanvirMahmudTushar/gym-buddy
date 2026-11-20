@@ -2,7 +2,7 @@ import { type FormEvent, Fragment, useEffect, useState } from "react"
 import StatusPill from "../../components/StatusPill"
 import { useAuth } from "../../context/AuthContext"
 import { useDebouncedValue } from "../../hooks/useDebouncedValue"
-import { banUser, changeRole, listUsers, unbanUser } from "../../services/adminService"
+import { banUser, changeRole, listUsers, resetPassword, unbanUser } from "../../services/adminService"
 import type { AdminUser, Role } from "../../types/auth"
 import { ROLES } from "../../utils/auth"
 import { errorText, formatDate, membersLink, planLabel, todayUtc } from "../../utils/member"
@@ -47,6 +47,10 @@ export default function UsersPage() {
   // The user the admin is about to ban, and the reason typed so far.
   const [banningId, setBanningId] = useState<number | null>(null)
   const [reason, setReason] = useState("")
+  // The user an admin is about to reset the password for, and the temporary password just made (shown once).
+  const [resettingId, setResettingId] = useState<number | null>(null)
+  const [resetResult, setResetResult] = useState<{ id: number; name: string; password: string } | null>(null)
+  const [copied, setCopied] = useState(false)
 
   useEffect(() => {
     let ignore = false
@@ -109,8 +113,44 @@ export default function UsersPage() {
 
   const handleUnban = (target: AdminUser) => change(target, () => unbanUser(target.id), (u) => `${u.name} can log in again.`)
 
+  function startReset(id: number) {
+    setResettingId(id)
+    setBanningId(null)
+    setResetResult(null)
+    setError("")
+    setNotice("")
+  }
+
+  async function handleReset(target: AdminUser) {
+    setSavingId(target.id)
+    setError("")
+    setNotice("")
+    try {
+      const result = await resetPassword(target.id)
+      setUsers((prev) => prev.map((u) => (u.id === result.user.id ? result.user : u)))
+      setResetResult({ id: target.id, name: target.name, password: result.temporary_password })
+      setCopied(false)
+      setResettingId(null)
+    } catch (err) {
+      setError(errorText(err))
+    } finally {
+      setSavingId(null)
+    }
+  }
+
+  async function copyTemporary() {
+    if (!resetResult) return
+    try {
+      await navigator.clipboard.writeText(resetResult.password)
+      setCopied(true)
+    } catch {
+      setError("Could not copy. Select the password and copy it by hand.")
+    }
+  }
+
   function startBan(id: number) {
     setBanningId(id)
+    setResettingId(null)
     setReason("")
     setError("")
     setNotice("")
@@ -176,20 +216,62 @@ export default function UsersPage() {
                     </td>
                     <td>{formatDate(u.created_at)}</td>
                     <td>
-                      {u.is_banned ? (
-                        <button onClick={() => handleUnban(u)} disabled={busy}>
-                          {busy ? "Unbanning…" : "Unban"}
-                        </button>
-                      ) : u.role === "admin" ? (
-                        // Admins cannot be banned: demote them first.
-                        <span className="hint">{isMe ? "—" : "Demote to ban"}</span>
-                      ) : (
-                        <button className="danger" onClick={() => startBan(u.id)} disabled={busy || banningId === u.id}>
-                          Ban
-                        </button>
-                      )}
+                      <div className="actions">
+                        {u.is_banned ? (
+                          <button onClick={() => handleUnban(u)} disabled={busy}>
+                            {busy ? "Unbanning…" : "Unban"}
+                          </button>
+                        ) : u.role === "admin" ? (
+                          // Admins cannot be banned: demote them first.
+                          <span className="hint">{isMe ? "—" : "Demote to ban"}</span>
+                        ) : (
+                          <button className="danger" onClick={() => startBan(u.id)} disabled={busy || banningId === u.id}>
+                            Ban
+                          </button>
+                        )}
+                        {/* Like banning: not for yourself (use My account) or another admin. */}
+                        {!isMe && u.role !== "admin" && (
+                          <button onClick={() => startReset(u.id)} disabled={busy || resettingId === u.id}>
+                            Reset password
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
+                  {resettingId === u.id && (
+                    <tr className="ban-row">
+                      <td colSpan={7}>
+                        <div className="ban-form">
+                          <span>
+                            Reset {u.name}'s password? Their current password and every login stop working, and they
+                            must choose a new password after logging in with the temporary one.
+                          </span>
+                          <button className="danger solid" onClick={() => handleReset(u)} disabled={busy}>
+                            {busy ? "Resetting…" : "Reset password"}
+                          </button>
+                          <button onClick={() => setResettingId(null)} disabled={busy}>
+                            Cancel
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                  {resetResult?.id === u.id && (
+                    <tr className="reset-row">
+                      <td colSpan={7}>
+                        <div className="reset-result" role="status">
+                          <span>Temporary password for {resetResult.name}:</span>
+                          <code className="temp-password">{resetResult.password}</code>
+                          <button onClick={copyTemporary}>{copied ? "Copied" : "Copy"}</button>
+                          <button onClick={() => setResetResult(null)}>Done</button>
+                        </div>
+                        <p className="hint">
+                          Shown only this once. Give it to {resetResult.name} in person; they choose their own password
+                          when they log in with it.
+                        </p>
+                      </td>
+                    </tr>
+                  )}
                   {banningId === u.id && (
                     <tr className="ban-row">
                       <td colSpan={7}>
@@ -238,7 +320,7 @@ export default function UsersPage() {
       </div>
       <p className="hint">
         Everyone starts as a User. Make someone a Gym Manager to let them manage members. A banned user is locked out
-        at once, and you can unban them later.
+        at once, and you can unban them later. Reset password gives someone who forgot theirs a temporary one.
       </p>
       {error && (
         <p className="error" role="alert">

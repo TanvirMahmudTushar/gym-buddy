@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useDebouncedValue } from "../hooks/useDebouncedValue"
 import { listWaiting } from "../services/memberService"
 import type { User } from "../types/auth"
@@ -11,10 +11,16 @@ interface Props {
   refreshKey: number
   /** Fill the Add member form with this account's email. */
   onStart: (email: string) => void
+  /** Scroll this card into view when the page opens (the overview's Waiting number links here). */
+  scrollOnOpen?: boolean
 }
 
 // People who signed up but have no membership yet: the front desk starts one with a click instead of typing the email.
-export default function WaitingList({ refreshKey, onStart }: Props) {
+export default function WaitingList({ refreshKey, onStart, scrollOnOpen = false }: Props) {
+  const section = useRef<HTMLElement>(null)
+  useEffect(() => {
+    if (scrollOnOpen) section.current?.scrollIntoView({ block: "start" })
+  }, [scrollOnOpen])
   const [accounts, setAccounts] = useState<User[]>([])
   const [total, setTotal] = useState(0)
   const [search, setSearch] = useState("")
@@ -75,7 +81,7 @@ export default function WaitingList({ refreshKey, onStart }: Props) {
     )
 
   return (
-    <section className="card" aria-labelledby="waiting-heading">
+    <section className="card" aria-labelledby="waiting-heading" ref={section}>
       <div className="toolbar">
         <h2 id="waiting-heading">
           Waiting for a membership {total > 0 && <span className="hint">({total})</span>}

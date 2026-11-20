@@ -9,6 +9,8 @@ export interface User {
   name: string
   role: Role
   created_at: string
+  /** True after an admin reset the password: the app shows only Choose a new password until it is changed. */
+  must_change_password: boolean
 }
 
 export interface LoginResult {
@@ -40,6 +42,12 @@ export interface AccountPage {
   total: number
   offset: number
   limit: number
+}
+
+/** After an admin resets a password: the account and the temporary password, shown only this once. */
+export interface PasswordResetResult {
+  user: AdminUser
+  temporary_password: string
 }
 
 export interface AdminUserPage {

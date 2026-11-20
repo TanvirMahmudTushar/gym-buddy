@@ -13,6 +13,8 @@ class EmailTakenError(Exception):
 
 
 ACCOUNT_BANNED_MESSAGE = "Account banned"
+# The answer to every request but GET /users/me and POST /users/me/password after an admin reset the password.
+MUST_CHANGE_PASSWORD_MESSAGE = "Choose a new password first"
 
 
 class AccountBannedError(Exception):
@@ -21,6 +23,10 @@ class AccountBannedError(Exception):
 
 class WrongPasswordError(Exception):
     """The current password given when changing the password is wrong."""
+
+
+class SamePasswordError(Exception):
+    """The new password is the same as the current one (such as the temporary password an admin gave)."""
 
 
 class InvalidCredentialsError(Exception):
@@ -109,10 +115,14 @@ def authenticate(session: Session, data: LoginRequest) -> User:
 
 
 def change_password(session: Session, user: User, current_password: str, new_password: str) -> None:
-    """Every token issued before this moment stops working (see deps.get_current_user)."""
+    """Every token issued before this moment stops working (see deps.get_logged_in_user). Also ends the
+    must-change-password state an admin reset leaves."""
     if not verify_password(current_password, user.password_hash):
         raise WrongPasswordError
+    if verify_password(new_password, user.password_hash):
+        raise SamePasswordError
     user.password_hash = hash_password(new_password)
     user.password_changed_at = utc_now()
+    user.must_change_password = False
     session.add(user)
     session.commit()

@@ -1,7 +1,7 @@
 # Admin-only endpoints under /api/v1/admin: stats, revenue, user list, roles, ban / unban, plan prices (TDD 6.2).
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response
 
 from app.database import SessionDep
 from app.deps import require_roles
@@ -10,6 +10,7 @@ from app.models import (
     AdminUserPage,
     AdminUserRead,
     BanRequest,
+    PasswordResetResult,
     Plan,
     PlanPrice,
     PlanRead,
@@ -69,6 +70,16 @@ def ban_user(user_id: int, session: SessionDep, admin: AdminUser, body: BanReque
 @router.post("/users/{user_id}/unban", response_model=AdminUserRead)
 def unban_user(user_id: int, session: SessionDep) -> User:
     return user_service.unban_user(session, user_id)
+
+
+@router.post("/users/{user_id}/reset-password", response_model=PasswordResetResult)
+def reset_password(user_id: int, session: SessionDep, admin: AdminUser, response: Response) -> dict:
+    """Makes a random temporary password and returns it this once. The account's logins end, and it must choose a
+    new password before doing anything else. Not for your own account or another admin's (400)."""
+    user, temporary = user_service.reset_password(session, admin, user_id)
+    # The temporary password must not be kept by the browser or any cache on the way.
+    response.headers["Cache-Control"] = "no-store"
+    return {"user": user, "temporary_password": temporary}
 
 
 @router.put("/plans/{plan}", response_model=PlanRead)

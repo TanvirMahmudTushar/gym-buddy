@@ -136,6 +136,16 @@ def _conditions(f: PaymentFilter) -> list:
     return conditions
 
 
+def totals_since(session: Session, day: date) -> tuple[int, int]:
+    """How many payments were taken from the start of this UTC day, and their sum; voided ones left out."""
+    count, amount = session.exec(
+        select(func.count(), func.coalesce(func.sum(Payment.amount), 0)).where(
+            col(Payment.voided_at).is_(None), col(Payment.paid_at) >= start_of_day(day)
+        )
+    ).one()
+    return count, amount
+
+
 def record_payment(session: Session, member_id: int, data: PaymentCreate, recorded_by: User) -> dict:
     """Record what a member paid. With renew_plan, the membership is extended in the same step."""
     member = member_service.get_member(session, member_id)
