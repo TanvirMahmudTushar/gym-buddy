@@ -47,8 +47,10 @@ def list_users(
     session: SessionDep,
     offset: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    q: Annotated[str | None, Query(max_length=100)] = None,
 ) -> dict:
-    items, total = user_service.list_users(session, offset, limit)
+    """Newest first, each with their membership. q finds users by part of the name or email."""
+    items, total = user_service.list_users(session, offset, limit, (q or "").strip() or None)
     return {"items": items, "total": total, "offset": offset, "limit": limit}
 
 

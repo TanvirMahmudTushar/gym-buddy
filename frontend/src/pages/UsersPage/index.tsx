@@ -1,14 +1,42 @@
 import { type FormEvent, Fragment, useEffect, useState } from "react"
+import StatusPill from "../../components/StatusPill"
 import { useAuth } from "../../context/AuthContext"
+import { useDebouncedValue } from "../../hooks/useDebouncedValue"
 import { banUser, changeRole, listUsers, unbanUser } from "../../services/adminService"
 import type { AdminUser, Role } from "../../types/auth"
 import { ROLES } from "../../utils/auth"
-import { errorText, formatDate } from "../../utils/member"
+import { errorText, formatDate, membersLink, planLabel, todayUtc } from "../../utils/member"
+
+// Members and users are the same accounts: this shows the membership and links to it on the Members page.
+function MembershipCell({ user: u }: { user: AdminUser }) {
+  if (u.plan && u.expires_on) {
+    const status = u.is_frozen ? "frozen" : u.expires_on < todayUtc() ? "expired" : "active"
+    return (
+      <>
+        <a href={membersLink({ member: u.id })}>{planLabel(u.plan)}</a> <StatusPill status={status} />
+        <div className="hint">until {formatDate(u.expires_on)}</div>
+      </>
+    )
+  }
+  // A User with no membership is on the Members page's waiting list.
+  if (u.role === "user")
+    return (
+      <>
+        <span className="hint">None yet</span>
+        <div>
+          <a href="#/members">Start on Members</a>
+        </div>
+      </>
+    )
+  return <span className="hint">—</span>
+}
 
 // Admins only: see everyone who has signed up, change their role, and ban or unban them.
 export default function UsersPage() {
   const { user: me } = useAuth()
   const [users, setUsers] = useState<AdminUser[]>([])
+  const [search, setSearch] = useState("")
+  const query = useDebouncedValue(search)
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
@@ -22,7 +50,8 @@ export default function UsersPage() {
 
   useEffect(() => {
     let ignore = false
-    listUsers(0)
+    setLoading(true)
+    listUsers(0, query)
       .then((page) => {
         if (ignore) return
         setUsers(page.items)
@@ -33,12 +62,12 @@ export default function UsersPage() {
     return () => {
       ignore = true
     }
-  }, [])
+  }, [query])
 
   async function loadMore() {
     setLoadingMore(true)
     try {
-      const page = await listUsers(users.length)
+      const page = await listUsers(users.length, query)
       setUsers((prev) => [...prev, ...page.items])
       setTotal(page.total)
     } catch (err) {
@@ -88,8 +117,8 @@ export default function UsersPage() {
   }
 
   let body
-  if (loading) body = <p className="empty">Loading users…</p>
-  else if (users.length === 0) body = <p className="empty">No users yet.</p>
+  if (loading && users.length === 0) body = <p className="empty">Loading users…</p>
+  else if (users.length === 0) body = <p className="empty">{query ? `No users match "${query}".` : "No users yet."}</p>
   else
     body = (
       <div className="table-wrap">
@@ -99,6 +128,7 @@ export default function UsersPage() {
               <th>Name</th>
               <th>Email</th>
               <th>Role</th>
+              <th>Membership</th>
               <th>Status</th>
               <th>Joined</th>
               <th>Action</th>
@@ -133,6 +163,9 @@ export default function UsersPage() {
                       </select>
                     </td>
                     <td className="wrap">
+                      <MembershipCell user={u} />
+                    </td>
+                    <td className="wrap">
                       <span className={u.is_banned ? "pill banned" : "pill active"}>{u.is_banned ? "Banned" : "Active"}</span>
                       {u.is_banned && (
                         <div className="hint">
@@ -159,7 +192,7 @@ export default function UsersPage() {
                   </tr>
                   {banningId === u.id && (
                     <tr className="ban-row">
-                      <td colSpan={6}>
+                      <td colSpan={7}>
                         <form className="ban-form" onSubmit={(e) => handleBan(e, u)}>
                           <div className="field">
                             <label htmlFor={`ban-reason-${u.id}`}>Reason for banning {u.name} (optional)</label>
@@ -191,7 +224,18 @@ export default function UsersPage() {
 
   return (
     <section className="card" aria-labelledby="users-heading">
-      <h2 id="users-heading">Users and roles</h2>
+      <div className="toolbar">
+        <h2 id="users-heading">Users and roles</h2>
+        <input
+          type="search"
+          className="search"
+          aria-label="Search users by name or email"
+          placeholder="Search name or email"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          maxLength={100}
+        />
+      </div>
       <p className="hint">
         Everyone starts as a User. Make someone a Gym Manager to let them manage members. A banned user is locked out
         at once, and you can unban them later.

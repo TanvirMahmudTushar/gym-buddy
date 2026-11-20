@@ -2,6 +2,7 @@
 from sqlmodel import Session, col, func, select
 
 from app.models import Role, User, utc_now
+from app.services.search import contains_any
 
 
 class UserNotFoundError(Exception):
@@ -23,10 +24,17 @@ def get_user(session: Session, user_id: int) -> User:
     return user
 
 
-def list_users(session: Session, offset: int, limit: int) -> tuple[list[User], int]:
-    """One page of users, newest first, plus the total number of users."""
-    total = session.exec(select(func.count()).select_from(User)).one()
-    query = select(User).order_by(col(User.created_at).desc(), col(User.id).desc()).offset(offset).limit(limit)
+def list_users(session: Session, offset: int, limit: int, q: str | None = None) -> tuple[list[User], int]:
+    """One page of users, newest first, plus how many match. q matches part of the name or email."""
+    filters = [contains_any(q, User.name, User.email)] if q else []
+    total = session.exec(select(func.count()).select_from(User).where(*filters)).one()
+    query = (
+        select(User)
+        .where(*filters)
+        .order_by(col(User.created_at).desc(), col(User.id).desc())
+        .offset(offset)
+        .limit(limit)
+    )
     return list(session.exec(query).all()), total
 
 

@@ -6,6 +6,7 @@ from typing import Literal
 from sqlmodel import Session, col, delete, func, select, update
 
 from app.models import CheckIn, ClassBooking, GymClass, MemberCreate, Payment, User, utc_today
+from app.services.search import contains_any
 
 # expiring_soon is a part of active: memberships that end today or within the next EXPIRING_SOON_DAYS days.
 MemberStatus = Literal["active", "expired", "frozen", "expiring_soon"]
@@ -96,10 +97,15 @@ def status_filters(status: MemberStatus | None) -> list:
     return []
 
 
-def list_members(session: Session, status: MemberStatus | None, offset: int, limit: int) -> tuple[list[User], int]:
+def list_members(
+    session: Session, status: MemberStatus | None, offset: int, limit: int, q: str | None = None
+) -> tuple[list[User], int]:
     """One page of members plus how many match the filter in total. Newest membership first, except
-    expiring_soon, which lists the soonest expiry first (the people to call first)."""
+    expiring_soon, which lists the soonest expiry first (the people to call first). q matches part of the
+    name, email or phone."""
     filters = [IS_MEMBER, *status_filters(status)]
+    if q:
+        filters.append(contains_any(q, User.name, User.email, User.phone))
     total = session.exec(select(func.count()).select_from(User).where(*filters)).one()
     if status == "expiring_soon":
         order = (col(User.expires_on), col(User.id))
@@ -107,6 +113,20 @@ def list_members(session: Session, status: MemberStatus | None, offset: int, lim
         order = (col(User.joined_on).desc(), col(User.id).desc())
     query = select(User).where(*filters).order_by(*order).offset(offset).limit(limit)
     return list(session.exec(query).all()), total
+
+
+# Accounts that signed up as a User but have no membership yet: the people to start one for.
+WAITING = [col(User.role) == "user", col(User.plan).is_(None)]
+
+
+def list_waiting(session: Session, offset: int, limit: int, q: str | None = None) -> tuple[list[User], int]:
+    """One page of accounts waiting for a membership, newest sign-up first. q matches part of the name or email."""
+    filters = list(WAITING)
+    if q:
+        filters.append(contains_any(q, User.name, User.email))
+    total = session.exec(select(func.count()).select_from(User).where(*filters)).one()
+    query = select(User).where(*filters).order_by(col(User.created_at).desc(), col(User.id).desc())
+    return list(session.exec(query.offset(offset).limit(limit)).all()), total
 
 
 def update_member(session: Session, member_id: int, changes: dict) -> User:

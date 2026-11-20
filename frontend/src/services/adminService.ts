@@ -7,8 +7,10 @@ import { request } from "./api"
 const BASE = "/api/v1/admin"
 const PAGE_SIZE = 20
 
-export function listUsers(offset: number): Promise<AdminUserPage> {
+/** q finds users by part of the name or email. */
+export function listUsers(offset: number, q = ""): Promise<AdminUserPage> {
   const params = new URLSearchParams({ offset: String(offset), limit: String(PAGE_SIZE) })
+  if (q.trim()) params.set("q", q.trim())
   return request<AdminUserPage>(`${BASE}/users?${params}`)
 }
 

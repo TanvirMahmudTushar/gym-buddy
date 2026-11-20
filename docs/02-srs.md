@@ -273,6 +273,17 @@ Every Admin is also a logged-in user, so they can log out, edit their profile an
 
 > **Built so far (payments):** FR-43 to FR-53.
 
+### 3.7b Finding and linking members — Beta
+
+| ID | Requirement | Release | Story |
+|---|---|---|---|
+| FR-54 | A gym manager or admin shall be able to search the member list with `q`: members whose name, email or phone contains the text, in any case, combined with the `status` filter. `%` and `_` match themselves. | Beta | US-13 |
+| FR-55 | A gym manager or admin shall be able to list the accounts waiting for a membership: role `user` and no plan, newest sign-up first, with the same `q` search on name and email. Starting a membership removes the account from this list. | Beta | US-13 |
+| FR-56 | The admin user list shall show each account's `plan`, `expires_on` and `is_frozen` (empty for an account without a membership) and accept `q` to search by name or email. | Beta | US-12 |
+| FR-57 | The Members page shall open on a member and a filter given in its address (`#/members?filter=...&member=ID`), and every member's name in the payments list, class bookings and today's check-ins shall link there. | Beta | US-13 |
+
+> **Built so far (finding members):** FR-54 to FR-57.
+
 ### 3.8 Account security — Beta
 
 | ID | Requirement | Release | Story |
@@ -339,6 +350,7 @@ A new member always starts as `Active` if `expires_on` is today or later. "Expir
 | List users, change roles | No | No (`403`) | No (`403`) | Yes |
 | View dashboard stats and revenue, ban / unban users | No | No (`403`) | No (`403`) | Yes (not self, not other admins) |
 | List members expiring soon | No | No (`403`) | Yes | Yes |
+| Search members, list accounts waiting for a membership | No | No (`403`) | Yes | Yes |
 | View own payments | No | Yes | Yes | Yes |
 | Record payments, list a member's payments and all payments | No | No (`403`) | Yes | Yes |
 | Void a payment, export payments as CSV | No | No (`403`) | No (`403`) | Yes |
@@ -570,6 +582,13 @@ Every endpoint except sign up, log in, refresh, health and the docs returns `401
 - When a gym manager sends `GET /api/v1/members?status=expiring_soon`, the response lists the three expiring today, in 5 days and in 7 days, in that order.
 - `GET /api/v1/admin/stats` returns `members.expiring_soon = 3`.
 
+**AC-35 Search and waiting list (FR-54, FR-55, FR-56)**
+- Given members Rafi Ahmed (phone 01711222333) and Mina Das, and User accounts Walt and Wendy with no membership
+- `GET /api/v1/members?q=rafi`, `?q=222333` and `?q=RAFI@X` each return only Rafi; `?q=x.com&status=frozen` returns none.
+- `GET /api/v1/members/waiting` returns Walt and Wendy, newest first, and not the staff accounts or the members; after a membership is started for Wendy, only Walt.
+- `GET /api/v1/admin/users` shows Rafi with `plan = monthly` and Walt with `plan = null`; `?q=max` returns only Max Manager.
+- A User gets `403` for the waiting list.
+
 ## 6. Traceability
 
 | Story | Requirements | Endpoint (see [TDD, section 6](03-tdd.md#6-rest-api-design)) | Release |
@@ -596,4 +615,5 @@ Every endpoint except sign up, log in, refresh, health and the docs returns `401
 | US-21 | FR-36, FR-37, FR-39 | `POST /api/v1/admin/users/{id}/ban`, `GET /api/v1/admin/users` | Beta |
 | US-22 | FR-38 | `POST /api/v1/admin/users/{id}/unban` | Beta |
 | US-23, US-24 | FR-16, FR-40, FR-41 | `GET` / `PATCH /api/v1/users/me`, `POST /api/v1/users/me/password` | Beta |
+| US-12, US-13 | FR-54 – FR-57 | `GET /api/v1/members?q=`, `GET /api/v1/members/waiting`, `GET /api/v1/admin/users?q=` | Beta |
 | US-25, US-26 | FR-43 – FR-51, FR-53 | `GET /api/v1/members?status=expiring_soon`, `/api/v1/plans`, `/api/v1/members/{id}/payments`, `/api/v1/payments`, `/api/v1/payments/{id}/void`, `/api/v1/payments/export.csv`, `/api/v1/users/me/payments`, `PUT /api/v1/admin/plans/{plan}` | Beta |

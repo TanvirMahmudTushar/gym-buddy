@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react"
 import { listBookings } from "../services/classService"
 import type { Booking } from "../types/gymClass"
-import { errorText, formatDateTime } from "../utils/member"
+import { errorText, formatDateTime, membersLink } from "../utils/member"
 
 // Who has booked a class, in the order they booked.
 export default function ClassBookings({ classId }: { classId: number }) {
@@ -32,7 +32,7 @@ export default function ClassBookings({ classId }: { classId: number }) {
     <ul className="visit-list">
       {bookings.map((b) => (
         <li key={b.member_id}>
-          <span>{b.member_name}</span>
+          <a href={membersLink({ member: b.member_id })}>{b.member_name}</a>
           <span className="hint">booked {formatDateTime(b.booked_at)}</span>
         </li>
       ))}

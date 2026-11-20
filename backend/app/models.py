@@ -162,6 +162,15 @@ class UserRead(SQLModel):
     created_at: datetime
 
 
+class AccountPage(SQLModel):
+    """A page of accounts, such as the ones waiting for a membership."""
+
+    items: list[UserRead]
+    total: int
+    offset: int
+    limit: int
+
+
 class TokenResponse(SQLModel):
     access_token: str
     token_type: Literal["bearer"] = "bearer"
@@ -169,11 +178,15 @@ class TokenResponse(SQLModel):
 
 
 class AdminUserRead(UserRead):
-    """What an admin sees about a user: the ban status as well."""
+    """What an admin sees about a user: the ban status and their membership as well."""
 
     is_banned: bool
     banned_at: datetime | None
     ban_reason: str | None
+    # The membership: plan is None for an account without one.
+    plan: Plan | None
+    expires_on: date | None
+    is_frozen: bool
 
 
 class AdminUserPage(SQLModel):

@@ -142,6 +142,7 @@ backend/
       payment_service.py # plan prices, record a payment (and renew), payment lists and total, void, CSV export; raises PaymentNotFoundError
       class_service.py   # classes and bookings: create, list, edit, delete, who booked; raises ClassNotFoundError / CapacityBelowBookingsError
       checkin_service.py # record a check-in (membership must be valid), history, today's list; raises MembershipNotValidError
+      search.py          # contains_any(): the any-case text search shared by the member, waiting and user lists
   alembic/             # (Beta) migration scripts
   alembic.ini          # (Beta)
   requirements.txt
@@ -154,7 +155,8 @@ frontend/
     pages/             # HomePage (members), LoginPage, SignupPage, AccountPage, DashboardPage (admin), UsersPage (admin), ClassesPage (gym manager, admin), PaymentsPage (gym manager, admin), MembershipPage and TimetablePage (user), PlansPage (admin); (Later) AboutPage, MemberDetailsPage; (Beta, Could) MyMembership, Classes, AdminDashboard
     services/          # fetch calls to the API
     types/             # TypeScript types
-    utils/             # display helpers
+    utils/             # display helpers; membersLink() builds the #/members?filter=&member= address
+    hooks/             # useDebouncedValue: search boxes ask the API once typing pauses
 docs/
   01-prd.md
   02-srs.md
@@ -385,7 +387,8 @@ erDiagram
 | `RoleUpdate` | Change role | `role` | Beta |
 | `ProfileUpdate` | Change own name | `name` | Beta |
 | `PasswordChange` | Change own password | `current_password`, `new_password` | Beta |
-| `AdminUserRead` | Admin user list | `UserRead` + `is_banned`, `banned_at`, `ban_reason` | Beta |
+| `AdminUserRead` | Admin user list | `UserRead` + `is_banned`, `banned_at`, `ban_reason`, `plan?`, `expires_on?`, `is_frozen` | Beta |
+| `AccountPage` | Accounts waiting for a membership | `items: UserRead[]`, `total`, `offset`, `limit` | Beta |
 | `BanRequest` | Ban a user | `reason?` | Beta |
 | `AdminStats` | Dashboard | `members {total, active, expired, frozen, new_last_7_days, expiring_soon}`, `classes {total, upcoming}`, `check_ins {today, last_7_days}`, `users {total, users, gym_managers, admins, banned}` | Beta |
 | `RevenueStats` | Dashboard revenue | `today`, `this_month`, `last_30_days`, `last_30_days_from` (date), `by_method [{method, amount, count}]` (all four methods), `months [{month: "YYYY-MM", amount}]` (6, oldest first) | Beta |
@@ -484,7 +487,8 @@ In the MVP no login is needed. In the Beta the member endpoints become admin-onl
 | Method | Path | Who | Body | Success | Errors | FR |
 |---|---|---|---|---|---|---|
 | `POST` | `/api/v1/members` | Gym Manager, Admin | `MemberCreate` (+ optional `user_id`) | `201` `MemberRead` | `403`, `409` (user already linked), `422` | FR-19 |
-| `GET` | `/api/v1/members?offset&limit&status` | Gym Manager, Admin | — | `200` `MemberPage` (`status=expiring_soon`: soonest expiry first) | `403` | FR-19, FR-53 |
+| `GET` | `/api/v1/members?offset&limit&status&q` | Gym Manager, Admin | — | `200` `MemberPage` (`status=expiring_soon`: soonest expiry first; `q`: name, email or phone) | `403` | FR-19, FR-53, FR-54 |
+| `GET` | `/api/v1/members/waiting?offset&limit&q` | Gym Manager, Admin | — | `200` `AccountPage` (role `user`, no plan, newest first; declared before `/{member_id}`) | `403` | FR-55 |
 | `GET` | `/api/v1/members/{id}` | Gym Manager, Admin | — | `200` `MemberRead` | `403`, `404` | FR-19 |
 | `PATCH` | `/api/v1/members/{id}` | Gym Manager, Admin | `MemberUpdate` | `200` `MemberRead` | `403`, `404`, `422` | FR-19 |
 | `DELETE` | `/api/v1/members/{id}` | Gym Manager, Admin | — | `204` | `403`, `404` | FR-19 |
@@ -496,7 +500,7 @@ In the MVP no login is needed. In the Beta the member endpoints become admin-onl
 
 | Method | Path | Who | Body | Success | Errors | FR |
 |---|---|---|---|---|---|---|
-| `GET` | `/api/v1/admin/users?offset&limit` | Admin | — | `200` `AdminUserPage` (`AdminUserRead` items, with ban info) | `403` | FR-21 |
+| `GET` | `/api/v1/admin/users?offset&limit&q` | Admin | — | `200` `AdminUserPage` (`AdminUserRead` items, with ban info and membership) | `403` | FR-21, FR-56 |
 | `PATCH` | `/api/v1/admin/users/{user_id}/role` | Admin | `RoleUpdate` | `200` `AdminUserRead` | `400` (own role), `403`, `404` | FR-22 |
 | `GET` | `/api/v1/admin/stats` | Admin | — | `200` `AdminStats` | `403` | FR-35 |
 | `GET` | `/api/v1/admin/revenue` | Admin | — | `200` `RevenueStats` | `401`, `403` | FR-52 |

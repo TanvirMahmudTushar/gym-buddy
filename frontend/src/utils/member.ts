@@ -9,6 +9,18 @@ export const PLANS: { value: Plan; label: string }[] = [
 
 export const planLabel = (plan: Plan) => PLANS.find((p) => p.value === plan)?.label ?? plan
 
+/** The options after ? in the address: #/members?filter=expiring_soon&member=5. */
+export const hashParams = () => new URLSearchParams(window.location.hash.split("?")[1] ?? "")
+
+/** The address of the Members page, opened on a filter and/or a member. Anything can link to a member with it. */
+export function membersLink(options: { filter?: string; member?: number | null } = {}): string {
+  const params = new URLSearchParams()
+  if (options.filter && options.filter !== "all") params.set("filter", options.filter)
+  if (options.member != null) params.set("member", String(options.member))
+  const query = params.toString()
+  return query ? `#/members?${query}` : "#/members"
+}
+
 /** Today as YYYY-MM-DD in UTC, the same "today" the backend uses for expiry. */
 export const todayUtc = () => new Date().toISOString().slice(0, 10)
 

@@ -1,4 +1,4 @@
-import { type FormEvent, useState } from "react"
+import { type FormEvent, useEffect, useRef, useState } from "react"
 import { createMember } from "../services/memberService"
 import type { Member, Plan } from "../types/member"
 import { PLANS, errorText, formatDate, todayUtc } from "../utils/member"
@@ -6,8 +6,25 @@ import { PLANS, errorText, formatDate, todayUtc } from "../utils/member"
 const EMPTY = { email: "", phone: "", plan: "monthly" as Plan, expires_on: "", notes: "" }
 
 // Members are users: the person signs up first, then staff start a membership on that account by its email.
-export default function AddMemberForm({ onCreated }: { onCreated: (member: Member) => void }) {
+interface Props {
+  onCreated: (member: Member) => void
+  /** Set by Start membership in the waiting list: the email to fill in (key changes on every click). */
+  start?: { email: string; key: number } | null
+}
+
+export default function AddMemberForm({ onCreated, start }: Props) {
   const [form, setForm] = useState(EMPTY)
+  const section = useRef<HTMLElement>(null)
+  const planField = useRef<HTMLSelectElement>(null)
+
+  // Start membership: fill the email, bring the form into view and go straight to the plan.
+  useEffect(() => {
+    if (!start) return
+    setForm((f) => ({ ...f, email: start.email }))
+    section.current?.scrollIntoView({ behavior: "smooth", block: "center" })
+    planField.current?.focus({ preventScroll: true })
+  }, [start])
+
   const [fieldErrors, setFieldErrors] = useState<{ email?: string; expires_on?: string }>({})
   const [error, setError] = useState("")
   const [saving, setSaving] = useState(false)
@@ -44,7 +61,7 @@ export default function AddMemberForm({ onCreated }: { onCreated: (member: Membe
   }
 
   return (
-    <section className="card" aria-labelledby="add-heading">
+    <section className="card" aria-labelledby="add-heading" ref={section}>
       <h2 id="add-heading">Add member</h2>
       <form className="fields" onSubmit={handleSubmit} noValidate>
         <div className="field">
@@ -73,7 +90,7 @@ export default function AddMemberForm({ onCreated }: { onCreated: (member: Membe
         </div>
         <div className="field">
           <label htmlFor="add-plan">Plan</label>
-          <select id="add-plan" value={form.plan} onChange={(e) => setForm({ ...form, plan: e.target.value as Plan })}>
+          <select id="add-plan" ref={planField} value={form.plan} onChange={(e) => setForm({ ...form, plan: e.target.value as Plan })}>
             {PLANS.map((p) => (
               <option key={p.value} value={p.value}>
                 {p.label}

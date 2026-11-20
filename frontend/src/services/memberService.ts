@@ -1,14 +1,24 @@
 // fetch helpers for the member REST API (/api/v1/members); managers and admins only.
+import type { AccountPage } from "../types/auth"
 import { request } from "./api"
 import type { Member, MemberBulkDeleteResult, MemberCreate, MemberFilter, MemberPage, MemberUpdate } from "../types/member"
 
 const BASE = "/api/v1/members"
 const PAGE_SIZE = 20
 
-export function listMembers(offset: number, status: MemberFilter | null): Promise<MemberPage> {
+/** q finds members by part of the name, email or phone. */
+export function listMembers(offset: number, status: MemberFilter | null, q = ""): Promise<MemberPage> {
   const params = new URLSearchParams({ offset: String(offset), limit: String(PAGE_SIZE) })
   if (status) params.set("status", status)
+  if (q.trim()) params.set("q", q.trim())
   return request<MemberPage>(`${BASE}?${params}`)
+}
+
+/** Accounts that signed up but have no membership yet, newest first. */
+export function listWaiting(offset: number, limit: number, q = ""): Promise<AccountPage> {
+  const params = new URLSearchParams({ offset: String(offset), limit: String(limit) })
+  if (q.trim()) params.set("q", q.trim())
+  return request<AccountPage>(`${BASE}/waiting?${params}`)
 }
 
 export const getMember = (id: number) => request<Member>(`${BASE}/${id}`)

@@ -1,4 +1,6 @@
 // Account types matching the FastAPI schemas (TDD 5.3).
+import type { Plan } from "./member"
+
 export type Role = "user" | "gym_manager" | "admin"
 
 export interface User {
@@ -21,11 +23,23 @@ export interface SignupBody {
   password: string
 }
 
-/** What an admin sees about a user: the ban status as well. */
+/** What an admin sees about a user: the ban status and their membership as well. */
 export interface AdminUser extends User {
   is_banned: boolean
   banned_at: string | null
   ban_reason: string | null
+  /** null for an account without a membership. */
+  plan: Plan | null
+  expires_on: string | null
+  is_frozen: boolean
+}
+
+/** A page of accounts, such as the ones waiting for a membership. */
+export interface AccountPage {
+  items: User[]
+  total: number
+  offset: number
+  limit: number
 }
 
 export interface AdminUserPage {
