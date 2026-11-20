@@ -202,7 +202,7 @@ erDiagram
 
 **`app_user`**
 
-> Built so far: `id`, `email`, `name`, `password_hash`, `role`, `is_banned`, `banned_at`, `ban_reason`, `password_changed_at` and `created_at`. The login lockout columns come with that feature. Tokens issued before `password_changed_at` are refused, which is how a password change ends earlier logins.
+> Built so far: `id`, `email`, `name`, `password_hash`, `role`, `is_banned`, `banned_at`, `ban_reason`, `password_changed_at`, `failed_login_count`, `locked_until` and `created_at` (the lockout columns are added to an existing table on start). Tokens issued before `password_changed_at` are refused, which is how a password change ends earlier logins.
 
 | Column | Type | Rules |
 |---|---|---|
@@ -677,6 +677,7 @@ flowchart LR
 - Unknown email and wrong password both return `401 "Invalid email or password"`, so emails cannot be discovered.
 - Wrong password: `failed_login_count += 1`. At 5, set `locked_until = now + 15 min` and reset the count. While `locked_until > now`, login returns `429`. A successful login resets the count.
 - Stored in the database (not in memory) because serverless functions do not share memory.
+- **Built so far:** `auth_service.authenticate()` refuses a locked account before checking the password. The `+ 1` is an `UPDATE ... SET failed_login_count = failed_login_count + 1`, so parallel wrong passwords all count; the 5th answers `429` straight away. The `429` carries `Retry-After` (seconds) and the message "Too many failed logins. Try again in N minutes." Attempts while locked do not count, and the lockout only blocks new logins: tokens already issued keep working. Unknown emails are never locked (there is no row to count on), so they always get the same `401`; after 5 tries the `429` does show that an account exists, an accepted trade-off of locking per account.
 
 ### 10.3 Permission dependencies
 

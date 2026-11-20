@@ -46,6 +46,9 @@ class User(SQLModel, table=True):
     ban_reason: str | None = Field(default=None, max_length=500)
     # Tokens issued before this moment stop working (set when the password is changed).
     password_changed_at: datetime | None = None
+    # Login lockout (FR-34): wrong passwords in a row, and the moment logins are blocked until.
+    failed_login_count: int = 0
+    locked_until: datetime | None = None
     created_at: datetime = Field(default_factory=utc_now)
     # Membership. plan is None until staff start one; joined_on and expires_on are set together with it.
     plan: str | None = Field(default=None, max_length=10)

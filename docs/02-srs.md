@@ -195,7 +195,7 @@ Every Admin is also a logged-in user, so they can log out, edit their profile an
 | FR-40 | A user shall be able to change their own `name`. Email and role cannot be changed through the profile. | Beta | US-23, US-24 |
 | FR-41 | A user shall be able to change their password by sending the current and the new password. A wrong current password returns `400`. On success all the user's sessions (refresh tokens) are revoked and they log in again. | Beta | US-24 |
 
-> **Built so far:** sign up, log in, own profile and rename (FR-12, FR-13, FR-16, FR-40), with one access token valid for 8 hours and no refresh cookie. Password change (FR-41) is built too: it ends every login made before the change, because there are no refresh tokens to revoke. Refresh tokens (FR-14, FR-15) and the login attempt limit (FR-34) come later.
+> **Built so far:** sign up, log in, own profile and rename (FR-12, FR-13, FR-16, FR-40), with one access token valid for 8 hours and no refresh cookie. Password change (FR-41) is built too: it ends every login made before the change, because there are no refresh tokens to revoke. The login attempt limit (FR-34) is built: the 5th wrong password in a row already answers `429` with `Retry-After`, attempts while locked do not count, and an existing login is not ended. Refresh tokens (FR-14, FR-15) come later.
 
 ### 3.3 Own membership and check-ins — Beta
 
@@ -386,6 +386,8 @@ Every endpoint except sign up, log in, refresh, health and the docs returns `401
 | NFR-19 | Maintainability | Database schema changes are made through Alembic migrations, not by hand. | Beta |
 | NFR-20 | Privacy | Member phone numbers and notes are returned only to admins and to the member themself. | Beta |
 | NFR-21 | Consistency | Booking a class checks capacity and inserts the booking in one database transaction, so a class is never over capacity and a member never books the same class twice. | Beta |
+
+> **Built so far (security):** NFR-11, NFR-15, NFR-16 (headers set for every response in `vercel.json`), NFR-17, NFR-20 and NFR-21. Access tokens last 8 hours and there are no refresh tokens yet (NFR-12 to NFR-14). Schema changes are applied on start by `create_db_and_tables()` rather than Alembic (NFR-19). Production is deployed with `vercel --prod`; the project is not connected to GitHub, so a push to `main` does not deploy by itself (NFR-10).
 
 ## 5. Acceptance criteria
 
