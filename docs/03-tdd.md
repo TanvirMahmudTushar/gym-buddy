@@ -396,6 +396,7 @@ erDiagram
 | `ClassRead` | Class responses | all class columns except `created_by` + `booked_count` (`is_booked_by_me` comes with member booking); times are UTC with a trailing `Z` | Beta |
 | `ClassPage` / `BookingPage` | Class and booking lists | `items`, `total`, `offset`, `limit` | Beta |
 | `BookingRead` | Booking responses | `class_id`, `member_id`, `member_name`, `booked_at` | Beta |
+| `BookedClassRead` / `BookedClassPage` | A member's bookings | `class_id`, `class_name`, `starts_at`, `duration_minutes`, `trainer_name?`, `booked_at` | Beta |
 | `PaymentCreate` / `PaymentRead` / `PaymentPage` | Record and list payments | create: `amount`, `method`, `note?`, `renew_plan?`; read: `id`, `member_id?`, `member_name`, `amount`, `method`, `plan?`, `note?`, `paid_at`, `renewed_until?`, `recorded_by_name?`, `voided_at?`, `void_reason?`, `voided_by_name?` | Beta |
 | `PaymentListPage` | All payments | `PaymentPage` + `total_amount` (sum of the matching payments that are not voided, across all pages) | Beta |
 | `PaymentFilter` | Query filters for the list and the CSV | `date_from?`, `date_to?` (UTC days, inclusive; `date_from` after `date_to` is `422`), `method?`, `member?` (part of the name, any case), `include_voided` (default false) | Beta |
@@ -522,6 +523,9 @@ Ban rules: banning is idempotent (banning a banned user changes nothing), an adm
 | `POST` | `/api/v1/members/{id}/payments` | Gym Manager, Admin | `PaymentCreate` | `201` `PaymentRead` (with `renew_plan`, the member's expiry and plan change too) | `403`, `404`, `422` | FR-44, FR-45 |
 | `GET` | `/api/v1/members/{id}/payments?offset&limit` | Gym Manager, Admin | — | `200` `PaymentPage` (newest first, voided included) | `403`, `404`, `422` | FR-46 |
 | `GET` | `/api/v1/payments?date_from&date_to&method&member&include_voided&offset&limit` | Gym Manager, Admin | — | `200` `PaymentListPage` (newest first) | `401`, `403`, `422` | FR-48 |
+| `GET` | `/api/v1/users/me/bookings?when&offset&limit` | Any logged-in user | — | `200` `BookedClassPage` (own only; `upcoming` soonest first, `past` latest first) | `401`, `422` | FR-60 |
+| `GET` | `/api/v1/members/{id}/bookings?when&offset&limit` | Gym Manager, Admin | — | `200` `BookedClassPage` | `403`, `404`, `422` | FR-58 |
+| `DELETE` | `/api/v1/members/{id}/bookings/{class_id}` | Gym Manager, Admin | — | `204` | `400` (class started), `403`, `404` | FR-59 |
 | `GET` | `/api/v1/users/me/payments?offset&limit` | Any logged-in user | — | `200` `PaymentPage` (own payments only, voided included) | `401` | FR-49 |
 | `POST` | `/api/v1/payments/{id}/void` | Admin | `VoidRequest` | `200` `PaymentRead` (voiding again: unchanged) | `401`, `403`, `404`, `422` | FR-50 |
 | `GET` | `/api/v1/payments/export.csv?date_from&date_to&method&member&include_voided` | Admin | — | `200` `text/csv` attachment `payments-YYYY-MM-DD.csv` | `401`, `403`, `422` | FR-51 |
@@ -537,7 +541,7 @@ Ban rules: banning is idempotent (banning a banned user changes nothing), an adm
 | `DELETE` | `/api/v1/classes/{class_id}` | Gym Manager, Admin | — | `204` (its bookings are deleted too) | `403`, `404` | FR-27 |
 | `GET` | `/api/v1/classes/{class_id}/bookings` | Gym Manager, Admin | — | `200` `BookingPage` (in booking order) | `403`, `404` | FR-28 |
 | `POST` | `/api/v1/classes/{class_id}/bookings` | Any logged-in user with a linked, valid membership | — | `201` `BookingRead` | `400` (membership not valid / class already started), `404`, `409` (full or already booked) | FR-28, FR-29 |
-| `DELETE` | `/api/v1/classes/{class_id}/bookings` | Any logged-in user with a linked membership | — | `204` (cancel my booking) | `404` | FR-29 |
+| `DELETE` | `/api/v1/classes/{class_id}/bookings` | Any logged-in user with a membership | — | `204` (cancel my booking) | `400` (class started), `404` | FR-29 |
 
 ### 6.3 Examples
 

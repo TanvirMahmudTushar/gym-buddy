@@ -127,7 +127,10 @@ export default function TimetablePage() {
   return (
     <section className="card narrow-wide" aria-labelledby="timetable-heading">
       <h2 id="timetable-heading">Classes</h2>
-      <p className="hint">Book a place in an upcoming class. You need a valid membership, and you can cancel any time.</p>
+      <p className="hint">
+        Book a place in an upcoming class. You need a valid membership, and you can cancel until the class starts. Your
+        bookings are also listed on <a href="#/membership">My membership</a>.
+      </p>
       {body}
       {!loading && classes.length > 0 && (
         <div className="list-foot">

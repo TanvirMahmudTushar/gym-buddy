@@ -47,6 +47,7 @@ Pages: `#/login`, `#/signup`, `#/dashboard` (Admin), `#/members` (Gym Manager, A
 **Gym Manager features (also available to Admins)**
 - **Check in a member:** open a member on the Members page and click **Check in**. Frozen and expired members cannot be checked in (the page says why; renew or unfreeze first). The same member can check in more than once a day.
 - **Visit history:** each member's visits, newest first, with who recorded each one.
+- **A member's bookings:** in the member details, **Bookings** lists the classes they booked, soonest first, with **Cancel** so the front desk can cancel for them; **Show past bookings** lists the classes that have already started.
 - **Renewals due:** the **Expiring soon** chip on the Members page lists the active (not frozen) memberships that end today or within the next 7 days, soonest first, so staff know who to remind. Every member whose expiry is that close shows "today", "tomorrow" or "in 5 days" next to the date. The filter is kept in the address (`#/members?filter=expiring_soon`), so the Dashboard can link to it.
 - **Checked in today:** a card at the top of the Members page lists everyone who has arrived since midnight UTC. Click a name to open that member.
 - **Find a member:** the search box on the Members page finds members by part of their name, email or phone, in any case, together with the status chips.
@@ -61,8 +62,10 @@ Pages: `#/login`, `#/signup`, `#/dashboard` (Admin), `#/members` (Gym Manager, A
 
 **User features**
 - **My membership:** plan, status, joined and expiry dates, and the person's own visits, newest first. A User can only ever see their own record. Before staff start a membership, the page says so and shows the email to give the front desk.
+- **My bookings:** on My membership, the person's upcoming classes with **Cancel**, past classes on request, and a link to book another.
+- **Plans and prices:** on My membership, what each plan costs and how many days it adds, with the person's own plan marked, and how renewing at the front desk works.
 - **My payments:** on My membership, the person's own payments, newest first. A voided payment shows as voided with the reason. Nobody can see another person's payments.
-- **Classes:** upcoming classes with places left. **Book** takes a place, **Cancel booking** frees it. Booking needs a valid membership (not frozen or expired) and a class that has not started; a full class or one you already booked is refused with a clear message. Two people booking the last place at the same moment cannot both get it.
+- **Classes:** upcoming classes with places left. **Book** takes a place, **Cancel booking** frees it (until the class starts; after that the booking is history and cannot be cancelled by anyone). Booking needs a valid membership (not frozen or expired) and a class that has not started; a full class or one you already booked is refused with a clear message. Two people booking the last place at the same moment cannot both get it.
 - **My account:** change your name, and change your password. After a password change every earlier login stops working and you log in again with the new password.
 
 **Admin features**
@@ -97,6 +100,7 @@ Interactive docs: `/api/docs` (for example http://localhost:8000/api/docs).
 | All payments | `GET /api/v1/payments?date_from=&date_to=&method=&member=&include_voided=false&offset=0&limit=20` | `200` `{items, total, offset, limit, total_amount}`, newest first; `total_amount` leaves out voided payments | `401`, `403`, `422` (bad method, or `date_from` after `date_to`) |
 | Void a payment (admin) | `POST /api/v1/payments/{id}/void` `{"reason": "Entered twice"}` | `200` payment with `voided_at`, `void_reason`, `voided_by_name` (again: unchanged) | `403`, `404`, `422` (no reason) |
 | Export payments (admin) | `GET /api/v1/payments/export.csv` with the same filters | `200` `text/csv` file | `403`, `422` |
+| My bookings | `GET /api/v1/users/me/bookings?when=upcoming&offset=0&limit=20` (`when=past` for started classes) | `200` `{items, total, offset, limit}` of `{class_id, class_name, starts_at, duration_minutes, trainer_name, booked_at}` | `401`, `422` |
 | My payments | `GET /api/v1/users/me/payments?offset=0&limit=20` | `200` `{items, total, offset, limit}`, only my own, newest first | `401` |
 | Plan prices | `GET /api/v1/plans` (any logged-in user) | `200` list of `{plan, price, duration_days}` | `401` |
 | Change a plan (admin) | `PUT /api/v1/admin/plans/{plan}` `{price, duration_days}` | `200` plan | `403`, `422` |
@@ -110,7 +114,9 @@ Interactive docs: `/api/docs` (for example http://localhost:8000/api/docs).
 | Delete a class | `DELETE /api/v1/classes/{id}` | `204` | `403`, `404` |
 | Class bookings | `GET /api/v1/classes/{id}/bookings` | `200` `{items, total, offset, limit}` with member name and time | `403`, `404` |
 | Book a class | `POST /api/v1/classes/{id}/bookings` (for the logged-in user) | `201` booking | `400` (membership not valid or class started), `404` (no membership, or no such class), `409` (full or already booked) |
-| Cancel my booking | `DELETE /api/v1/classes/{id}/bookings` | `204` | `404` |
+| Cancel my booking | `DELETE /api/v1/classes/{id}/bookings` | `204` | `400` (class has started), `404` |
+| A member's bookings | `GET /api/v1/members/{id}/bookings?when=upcoming&offset=0&limit=20` | `200` same shape as My bookings | `403`, `404`, `422` |
+| Cancel for a member | `DELETE /api/v1/members/{id}/bookings/{class_id}` | `204` | `400` (class has started), `403`, `404` |
 | My membership | `GET /api/v1/users/me/membership` | `200` member | `401`, `404` (no membership yet) |
 | My visits | `GET /api/v1/users/me/check-ins?offset=0&limit=20` | `200` `{items, total, offset, limit}`, newest first | `401`, `404` |
 | Change my password | `POST /api/v1/users/me/password` `{current_password, new_password}` | `204` | `400` (wrong current password), `401`, `422` |

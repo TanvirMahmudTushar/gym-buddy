@@ -235,7 +235,7 @@ Every Admin is also a logged-in user, so they can log out, edit their profile an
 | FR-26 | Any logged-in user shall be able to list classes (optionally only upcoming, ordered by start time) and view one class. Each class shows `booked_count` and, for members, whether they booked it (`is_booked_by_me`). | Beta | US-15 |
 | FR-27 | A gym manager or admin shall be able to edit or delete a class. Lowering `capacity` below the current number of bookings returns `422`. Deleting a class deletes its bookings. | Beta | US-14 |
 | FR-28 | A gym manager or admin shall be able to list the bookings of a class (member name and booking time). | Beta | US-17 |
-| FR-29 | A member with a valid membership shall be able to book a class that has not started yet, and cancel their own booking. Booking returns `400` if the membership is not valid or the class already started, `409` if the class is full or the member already booked it. A member can book or cancel only for themself. | Beta | US-16 |
+| FR-29 | A member with a valid membership shall be able to book a class that has not started yet, and cancel their own booking. Booking returns `400` if the membership is not valid or the class already started, `409` if the class is full or the member already booked it. A member can book or cancel only for themself, and (Beta, built) cannot cancel once the class has started (`400`). | Beta | US-16 |
 
 > **Built so far (gym manager):** FR-25, FR-26 (with `booked_count`), FR-27 and FR-28. Deleting a member also deletes their bookings.
 
@@ -283,6 +283,17 @@ Every Admin is also a logged-in user, so they can log out, edit their profile an
 | FR-57 | The Members page shall open on a member and a filter given in its address (`#/members?filter=...&member=ID`), and every member's name in the payments list, class bookings and today's check-ins shall link there. | Beta | US-13 |
 
 > **Built so far (finding members):** FR-54 to FR-57.
+
+### 3.7c Bookings and renewals — Beta
+
+| ID | Requirement | Release | Story |
+|---|---|---|---|
+| FR-58 | A gym manager or admin shall be able to list a member's bookings with the class name, start time, length and trainer: `when=upcoming` (soonest first, the default) or `when=past` (latest first), paginated. | Beta | US-17 |
+| FR-59 | A gym manager or admin shall be able to cancel a member's booking for them. A booking for a class that has started cannot be cancelled by anyone (`400`); a missing booking is `404`. | Beta | US-17 |
+| FR-60 | A logged-in user shall be able to list their own bookings the same way (FR-58); nobody can list another person's this way. | Beta | US-16 |
+| FR-61 | My membership shall show the member's upcoming bookings with Cancel and their past bookings on request, and the price and length of every plan with the member's own plan marked. | Beta | US-11 |
+
+> **Built so far (bookings and renewals):** FR-58 to FR-61.
 
 ### 3.8 Account security — Beta
 
@@ -347,6 +358,8 @@ A new member always starts as `Active` if `expires_on` is today or later. "Expir
 | Create, edit, delete classes | No | No (`403`) | Yes | Yes |
 | View a class's bookings | No | No (`403`) | Yes | Yes |
 | Book or cancel own class booking | No | Yes (valid membership needed to book) | Only if linked | Only if linked |
+| List own bookings | No | Yes | Yes | Yes |
+| List or cancel a member's bookings | No | No (`403`) | Yes | Yes |
 | List users, change roles | No | No (`403`) | No (`403`) | Yes |
 | View dashboard stats and revenue, ban / unban users | No | No (`403`) | No (`403`) | Yes (not self, not other admins) |
 | List members expiring soon | No | No (`403`) | Yes | Yes |
@@ -589,6 +602,12 @@ Every endpoint except sign up, log in, refresh, health and the docs returns `401
 - `GET /api/v1/admin/users` shows Rafi with `plan = monthly` and Walt with `plan = null`; `?q=max` returns only Max Manager.
 - A User gets `403` for the waiting list.
 
+**AC-36 Bookings (FR-58 – FR-60)**
+- Given member A booked Spin (tomorrow), Yoga (in 2 days), HIIT (in 3 days) and Pilates (started 2 days ago)
+- When a gym manager sends `GET /api/v1/members/{A}/bookings`, the response lists Spin, Yoga, HIIT in that order; with `when=past` it lists Pilates.
+- When the gym manager sends `DELETE /api/v1/members/{A}/bookings/{Spin}`, the response is `204`; again, `404`. For Pilates it is `400`, for staff and for A alike.
+- When member B sends `GET /api/v1/members/{A}/bookings`, the response is `403`; `GET /api/v1/users/me/bookings` returns only B's own.
+
 ## 6. Traceability
 
 | Story | Requirements | Endpoint (see [TDD, section 6](03-tdd.md#6-rest-api-design)) | Release |
@@ -615,5 +634,6 @@ Every endpoint except sign up, log in, refresh, health and the docs returns `401
 | US-21 | FR-36, FR-37, FR-39 | `POST /api/v1/admin/users/{id}/ban`, `GET /api/v1/admin/users` | Beta |
 | US-22 | FR-38 | `POST /api/v1/admin/users/{id}/unban` | Beta |
 | US-23, US-24 | FR-16, FR-40, FR-41 | `GET` / `PATCH /api/v1/users/me`, `POST /api/v1/users/me/password` | Beta |
+| US-11, US-16, US-17 | FR-58 – FR-61 | `GET /api/v1/members/{id}/bookings`, `DELETE /api/v1/members/{id}/bookings/{class_id}`, `GET /api/v1/users/me/bookings` | Beta |
 | US-12, US-13 | FR-54 – FR-57 | `GET /api/v1/members?q=`, `GET /api/v1/members/waiting`, `GET /api/v1/admin/users?q=` | Beta |
 | US-25, US-26 | FR-43 – FR-51, FR-53 | `GET /api/v1/members?status=expiring_soon`, `/api/v1/plans`, `/api/v1/members/{id}/payments`, `/api/v1/payments`, `/api/v1/payments/{id}/void`, `/api/v1/payments/export.csv`, `/api/v1/users/me/payments`, `PUT /api/v1/admin/plans/{plan}` | Beta |

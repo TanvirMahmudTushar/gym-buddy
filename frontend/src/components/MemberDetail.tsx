@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react"
-import { deleteMember, getMember, updateMember } from "../services/memberService"
+import { cancelMemberBooking, deleteMember, getMember, listMemberBookings, updateMember } from "../services/memberService"
 import type { Member, MemberUpdate } from "../types/member"
 import { errorText, formatDate, memberStatus, planLabel } from "../utils/member"
+import BookingsSection from "./BookingsSection"
 import CheckInSection from "./CheckInSection"
 import EditMemberForm from "./EditMemberForm"
 import PaymentSection from "./PaymentSection"
@@ -162,6 +163,15 @@ export default function MemberDetail({ memberId, onChanged, onDeleted, onChecked
       </dl>
       <hr className="separator" />
       <CheckInSection key={member.id} member={member} onCheckedIn={onCheckedIn} />
+      <hr className="separator" />
+      <BookingsSection
+        key={`bookings-${member.id}`}
+        variant="panel"
+        title="Bookings"
+        load={(when, offset, limit) => listMemberBookings(member.id, when, offset, limit)}
+        cancel={(classId) => cancelMemberBooking(member.id, classId)}
+        emptyText="No upcoming classes booked."
+      />
       <hr className="separator" />
       <PaymentSection key={`pay-${member.id}`} member={member} onRecorded={(renewed) => renewed && refreshMember()} />
       <hr className="separator" />

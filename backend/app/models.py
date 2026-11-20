@@ -360,6 +360,24 @@ class BookingPage(SQLModel):
     limit: int
 
 
+class BookedClassRead(SQLModel):
+    """One of a member's bookings, with the class it is for."""
+
+    class_id: int
+    class_name: str
+    starts_at: UtcDateTime
+    duration_minutes: int
+    trainer_name: str | None
+    booked_at: UtcDateTime
+
+
+class BookedClassPage(SQLModel):
+    items: list[BookedClassRead]
+    total: int
+    offset: int
+    limit: int
+
+
 # --- Password change ---
 
 
