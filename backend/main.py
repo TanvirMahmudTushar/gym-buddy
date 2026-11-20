@@ -14,6 +14,7 @@ from app.services.auth_service import (
     AccountLockedError,
     EmailTakenError,
     InvalidCredentialsError,
+    SamePasswordError,
     WrongPasswordError,
 )
 from app.services.checkin_service import MembershipNotValidError
@@ -34,7 +35,12 @@ from app.services.member_service import (
     NoMembershipError,
 )
 from app.services.payment_service import PaymentNotFoundError
-from app.services.user_service import CannotBanError, CannotChangeOwnRoleError, UserNotFoundError
+from app.services.user_service import (
+    CannotBanError,
+    CannotChangeOwnRoleError,
+    CannotResetPasswordError,
+    UserNotFoundError,
+)
 
 logger = logging.getLogger("gym_buddy")
 
@@ -104,6 +110,7 @@ _plain_error(AccountNotFoundError, 422, "No account has that email. Ask the pers
 _plain_error(AlreadyMemberError, 409, "That account already has a membership")
 _plain_error(NoMembershipError, 404, "You do not have a membership yet")
 _plain_error(WrongPasswordError, 400, "Current password is wrong")
+_plain_error(SamePasswordError, 400, "Choose a password different from your current one")
 _plain_error(ClassStartedError, 400, "This class has already started")
 _plain_error(ClassFullError, 409, "This class is full")
 _plain_error(AlreadyBookedError, 409, "You have already booked this class")
@@ -140,6 +147,11 @@ async def account_locked(request: Request, exc: AccountLockedError) -> JSONRespo
 @app.exception_handler(AccountBannedError)
 async def account_banned(request: Request, exc: AccountBannedError) -> JSONResponse:
     return JSONResponse(status_code=403, content={"detail": ACCOUNT_BANNED_MESSAGE})
+
+
+@app.exception_handler(CannotResetPasswordError)
+async def cannot_reset_password(request: Request, exc: CannotResetPasswordError) -> JSONResponse:
+    return JSONResponse(status_code=400, content={"detail": str(exc)})
 
 
 @app.exception_handler(CannotBanError)

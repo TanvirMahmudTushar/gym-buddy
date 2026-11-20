@@ -76,6 +76,7 @@ Pages: `#/login`, `#/signup`, `#/dashboard` (Admin), `#/overview` (Gym Manager, 
 - **Void a payment:** on the **Payments** page, **Void** marks a mistaken payment, with a reason that must be given. The payment stays on record (struck through, with who voided it, when and why) but is left out of every total. Voiding an already voided payment changes nothing. Voiding does not change the member's expiry date; edit it on the Members page if a renewal was wrong.
 - **Export CSV:** on the **Payments** page, **Export CSV** downloads every payment that matches the current filters (not just the rows loaded), newest first, with the columns `id`, `paid_at_utc`, `member`, `member_id`, `amount_taka`, `method`, `plan`, `renewed_until`, `note`, `recorded_by`, `voided_at_utc`, `void_reason` and `voided_by`. It opens in Excel or Google Sheets with Bengali names intact, and any text that a spreadsheet would run as a formula (starting with `=`, `+`, `-` or `@`) is saved with a leading `'` so it shows as plain text.
 - **Users and their memberships:** the **Users** page shows each account's membership (plan, status and expiry, linking to the member) or "None yet" with a link to start one, and has a search by name or email.
+- **Reset a password:** on the **Users** page, **Reset password** (for a User or Gym Manager, not yourself or another admin) makes a random 12-character temporary password and shows it once, with **Copy**, to hand over in person. The person's old password and every login stop working and any login lockout is cleared. When they log in with the temporary password, the app shows only **Choose a new password** (the API refuses everything else with `403 Choose a new password first`); the new one must differ from the temporary one, and they then log in again with it.
 - **Ban / unban:** on the **Users** page, an admin can ban a User or Gym Manager with an optional reason. A banned person gets `403 Account banned` when logging in and on every request, even with a token that has not expired, and the app logs them out. Unbanning restores access with their role and data unchanged. An admin cannot ban themself or another admin; change the other admin's role first.
 
 **First admin.** Nobody can make themselves an admin. Sign up in the app, then in Supabase → **Table Editor** → `app_user`, set that row's `role` to `admin` (or run `update app_user set role = 'admin' where email = 'you@example.com';` in the SQL editor). Log in again. From then on, change roles on the **Users** page.
@@ -120,7 +121,7 @@ Interactive docs: `/api/docs` (for example http://localhost:8000/api/docs).
 | Cancel for a member | `DELETE /api/v1/members/{id}/bookings/{class_id}` | `204` | `400` (class has started), `403`, `404` |
 | My membership | `GET /api/v1/users/me/membership` | `200` member | `401`, `404` (no membership yet) |
 | My visits | `GET /api/v1/users/me/check-ins?offset=0&limit=20` | `200` `{items, total, offset, limit}`, newest first | `401`, `404` |
-| Change my password | `POST /api/v1/users/me/password` `{current_password, new_password}` | `204` | `400` (wrong current password), `401`, `422` |
+| Change my password | `POST /api/v1/users/me/password` `{current_password, new_password}` | `204` (also ends the must-choose-a-new-password state) | `400` (wrong current password, or the new one is the same), `401`, `422` |
 | Health | `GET /api/health` | `200` `{"status": "ok"}` | |
 | Sign up | `POST /api/v1/auth/signup` `{email, name, password}` | `201` user (role `user`) | `409`, `422` |
 | Log in | `POST /api/v1/auth/login` `{email, password}` | `200` `{access_token, token_type, user}` | `401`, `403` (banned), `422`, `429` (locked after 5 wrong passwords) |
@@ -133,6 +134,7 @@ Interactive docs: `/api/docs` (for example http://localhost:8000/api/docs).
 | Change role (admin) | `PATCH /api/v1/admin/users/{id}/role` `{"role": "gym_manager"}` | `200` user | `400` (own role), `403`, `404`, `422` |
 | Ban (admin) | `POST /api/v1/admin/users/{id}/ban` `{"reason": "optional"}` | `200` user | `400` (self or another admin), `403`, `404`, `422` |
 | Unban (admin) | `POST /api/v1/admin/users/{id}/unban` | `200` user | `403`, `404` |
+| Reset a password (admin) | `POST /api/v1/admin/users/{id}/reset-password` | `200` `{user, temporary_password}` (`Cache-Control: no-store`); the user's `must_change_password` is `true` until they choose a new one | `400` (yourself or another admin), `403`, `404` |
 
 - Every `/api/v1/members` endpoint needs `Authorization: Bearer <access_token>` from a Gym Manager or Admin: `401` without a token, `403` for a User.
 - A member's `id` is their user id. A member is `{id, name, email, phone, plan, joined_on, expires_on, is_frozen, notes}`.

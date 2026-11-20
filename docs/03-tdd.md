@@ -213,6 +213,7 @@ erDiagram
 | `email` | varchar(254) | Unique, stored lowercase |
 | `name` | varchar(100) | Not null |
 | `password_hash` | varchar | Argon2 hash, never returned by the API |
+| `must_change_password` | boolean | Default false; true after an admin reset until a new password is chosen |
 | `role` | varchar(20) | `user`, `gym_manager` or `admin`, default `user` |
 | `failed_login_count` | integer | Default 0 |
 | `locked_until` | timestamp (UTC) | Nullable |
@@ -391,6 +392,7 @@ erDiagram
 | `AdminUserRead` | Admin user list | `UserRead` + `is_banned`, `banned_at`, `ban_reason`, `plan?`, `expires_on?`, `is_frozen` | Beta |
 | `AccountPage` | Accounts waiting for a membership | `items: UserRead[]`, `total`, `offset`, `limit` | Beta |
 | `BanRequest` | Ban a user | `reason?` | Beta |
+| `PasswordResetResult` | Admin password reset | `user: AdminUserRead`, `temporary_password` (shown once) | Beta |
 | `AdminStats` | Dashboard | `members {total, active, expired, frozen, new_last_7_days, expiring_soon}`, `classes {total, upcoming}`, `check_ins {today, last_7_days}`, `users {total, users, gym_managers, admins, banned}` | Beta |
 | `Overview` | Gym manager start page | `check_ins_today`, `expiring_soon`, `waiting`, `payments_today {count, amount}`, `next_classes: ClassRead[]` (5) | Beta |
 | `RevenueStats` | Dashboard revenue | `today`, `this_month`, `last_30_days`, `last_30_days_from` (date), `by_method [{method, amount, count}]` (all four methods), `months [{month: "YYYY-MM", amount}]` (6, oldest first) | Beta |
@@ -480,7 +482,7 @@ In the MVP no login is needed. In the Beta the member endpoints become admin-onl
 | `POST` | `/api/v1/auth/logout` | Refresh cookie | — | `204`, cookie cleared | — | FR-15 |
 | `GET` | `/api/v1/users/me` | Member | — | `200` `UserRead` | `401` | FR-16 |
 | `PATCH` | `/api/v1/users/me` | Member | `ProfileUpdate` | `200` `UserRead` | `422` | FR-40 |
-| `POST` | `/api/v1/users/me/password` | Any logged-in user | `PasswordChange` | `204` (tokens issued before the change stop working) | `400` (wrong current password), `401`, `422` | FR-41 |
+| `POST` | `/api/v1/users/me/password` | Any logged-in user, also while a new password is due | `PasswordChange` | `204` (tokens issued before the change stop working; clears `must_change_password`) | `400` (wrong current password or same password), `401`, `422` | FR-41, FR-66 |
 | `GET` | `/api/v1/users/lookup?email` or `?id` | Gym Manager, Admin | — | `200` `AccountLookup` (`id`, `name`, `email`) | `403`, `404`, `422` | FR-23 |
 | `GET` | `/api/v1/users/me/membership` | Any logged-in user | — | `200` `MemberRead` | `401`, `404` (no membership linked) | FR-17 |
 | `GET` | `/api/v1/users/me/check-ins?offset&limit` | Any logged-in user | — | `200` `CheckInPage` (newest first) | `401`, `404` | FR-18 |
@@ -510,6 +512,7 @@ In the MVP no login is needed. In the Beta the member endpoints become admin-onl
 | `GET` | `/api/v1/overview` | Gym Manager, Admin | — | `200` `Overview` (`payment_service.totals_since()`, `checkin_service.count_since()`, the member list's `status_filters("expiring_soon")` and `WAITING`, `class_service.list_classes(upcoming)`) | `401`, `403` | FR-62 |
 | `POST` | `/api/v1/admin/users/{user_id}/ban` | Admin | `BanRequest` | `200` `AdminUserRead` | `400` (self / other admin), `403`, `404` | FR-36 |
 | `POST` | `/api/v1/admin/users/{user_id}/unban` | Admin | — | `200` `AdminUserRead` | `403`, `404` | FR-38 |
+| `POST` | `/api/v1/admin/users/{user_id}/reset-password` | Admin | — | `200` `PasswordResetResult`, `Cache-Control: no-store` | `400` (self or another admin), `403`, `404` | FR-64 |
 
 `GET /api/v1/admin/users` returns `AdminUserRead` items so the Users page can show who is banned, since when and why (FR-39).
 
@@ -741,6 +744,7 @@ Row-level rules that depend on the data are checked inside the route:
 - Ban: target is the caller or an admin → `400`. Otherwise set `is_banned = true`, `banned_at = now`, `ban_reason`, and revoke all the user's refresh tokens in the same transaction. Unban clears the three fields.
 - Login and refresh also reject banned users with `403`.
 - Change password: verify `current_password` (`400` if wrong), hash `new_password`, revoke all the user's refresh tokens; the client then logs in again.
+- **Built so far (password reset):** `get_logged_in_user` checks the token, the password change time and the ban; `get_current_user` (used by every route and by `require_roles`) also returns `403 Choose a new password first` while `must_change_password` is set. Only `GET /users/me` and `POST /users/me/password` take `LoggedInUser` instead, so a reset account can see who it is and choose a password. Tokens carry `iat` with the fraction of a second and are refused when `iat < password_changed_at`.
 
 ### 10.4 Admin dashboard stats
 

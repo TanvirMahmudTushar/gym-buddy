@@ -2,6 +2,7 @@ import { useEffect, useState } from "react"
 import { useAuth } from "./context/AuthContext"
 import AppLayout from "./layouts/AppLayout"
 import AccountPage from "./pages/AccountPage"
+import ChoosePasswordPage from "./pages/ChoosePasswordPage"
 import ClassesPage from "./pages/ClassesPage"
 import DashboardPage from "./pages/DashboardPage"
 import HomePage from "./pages/HomePage"
@@ -54,6 +55,14 @@ export default function App() {
   }, [page, requested, loading])
 
   if (loading) return <p className="empty">Loading…</p>
+
+  // After an admin reset the password, nothing else opens until a new one is chosen (the API refuses it too).
+  if (user?.must_change_password)
+    return (
+      <AppLayout page="account" locked>
+        <ChoosePasswordPage />
+      </AppLayout>
+    )
 
   return (
     <AppLayout page={page}>

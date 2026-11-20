@@ -4,7 +4,7 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, Query, Response
 
 from app.database import SessionDep
-from app.deps import CurrentUser
+from app.deps import CurrentUser, LoggedInUser
 from app.models import (
     BookedClassPage,
     CheckInPage,
@@ -21,7 +21,8 @@ router = APIRouter(prefix="/api/v1/users", tags=["users"])
 
 
 @router.get("/me", response_model=UserRead)
-def get_me(user: CurrentUser) -> User:
+def get_me(user: LoggedInUser) -> User:
+    """Works even while a new password is due (must_change_password), so the app knows to ask for one."""
     return user
 
 
@@ -76,7 +77,8 @@ def list_my_payments(
 
 
 @router.post("/me/password", status_code=204)
-def change_my_password(body: PasswordChange, user: CurrentUser, session: SessionDep) -> Response:
-    """400 if the current password is wrong. Logins made before the change stop working."""
+def change_my_password(body: PasswordChange, user: LoggedInUser, session: SessionDep) -> Response:
+    """400 if the current password is wrong or the new one is the same. Logins made before the change stop
+    working. Also the way out of must_change_password after an admin reset."""
     auth_service.change_password(session, user, body.current_password, body.new_password)
     return Response(status_code=204)

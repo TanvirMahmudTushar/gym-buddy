@@ -46,6 +46,8 @@ class User(SQLModel, table=True):
     ban_reason: str | None = Field(default=None, max_length=500)
     # Tokens issued before this moment stop working (set when the password is changed).
     password_changed_at: datetime | None = None
+    # Set when an admin resets the password: until a new one is chosen, the account can do nothing else.
+    must_change_password: bool = False
     # Login lockout (FR-34): wrong passwords in a row, and the moment logins are blocked until.
     failed_login_count: int = 0
     locked_until: datetime | None = None
@@ -160,6 +162,8 @@ class UserRead(SQLModel):
     name: str
     role: Role
     created_at: datetime
+    # True after an admin reset the password: the app asks for a new one before anything else.
+    must_change_password: bool
 
 
 class AccountPage(SQLModel):
@@ -194,6 +198,13 @@ class AdminUserPage(SQLModel):
     total: int
     offset: int
     limit: int
+
+
+class PasswordResetResult(SQLModel):
+    """The account after an admin reset its password, and the temporary password (shown only this once)."""
+
+    user: AdminUserRead
+    temporary_password: str
 
 
 class BanRequest(SQLModel):
