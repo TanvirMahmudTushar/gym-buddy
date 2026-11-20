@@ -72,6 +72,8 @@ Pages: `#/login`, `#/signup`, `#/dashboard` (Admin), `#/members` (Gym Manager, A
 
 **First admin.** Nobody can make themselves an admin. Sign up in the app, then in Supabase → **Table Editor** → `app_user`, set that row's `role` to `admin` (or run `update app_user set role = 'admin' where email = 'you@example.com';` in the SQL editor). Log in again. From then on, change roles on the **Users** page.
 
+**Login lockout.** After 5 wrong passwords in a row for an account, logging in to it is blocked for 15 minutes, even with the right password: the app shows "Too many failed logins. Try again in 15 minutes." (`429`, with a `Retry-After` header in seconds). Attempts while it is blocked do not count, and a successful login resets the count. Someone already logged in stays logged in. An email with no account always gets the same "Wrong email or password".
+
 **`JWT_SECRET`.** Login tokens are signed with the `JWT_SECRET` environment variable (at least 32 bytes). Locally it is optional: without it the backend makes a temporary secret and you log in again after each restart. On Vercel it is required; generate one with `python -c "import secrets; print(secrets.token_urlsafe(48))"` and add it under **Settings** → **Environment Variables**.
 
 ## REST API
@@ -110,7 +112,7 @@ Interactive docs: `/api/docs` (for example http://localhost:8000/api/docs).
 | Change my password | `POST /api/v1/users/me/password` `{current_password, new_password}` | `204` | `400` (wrong current password), `401`, `422` |
 | Health | `GET /api/health` | `200` `{"status": "ok"}` | |
 | Sign up | `POST /api/v1/auth/signup` `{email, name, password}` | `201` user (role `user`) | `409`, `422` |
-| Log in | `POST /api/v1/auth/login` `{email, password}` | `200` `{access_token, token_type, user}` | `401`, `422` |
+| Log in | `POST /api/v1/auth/login` `{email, password}` | `200` `{access_token, token_type, user}` | `401`, `403` (banned), `422`, `429` (locked after 5 wrong passwords) |
 | My account | `GET` / `PATCH /api/v1/users/me` | `200` user | `401`, `422` |
 | Dashboard stats (admin) | `GET /api/v1/admin/stats` | `200` `{members, users, check_ins, classes}` counts; `members.expiring_soon` included | `401`, `403` |
 | Revenue (admin) | `GET /api/v1/admin/revenue` | `200` `{today, this_month, last_30_days, last_30_days_from, by_method, months}` in whole taka, voided left out | `401`, `403` |
@@ -190,7 +192,9 @@ Free-tier Supabase projects pause after a week with no activity; open the dashbo
 3. Set `DATABASE_URL` as above. Without it, data is kept only in `/tmp` and is lost between requests.
 4. Set `JWT_SECRET` (see **Accounts and roles**). Without it, login and the members API return `500`.
 
-Every push to `main` redeploys automatically. Or deploy from your machine with `vercel --prod`.
+The Vercel project is not connected to GitHub, so merging into `main` does not deploy by itself. Deploy from an up-to-date `main` with `vercel --prod`, or connect the repository under Project → **Settings** → **Git** so every push to `main` deploys.
+
+`vercel.json` adds security headers to every response (pages and API): `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin` and `Strict-Transport-Security`. They apply on Vercel only, not to `fastapi dev`.
 
 ## Troubleshooting
 

@@ -1,14 +1,17 @@
 import logging
+import math
 from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from app.database import create_db_and_tables
+from app.models import utc_now
 from app.routers import admin, auth, check_ins, classes, members, payments, plans, users
 from app.services.auth_service import (
     ACCOUNT_BANNED_MESSAGE,
     AccountBannedError,
+    AccountLockedError,
     EmailTakenError,
     InvalidCredentialsError,
     WrongPasswordError,
@@ -118,6 +121,18 @@ async def invalid_credentials(request: Request, exc: InvalidCredentialsError) ->
         status_code=401,
         content={"detail": "Wrong email or password"},
         headers={"WWW-Authenticate": "Bearer"},
+    )
+
+
+@app.exception_handler(AccountLockedError)
+async def account_locked(request: Request, exc: AccountLockedError) -> JSONResponse:
+    # Retry-After tells the client how many seconds are left; the message rounds up to whole minutes.
+    seconds = max(1, math.ceil((exc.until - utc_now()).total_seconds()))
+    minutes = math.ceil(seconds / 60)
+    return JSONResponse(
+        status_code=429,
+        content={"detail": f"Too many failed logins. Try again in {minutes} minute{'' if minutes == 1 else 's'}."},
+        headers={"Retry-After": str(seconds)},
     )
 
 

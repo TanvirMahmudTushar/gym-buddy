@@ -54,6 +54,8 @@ _ADDED_COLUMNS = [
     ("app_user", "banned_at", "TIMESTAMP"),
     ("app_user", "ban_reason", "VARCHAR(500)"),
     ("app_user", "password_changed_at", "TIMESTAMP"),
+    ("app_user", "failed_login_count", "INTEGER NOT NULL DEFAULT 0"),
+    ("app_user", "locked_until", "TIMESTAMP"),
     # The membership now lives on the account (there is no member table any more).
     ("app_user", "plan", "VARCHAR(10)"),
     ("app_user", "joined_on", "DATE"),
