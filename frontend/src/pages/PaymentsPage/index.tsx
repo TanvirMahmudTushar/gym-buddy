@@ -2,10 +2,18 @@ import { type FormEvent, Fragment, useEffect, useState } from "react"
 import { useAuth } from "../../context/AuthContext"
 import { exportPaymentsCsv, listPayments, voidPayment } from "../../services/paymentService"
 import type { Payment, PaymentFilters, PaymentMethod } from "../../types/payment"
-import { errorText, formatDate, formatDateTime, membersLink, planLabel, todayUtc } from "../../utils/member"
+import { errorText, formatDate, formatDateTime, hashParams, membersLink, planLabel, todayUtc } from "../../utils/member"
 import { METHODS, formatMoney, methodLabel, saveFile } from "../../utils/payment"
 
 const NO_FILTERS: PaymentFilters = { date_from: "", date_to: "", method: "", member: "", include_voided: false }
+
+const asDay = (value: string | null) => (value && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : "")
+
+/** The date range named in the address (#/payments?from=2026-11-20&to=2026-11-20), so other pages can link to a day. */
+function filtersFromHash(): PaymentFilters {
+  const params = hashParams()
+  return { ...NO_FILTERS, date_from: asDay(params.get("from")), date_to: asDay(params.get("to")) }
+}
 
 // Gym Managers and Admins: every payment, newest first, with filters and the total of what is shown.
 // Admins can also void a mistaken payment and export the list as CSV.
@@ -13,8 +21,8 @@ export default function PaymentsPage() {
   const { user } = useAuth()
   const isAdmin = user?.role === "admin"
   // What is typed in the filter form, and the filters the list was last loaded with.
-  const [draft, setDraft] = useState<PaymentFilters>(NO_FILTERS)
-  const [filters, setFilters] = useState<PaymentFilters>(NO_FILTERS)
+  const [draft, setDraft] = useState<PaymentFilters>(filtersFromHash)
+  const [filters, setFilters] = useState<PaymentFilters>(filtersFromHash)
   const [payments, setPayments] = useState<Payment[]>([])
   const [total, setTotal] = useState(0)
   const [totalAmount, setTotalAmount] = useState(0)
@@ -29,6 +37,14 @@ export default function PaymentsPage() {
   const [reason, setReason] = useState("")
   const [voidError, setVoidError] = useState("")
   const [savingId, setSavingId] = useState<number | null>(null)
+
+  // Keep the date range in the address, so a reload or a shared link shows the same days.
+  useEffect(() => {
+    const params = new URLSearchParams()
+    if (filters.date_from) params.set("from", filters.date_from)
+    if (filters.date_to) params.set("to", filters.date_to)
+    window.history.replaceState(null, "", params.toString() ? `#/payments?${params}` : "#/payments")
+  }, [filters])
 
   useEffect(() => {
     let ignore = false

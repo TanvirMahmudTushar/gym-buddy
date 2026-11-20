@@ -12,6 +12,11 @@ export const methodLabel = (method: PaymentMethod) => METHODS.find((m) => m.valu
 
 export const formatMoney = (amount: number) => `৳${amount.toLocaleString("en-US")}`
 
+/** The address of the Payments page filtered to these UTC days (YYYY-MM-DD), so a number elsewhere can link to its list. */
+export function paymentsLink(from: string, to: string): string {
+  return `#/payments?${new URLSearchParams({ from, to })}`
+}
+
 /** Hand a downloaded file to the browser's Save dialog. */
 export function saveFile(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob)

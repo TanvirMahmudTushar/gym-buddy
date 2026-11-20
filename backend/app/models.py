@@ -521,3 +521,24 @@ class PlanUpdate(SQLModel):
 
     price: Annotated[int, Field(ge=1, le=10_000_000)]
     duration_days: Annotated[int, Field(ge=1, le=3_660)]
+
+
+# --- Overview (the Gym Manager's start page) ---
+
+
+class PaymentsToday(SQLModel):
+    """Payments taken since midnight UTC that are not voided."""
+
+    count: int
+    amount: int
+
+
+class Overview(SQLModel):
+    """What needs attention today. Each number uses the same rule as the page it links to."""
+
+    check_ins_today: int
+    expiring_soon: int
+    waiting: int
+    payments_today: PaymentsToday
+    # The next classes that have not started yet, soonest first.
+    next_classes: list[ClassRead]
