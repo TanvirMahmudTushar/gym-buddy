@@ -295,6 +295,15 @@ Every Admin is also a logged-in user, so they can log out, edit their profile an
 
 > **Built so far (bookings and renewals):** FR-58 to FR-61.
 
+### 3.7d Gym Manager overview — Beta
+
+| ID | Requirement | Release | Story |
+|---|---|---|---|
+| FR-62 | A gym manager or admin shall be able to view today's overview: check-ins since midnight UTC, memberships expiring soon (FR-53), accounts waiting for a membership (FR-55), payments taken since midnight UTC that are not voided (count and sum), and the next 5 classes that have not started with their bookings and capacity. Each number shall equal the list it links to. A user gets `403`. | Beta | US-20 |
+| FR-63 | A gym manager shall land on the overview after logging in. | Beta | US-20 |
+
+> **Built so far (overview):** FR-62 and FR-63. The payments list also opens on a date range given in its address (`#/payments?from=&to=`), which the overview's payments number links to.
+
 ### 3.8 Account security — Beta
 
 | ID | Requirement | Release | Story |
@@ -360,6 +369,7 @@ A new member always starts as `Active` if `expires_on` is today or later. "Expir
 | Book or cancel own class booking | No | Yes (valid membership needed to book) | Only if linked | Only if linked |
 | List own bookings | No | Yes | Yes | Yes |
 | List or cancel a member's bookings | No | No (`403`) | Yes | Yes |
+| View today's overview | No | No (`403`) | Yes | Yes |
 | List users, change roles | No | No (`403`) | No (`403`) | Yes |
 | View dashboard stats and revenue, ban / unban users | No | No (`403`) | No (`403`) | Yes (not self, not other admins) |
 | List members expiring soon | No | No (`403`) | Yes | Yes |
@@ -608,6 +618,11 @@ Every endpoint except sign up, log in, refresh, health and the docs returns `401
 - When the gym manager sends `DELETE /api/v1/members/{A}/bookings/{Spin}`, the response is `204`; again, `404`. For Pilates it is `400`, for staff and for A alike.
 - When member B sends `GET /api/v1/members/{A}/bookings`, the response is `403`; `GET /api/v1/users/me/bookings` returns only B's own.
 
+**AC-37 Overview (FR-62)**
+- Given 3 check-ins today, 2 active members expiring within 7 days (and a frozen one that is not counted), 2 User accounts with no membership, payments today of 4,000 and 700 (voided) and one of 1,500 yesterday, and 6 upcoming classes
+- When a gym manager sends `GET /api/v1/overview`, the response has `check_ins_today = 3`, `expiring_soon = 2`, `waiting = 2`, `payments_today = {count: 1, amount: 4000}` and the next 5 classes, soonest first.
+- Each number equals `total` (or `total_amount`) of the list it links to; a user gets `403`.
+
 ## 6. Traceability
 
 | Story | Requirements | Endpoint (see [TDD, section 6](03-tdd.md#6-rest-api-design)) | Release |
@@ -634,6 +649,7 @@ Every endpoint except sign up, log in, refresh, health and the docs returns `401
 | US-21 | FR-36, FR-37, FR-39 | `POST /api/v1/admin/users/{id}/ban`, `GET /api/v1/admin/users` | Beta |
 | US-22 | FR-38 | `POST /api/v1/admin/users/{id}/unban` | Beta |
 | US-23, US-24 | FR-16, FR-40, FR-41 | `GET` / `PATCH /api/v1/users/me`, `POST /api/v1/users/me/password` | Beta |
+| US-20 | FR-62, FR-63 | `GET /api/v1/overview` | Beta |
 | US-11, US-16, US-17 | FR-58 – FR-61 | `GET /api/v1/members/{id}/bookings`, `DELETE /api/v1/members/{id}/bookings/{class_id}`, `GET /api/v1/users/me/bookings` | Beta |
 | US-12, US-13 | FR-54 – FR-57 | `GET /api/v1/members?q=`, `GET /api/v1/members/waiting`, `GET /api/v1/admin/users?q=` | Beta |
 | US-25, US-26 | FR-43 – FR-51, FR-53 | `GET /api/v1/members?status=expiring_soon`, `/api/v1/plans`, `/api/v1/members/{id}/payments`, `/api/v1/payments`, `/api/v1/payments/{id}/void`, `/api/v1/payments/export.csv`, `/api/v1/users/me/payments`, `PUT /api/v1/admin/plans/{plan}` | Beta |

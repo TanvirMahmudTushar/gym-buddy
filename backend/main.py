@@ -7,7 +7,7 @@ from fastapi.responses import JSONResponse
 
 from app.database import create_db_and_tables
 from app.models import utc_now
-from app.routers import admin, auth, check_ins, classes, members, payments, plans, users
+from app.routers import admin, auth, check_ins, classes, members, overview, payments, plans, users
 from app.services.auth_service import (
     ACCOUNT_BANNED_MESSAGE,
     AccountBannedError,
@@ -54,6 +54,7 @@ app.include_router(check_ins.router)
 app.include_router(classes.router)
 app.include_router(plans.router)
 app.include_router(payments.router)
+app.include_router(overview.router)
 
 # Run at import (not in a lifespan hook) so it also works on Vercel's serverless functions.
 create_db_and_tables()
