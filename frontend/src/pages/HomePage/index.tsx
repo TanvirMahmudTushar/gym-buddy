@@ -2,15 +2,21 @@ import { useEffect, useState } from "react"
 import { listMembers } from "../../services/memberService"
 import AddMemberForm from "../../components/AddMemberForm"
 import MemberDetail from "../../components/MemberDetail"
-import MemberList, { type Filter } from "../../components/MemberList"
+import MemberList, { FILTERS, type Filter } from "../../components/MemberList"
 import TodayCheckIns from "../../components/TodayCheckIns"
 import type { Member } from "../../types/member"
 import { errorText } from "../../utils/member"
 
+/** The list filter named in the URL (#/members?filter=expiring_soon), so the dashboard can link straight to it. */
+function filterFromHash(): Filter {
+  const value = new URLSearchParams(window.location.hash.split("?")[1] ?? "").get("filter")
+  return FILTERS.find((f) => f.value === value)?.value ?? "all"
+}
+
 // The members page: add form and member list on the left, details of the selected member on the right.
 export default function HomePage() {
   const [members, setMembers] = useState<Member[]>([])
-  const [filter, setFilter] = useState<Filter>("all")
+  const [filter, setFilter] = useState<Filter>(filterFromHash)
   const [selectedId, setSelectedId] = useState<number | null>(null)
   // Members ticked for bulk delete; separate from selectedId, the member shown in the details panel.
   const [checkedIds, setCheckedIds] = useState<number[]>([])
@@ -60,6 +66,7 @@ export default function HomePage() {
 
   function handleCreated(member: Member) {
     setFilter("all")
+    window.history.replaceState(null, "", "#/members")
     setSelectedId(member.id)
     setReloadKey((k) => k + 1)
   }
@@ -72,6 +79,8 @@ export default function HomePage() {
   function handleFilterChange(next: Filter) {
     setFilter(next)
     setCheckedIds([])
+    // Keep the address in step, so a reload shows the same list (replaceState does not add a history entry).
+    window.history.replaceState(null, "", next === "all" ? "#/members" : `#/members?filter=${next}`)
   }
 
   function handleBulkDeleted(ids: number[]) {

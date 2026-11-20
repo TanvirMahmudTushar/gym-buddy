@@ -36,7 +36,7 @@ export interface AdminUserPage {
 }
 
 export interface AdminStats {
-  members: { total: number; active: number; expired: number; frozen: number; new_last_7_days: number }
+  members: { total: number; active: number; expired: number; frozen: number; new_last_7_days: number; expiring_soon: number }
   users: { total: number; users: number; gym_managers: number; admins: number; banned: number }
   check_ins: { today: number; last_7_days: number }
   classes: { total: number; upcoming: number }

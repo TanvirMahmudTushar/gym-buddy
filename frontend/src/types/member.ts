@@ -1,6 +1,8 @@
 // Member types matching the FastAPI schemas (TDD 5.3). A member is a user whose account has a membership.
 export type Plan = "monthly" | "quarterly" | "yearly"
 export type MemberStatus = "active" | "expired" | "frozen"
+/** A member list filter: a status, or active memberships ending today or within the next 7 days. */
+export type MemberFilter = MemberStatus | "expiring_soon"
 
 export interface Member {
   /** The user's id: members and users are the same accounts. */

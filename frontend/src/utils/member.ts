@@ -18,6 +18,14 @@ export function memberStatus(member: Member): MemberStatus {
   return member.expires_on < todayUtc() ? "expired" : "active"
 }
 
+/** "today", "tomorrow" or "in 5 days" for an active membership ending within 7 days; otherwise null. */
+export function expiresSoonNote(member: Member): string | null {
+  if (member.is_frozen) return null
+  const days = Math.round((Date.parse(member.expires_on) - Date.parse(todayUtc())) / 86_400_000)
+  if (days < 0 || days > 7) return null
+  return days === 0 ? "today" : days === 1 ? "tomorrow" : `in ${days} days`
+}
+
 export function formatDate(isoDate: string): string {
   return new Date(`${isoDate.slice(0, 10)}T00:00:00Z`).toLocaleDateString("en-GB", {
     day: "numeric",

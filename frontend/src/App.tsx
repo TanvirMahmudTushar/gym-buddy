@@ -17,9 +17,12 @@ import { type Page, type ProtectedPage, canOpen, homePage } from "./utils/auth"
 const PAGES: Page[] = ["login", "signup", "dashboard", "members", "classes", "payments", "membership", "timetable", "plans", "account", "users"]
 const isProtected = (page: Page | null): page is ProtectedPage => page !== null && page !== "login" && page !== "signup"
 
+/** The page part of the URL hash: "members" for #/members?filter=expiring_soon. */
+const hashPage = () => window.location.hash.replace(/^#\/?/, "").split("?")[0]
+
 /** The page named in the URL hash (#/members), or null when there is none. */
 function readHash(): Page | null {
-  const name = window.location.hash.replace(/^#\/?/, "")
+  const name = hashPage()
   return PAGES.find((p) => p === name) ?? null
 }
 
@@ -43,7 +46,8 @@ export default function App() {
   // Keep the address bar in step with the page shown (for example after a redirect to login).
   useEffect(() => {
     if (loading) return
-    if (window.location.hash !== `#/${page}`) window.history.replaceState(null, "", `#/${page}`)
+    // Only the page part is compared, so a page's own options after ? (such as a list filter) are kept.
+    if (hashPage() !== page) window.history.replaceState(null, "", `#/${page}`)
     setRequested(page)
     // Runs again whenever the requested page changes, so a blocked page (#/users for a Gym Manager) is replaced too.
   }, [page, requested, loading])

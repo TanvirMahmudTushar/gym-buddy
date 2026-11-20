@@ -1,4 +1,4 @@
-# Admin-only endpoints under /api/v1/admin: stats, user list, roles, ban / unban, plan prices (TDD 6.2).
+# Admin-only endpoints under /api/v1/admin: stats, revenue, user list, roles, ban / unban, plan prices (TDD 6.2).
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
@@ -14,10 +14,11 @@ from app.models import (
     PlanPrice,
     PlanRead,
     PlanUpdate,
+    RevenueStats,
     User,
     UserRoleUpdate,
 )
-from app.services import payment_service, stats_service, user_service
+from app.services import payment_service, revenue_service, stats_service, user_service
 
 # Every route here is for admins only (403 for everyone else).
 router = APIRouter(
@@ -32,6 +33,13 @@ AdminUser = Annotated[User, Depends(require_roles("admin"))]
 @router.get("/stats", response_model=AdminStats)
 def get_stats(session: SessionDep) -> dict:
     return stats_service.admin_stats(session)
+
+
+@router.get("/revenue", response_model=RevenueStats)
+def get_revenue(session: SessionDep) -> dict:
+    """Money taken today, this month and in the last 30 days (also split by method), and in each of the last 6
+    months. UTC calendar days, like the payments list; voided payments are left out."""
+    return revenue_service.revenue_stats(session)
 
 
 @router.get("/users", response_model=AdminUserPage)

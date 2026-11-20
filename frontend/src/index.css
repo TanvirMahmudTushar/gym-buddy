@@ -13,6 +13,8 @@
   --bad-bg: #fbe4e1;
   --info: #3a5f8f;
   --info-bg: #e3ecf7;
+  /* Chart marks: a teal checked with the dataviz validator (contrast, lightness band and chroma) on each surface. */
+  --chart: #0a8f86;
   --display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
   --body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
   color-scheme: light;
@@ -33,6 +35,7 @@
     --bad-bg: #402220;
     --info: #8db6ee;
     --info-bg: #1d2f48;
+    --chart: #2aa197;
     color-scheme: dark;
   }
 }
@@ -745,6 +748,198 @@ button.linklike {
 .voided-amount {
   text-decoration: line-through;
   color: var(--muted);
+}
+
+/* Dashboard: revenue and renewals */
+.stat dd a {
+  color: inherit;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 4px;
+}
+
+.revenue-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 24px;
+}
+
+.bar-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.bar-list li {
+  display: grid;
+  grid-template-columns: 8.5rem 1fr auto;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+}
+
+/* The method on one line, its number of payments under it. */
+.bar-name {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
+.bar-track {
+  height: 10px;
+}
+
+/* Square at the baseline, 4px round at the data end. */
+.bar-fill {
+  display: block;
+  height: 100%;
+  background: var(--chart);
+  border-radius: 0 4px 4px 0;
+}
+
+.bar-value {
+  min-width: 72px;
+  text-align: right;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.month-chart {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px;
+  /* Room above the tallest column for its label or tooltip. */
+  padding-top: 44px;
+}
+
+/* Tick labels centred on the gridlines at the top, middle and baseline of the 140px plot. */
+.month-axis {
+  height: 152px;
+  margin-top: -6px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  font-size: 11px;
+  line-height: 12px;
+  color: var(--muted);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.month-plot {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  min-width: 0;
+}
+
+/* The whole column is the hover and focus target, not just the painted bar. */
+.month-col {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  outline: none;
+}
+
+.month-bar-area {
+  position: relative;
+  width: 100%;
+  height: 140px;
+  display: flex;
+  justify-content: center;
+  align-items: flex-end;
+  background:
+    linear-gradient(var(--line), var(--line)) top / 100% 1px no-repeat,
+    linear-gradient(var(--line), var(--line)) center / 100% 1px no-repeat,
+    linear-gradient(var(--line), var(--line)) bottom / 100% 1px no-repeat;
+}
+
+.month-col:focus-visible .month-bar-area {
+  border-radius: 4px;
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.month-bar {
+  width: min(24px, 60%);
+  background: var(--chart);
+  border-radius: 4px 4px 0 0;
+}
+
+.month-col.active .month-bar {
+  filter: brightness(1.15);
+}
+
+.month-label {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.month-cap,
+.chart-tip {
+  position: absolute;
+  left: 50%;
+  transform: translate(-50%, -6px);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.month-cap {
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.chart-tip {
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 4px 8px;
+  font-size: 12px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.15);
+}
+
+.chart-tip strong {
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.chart-tip span {
+  color: var(--muted);
+}
+
+.chart-tip.start {
+  left: 0;
+  transform: translateY(-6px);
+  align-items: flex-start;
+}
+
+.month-cap.end,
+.chart-tip.end {
+  left: auto;
+  right: 0;
+  transform: translateY(-6px);
+  align-items: flex-end;
+}
+
+.chart-table summary {
+  font-size: 13px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.chart-table table {
+  margin-top: 8px;
 }
 
 @media (max-width: 860px) {

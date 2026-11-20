@@ -126,7 +126,7 @@ backend/
       members.py       # /api/v1/members (+ check-ins in Beta)
       auth.py          # /api/v1/auth/signup, /login
       users.py         # /api/v1/users/me (profile, change name); (Beta) change password
-      admin.py         # /api/v1/admin/stats, /users (list, change role, ban, unban), /plans (set prices)
+      admin.py         # /api/v1/admin/stats, /revenue, /users (list, change role, ban, unban), /plans (set prices)
       check_ins.py     # /api/v1/check-ins/today
       classes.py       # /api/v1/classes (read: anyone logged in; change and bookings: gym manager, admin)
       plans.py         # /api/v1/plans (anyone logged in)
@@ -137,7 +137,8 @@ backend/
       member_service.py  # member rules and queries; raises MemberNotFoundError / InvalidExpiryError
       auth_service.py    # sign up (always role user) and log in; raises EmailTakenError / InvalidCredentialsError
       user_service.py    # list users, change role, rename, ban / unban; raises UserNotFoundError / CannotChangeOwnRoleError / CannotBanError
-      stats_service.py   # member, check-in, class and user counts for the admin dashboard
+      stats_service.py   # member, check-in, class and user counts for the admin dashboard (member counts reuse the member list filters)
+      revenue_service.py # revenue today, this month, last 30 days, by method and by month (voided left out)
       payment_service.py # plan prices, record a payment (and renew), payment lists and total, void, CSV export; raises PaymentNotFoundError
       class_service.py   # classes and bookings: create, list, edit, delete, who booked; raises ClassNotFoundError / CapacityBelowBookingsError
       checkin_service.py # record a check-in (membership must be valid), history, today's list; raises MembershipNotValidError
@@ -386,7 +387,8 @@ erDiagram
 | `PasswordChange` | Change own password | `current_password`, `new_password` | Beta |
 | `AdminUserRead` | Admin user list | `UserRead` + `is_banned`, `banned_at`, `ban_reason` | Beta |
 | `BanRequest` | Ban a user | `reason?` | Beta |
-| `AdminStats` | Dashboard | `members {total, active, expired, new_last_7_days}`, `classes {total, upcoming}`, `check_ins {today, last_7_days}`, `users {total, admins, banned}` | Beta |
+| `AdminStats` | Dashboard | `members {total, active, expired, frozen, new_last_7_days, expiring_soon}`, `classes {total, upcoming}`, `check_ins {today, last_7_days}`, `users {total, users, gym_managers, admins, banned}` | Beta |
+| `RevenueStats` | Dashboard revenue | `today`, `this_month`, `last_30_days`, `last_30_days_from` (date), `by_method [{method, amount, count}]` (all four methods), `months [{month: "YYYY-MM", amount}]` (6, oldest first) | Beta |
 | `ClassCreate` / `ClassUpdate` | Create / edit class | `name`, `description?`, `trainer_name?`, `starts_at`, `duration_minutes`, `capacity` (all optional on update) | Beta |
 | `ClassRead` | Class responses | all class columns except `created_by` + `booked_count` (`is_booked_by_me` comes with member booking); times are UTC with a trailing `Z` | Beta |
 | `ClassPage` / `BookingPage` | Class and booking lists | `items`, `total`, `offset`, `limit` | Beta |
@@ -482,7 +484,7 @@ In the MVP no login is needed. In the Beta the member endpoints become admin-onl
 | Method | Path | Who | Body | Success | Errors | FR |
 |---|---|---|---|---|---|---|
 | `POST` | `/api/v1/members` | Gym Manager, Admin | `MemberCreate` (+ optional `user_id`) | `201` `MemberRead` | `403`, `409` (user already linked), `422` | FR-19 |
-| `GET` | `/api/v1/members?offset&limit&status` | Gym Manager, Admin | — | `200` `MemberPage` | `403` | FR-19 |
+| `GET` | `/api/v1/members?offset&limit&status` | Gym Manager, Admin | — | `200` `MemberPage` (`status=expiring_soon`: soonest expiry first) | `403` | FR-19, FR-53 |
 | `GET` | `/api/v1/members/{id}` | Gym Manager, Admin | — | `200` `MemberRead` | `403`, `404` | FR-19 |
 | `PATCH` | `/api/v1/members/{id}` | Gym Manager, Admin | `MemberUpdate` | `200` `MemberRead` | `403`, `404`, `422` | FR-19 |
 | `DELETE` | `/api/v1/members/{id}` | Gym Manager, Admin | — | `204` | `403`, `404` | FR-19 |
@@ -497,12 +499,13 @@ In the MVP no login is needed. In the Beta the member endpoints become admin-onl
 | `GET` | `/api/v1/admin/users?offset&limit` | Admin | — | `200` `AdminUserPage` (`AdminUserRead` items, with ban info) | `403` | FR-21 |
 | `PATCH` | `/api/v1/admin/users/{user_id}/role` | Admin | `RoleUpdate` | `200` `AdminUserRead` | `400` (own role), `403`, `404` | FR-22 |
 | `GET` | `/api/v1/admin/stats` | Admin | — | `200` `AdminStats` | `403` | FR-35 |
+| `GET` | `/api/v1/admin/revenue` | Admin | — | `200` `RevenueStats` | `401`, `403` | FR-52 |
 | `POST` | `/api/v1/admin/users/{user_id}/ban` | Admin | `BanRequest` | `200` `AdminUserRead` | `400` (self / other admin), `403`, `404` | FR-36 |
 | `POST` | `/api/v1/admin/users/{user_id}/unban` | Admin | — | `200` `AdminUserRead` | `403`, `404` | FR-38 |
 
 `GET /api/v1/admin/users` returns `AdminUserRead` items so the Users page can show who is banned, since when and why (FR-39).
 
-`GET /api/v1/admin/stats` returns `{members: {total, active, expired, frozen, new_last_7_days}, users: {total, users, gym_managers, admins, banned}}`. "Active", "expired" and "frozen" use the same rules as the member list. Class and check-in numbers are added with those features.
+`GET /api/v1/admin/stats` returns `{members: {total, active, expired, frozen, new_last_7_days, expiring_soon}, users: {total, users, gym_managers, admins, banned}, check_ins, classes}`. "Active", "expired", "frozen" and "expiring_soon" call the member list's own `status_filters()`, so each count equals the list with that filter.
 
 Ban rules: banning is idempotent (banning a banned user changes nothing), an admin cannot ban themself or another admin (`400`), and unbanning clears `banned_at` and `ban_reason` but keeps the role. `get_current_user` returns `403 Account banned` for a banned user on every request, and `/auth/login` does the same after the password is checked, so a stranger cannot find out who is banned.
 
@@ -759,6 +762,10 @@ stats = AdminStats(
 ```
 
 `count(model, *filters)` is a small helper around `select(func.count()).select_from(model).where(*filters)`.
+
+> Built so far: members are users with a plan, so the member counts are `COUNT`s on `app_user` with the member list's `status_filters()` (including `expiring_soon`: not frozen, `today <= expires_on <= today + 7`).
+
+**Revenue (`GET /api/v1/admin/revenue`).** `revenue_service.revenue_stats()` sums `payment.amount` where `voided_at IS NULL` over UTC day ranges built with the same `start_of_day()` the payments list filter uses: today, the first of this month, and today − 29 days (30 days counting today). `by_method` is one `GROUP BY method` over the last 30 days, filled to all four methods. The 6 months are six small range sums (first of the month up to the first of the next), which keeps the code the same on SQLite and PostgreSQL (no date functions in SQL).
 
 ## 11. Security — Beta
 

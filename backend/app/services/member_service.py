@@ -1,12 +1,15 @@
 # Member business rules and database queries, used by the routes in app/routers/members.py (TDD 4).
 # A member is a user whose account has a membership (a plan); there is no separate member table.
+from datetime import timedelta
 from typing import Literal
 
 from sqlmodel import Session, col, delete, func, select, update
 
 from app.models import CheckIn, ClassBooking, GymClass, MemberCreate, Payment, User, utc_today
 
-MemberStatus = Literal["active", "expired", "frozen"]
+# expiring_soon is a part of active: memberships that end today or within the next EXPIRING_SOON_DAYS days.
+MemberStatus = Literal["active", "expired", "frozen", "expiring_soon"]
+EXPIRING_SOON_DAYS = 7
 
 # The SQL condition "this account has a membership".
 IS_MEMBER = col(User.plan).is_not(None)
@@ -73,29 +76,36 @@ def get_member(session: Session, member_id: int) -> User:
     return member
 
 
-def _status_filters(status: MemberStatus | None) -> list:
+def status_filters(status: MemberStatus | None) -> list:
     """A frozen member counts as frozen whatever its expiry date."""
     today = utc_today()
+    not_frozen = col(User.is_frozen).is_(False)
     if status == "active":
-        return [col(User.is_frozen).is_(False), col(User.expires_on) >= today]
+        return [not_frozen, col(User.expires_on) >= today]
     if status == "expired":
-        return [col(User.is_frozen).is_(False), col(User.expires_on) < today]
+        return [not_frozen, col(User.expires_on) < today]
     if status == "frozen":
         return [col(User.is_frozen).is_(True)]
+    if status == "expiring_soon":
+        # Both ends included: a membership ending today still counts, and so does one ending in exactly 7 days.
+        return [
+            not_frozen,
+            col(User.expires_on) >= today,
+            col(User.expires_on) <= today + timedelta(days=EXPIRING_SOON_DAYS),
+        ]
     return []
 
 
 def list_members(session: Session, status: MemberStatus | None, offset: int, limit: int) -> tuple[list[User], int]:
-    """One page of members, newest membership first, plus how many members match the filter in total."""
-    filters = [IS_MEMBER, *_status_filters(status)]
+    """One page of members plus how many match the filter in total. Newest membership first, except
+    expiring_soon, which lists the soonest expiry first (the people to call first)."""
+    filters = [IS_MEMBER, *status_filters(status)]
     total = session.exec(select(func.count()).select_from(User).where(*filters)).one()
-    query = (
-        select(User)
-        .where(*filters)
-        .order_by(col(User.joined_on).desc(), col(User.id).desc())
-        .offset(offset)
-        .limit(limit)
-    )
+    if status == "expiring_soon":
+        order = (col(User.expires_on), col(User.id))
+    else:
+        order = (col(User.joined_on).desc(), col(User.id).desc())
+    query = select(User).where(*filters).order_by(*order).offset(offset).limit(limit)
     return list(session.exec(query).all()), total
 
 

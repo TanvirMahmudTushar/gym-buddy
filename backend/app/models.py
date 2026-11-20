@@ -210,6 +210,8 @@ class MemberStats(SQLModel):
     expired: int
     frozen: int
     new_last_7_days: int
+    # Active memberships that expire today or in the next 7 days: the people to remind about renewing.
+    expiring_soon: int
 
 
 class UserStats(SQLModel):
@@ -444,6 +446,34 @@ class PaymentFilter(SQLModel):
 
 class VoidRequest(SQLModel):
     reason: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
+
+
+# --- Revenue (admin dashboard) ---
+
+
+class MethodRevenue(SQLModel):
+    method: PaymentMethod
+    amount: int
+    count: int
+
+
+class MonthRevenue(SQLModel):
+    month: str  # YYYY-MM
+    amount: int
+
+
+class RevenueStats(SQLModel):
+    """Money taken, in whole taka, by UTC calendar day. Voided payments are never counted."""
+
+    today: int
+    this_month: int
+    # The last 30 days, today included: the same as the payments list from last_30_days_from to today.
+    last_30_days: int
+    last_30_days_from: date
+    # The last 30 days split by method: every method, in a fixed order, zero when unused.
+    by_method: list[MethodRevenue]
+    # The last 6 months, oldest first; the last one is this month so far.
+    months: list[MonthRevenue]
 
 
 class PlanRead(SQLModel):

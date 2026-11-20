@@ -114,7 +114,7 @@ def _page(session: Session, filters: list, offset: int, limit: int) -> tuple[lis
     return [_read(p, recorded_by, voided_by) for p, recorded_by, voided_by in rows], total
 
 
-def _start_of(day: date) -> datetime:
+def start_of_day(day: date) -> datetime:
     """Midnight UTC at the start of a day: the same calendar the expiry check uses (SRS C-7)."""
     return datetime.combine(day, time.min, tzinfo=timezone.utc)
 
@@ -122,10 +122,10 @@ def _start_of(day: date) -> datetime:
 def _conditions(f: PaymentFilter) -> list:
     conditions = []
     if f.date_from:
-        conditions.append(col(Payment.paid_at) >= _start_of(f.date_from))
+        conditions.append(col(Payment.paid_at) >= start_of_day(f.date_from))
     if f.date_to:
         # date_to is inclusive: everything before the start of the next day.
-        conditions.append(col(Payment.paid_at) < _start_of(f.date_to + timedelta(days=1)))
+        conditions.append(col(Payment.paid_at) < start_of_day(f.date_to + timedelta(days=1)))
     if f.method:
         conditions.append(col(Payment.method) == f.method)
     if f.member:
