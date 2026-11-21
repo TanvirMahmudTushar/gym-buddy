@@ -3,8 +3,14 @@ import { listBookings } from "../services/classService"
 import type { Booking } from "../types/gymClass"
 import { errorText, formatDateTime, membersLink } from "../utils/member"
 
+interface Props {
+  classId: number
+  /** Names open the member on the Members page; off for a trainer, who cannot open it. */
+  linkMembers?: boolean
+}
+
 // Who has booked a class, in the order they booked.
-export default function ClassBookings({ classId }: { classId: number }) {
+export default function ClassBookings({ classId, linkMembers = true }: Props) {
   const [bookings, setBookings] = useState<Booking[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
@@ -32,7 +38,7 @@ export default function ClassBookings({ classId }: { classId: number }) {
     <ul className="visit-list">
       {bookings.map((b) => (
         <li key={b.member_id}>
-          <a href={membersLink({ member: b.member_id })}>{b.member_name}</a>
+          {linkMembers ? <a href={membersLink({ member: b.member_id })}>{b.member_name}</a> : <span>{b.member_name}</span>}
           <span className="hint">booked {formatDateTime(b.booked_at)}</span>
         </li>
       ))}

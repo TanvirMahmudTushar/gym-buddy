@@ -512,6 +512,11 @@ a:focus-visible {
   color: var(--info);
 }
 
+.pill.role-trainer {
+  background: var(--line);
+  color: var(--ink);
+}
+
 .pill.role-gym_manager {
   background: var(--good-bg);
   color: var(--good);

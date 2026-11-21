@@ -40,7 +40,8 @@ This document lists the requirements for Gym Buddy: the MVP (gym member CRUD RES
 | Frozen membership | A membership with `is_active = false` (paused by staff) |
 | Expired membership | A membership with `expires_on` before today |
 | Walk-in member | (Beta) A member record with no linked login account; staff manage it for them |
-| Class | (Beta) A scheduled workout session with a name, start time, duration, capacity and optional trainer name |
+| Class | (Beta) A scheduled workout session with a name, start time, duration, capacity and an optional trainer |
+| Trainer | (Beta) An account with the role `trainer` who teaches classes; a class's `trainer_id` points at one. Classes from before trainers were accounts keep a free-text `trainer_name` |
 | Booking | (Beta) A member's reserved spot in a class |
 | Check-in | (Beta) A record that a member arrived at the gym, entered by staff |
 | RBAC | Role-Based Access Control: what a caller can do depends on their role |
@@ -67,10 +68,11 @@ flowchart LR
 | Anonymous client | MVP | Anyone who can reach the API; full access to the shared member list |
 | Guest | Beta | Not logged in; can only sign up, log in, check health and read the API docs |
 | User | Beta | Logged in with global role `user` (everyone who signs up); edits their own profile, views their own membership and check-ins, browses classes, books and cancels their own bookings |
+| Trainer | Beta | Logged in with global role `trainer` (given by an admin): sees the classes they teach and who booked each one, and has the same own-account pages as a User. Cannot manage members or classes |
 | Gym Manager | Beta | Gym staff with global role `gym_manager`: manage all members, classes and check-ins and view bookings. Cannot list users, change roles or see the dashboard |
 | Admin | Beta | Global role `admin`: everything a Gym Manager can do, plus list users, change roles, view dashboard stats, ban / unban users |
 
-`user`, `gym_manager` and `admin` are **global** roles stored on the user account. A logged-in user is linked to at most one membership record (`member.user_id`). A logged-in `user` with no linked record can log in and edit their profile but gets `404` on membership and booking endpoints until staff link their account.
+`user`, `trainer`, `gym_manager` and `admin` are **global** roles stored on the user account. A logged-in user is linked to at most one membership record (`member.user_id`). A logged-in `user` with no linked record can log in and edit their profile but gets `404` on membership and booking endpoints until staff link their account.
 
 ### 2.3 Use cases
 
@@ -215,7 +217,7 @@ Every Admin is also a logged-in user, so they can log out, edit their profile an
 
 | ID | Requirement | Release | Story |
 |---|---|---|---|
-| FR-20 | Every user shall have exactly one global role: `user`, `gym_manager` or `admin`. | Beta | US-12 |
+| FR-20 | Every user shall have exactly one global role: `user`, `trainer`, `gym_manager` or `admin`. | Beta | US-12 |
 | FR-21 | An admin shall be able to list all users (paginated). | Beta | US-12 |
 | FR-22 | An admin shall be able to change another user's role. An admin cannot change their own role (`400`), so the system always keeps at least one admin. | Beta | US-12 |
 | FR-24 | A caller whose role is not allowed on an endpoint shall get `403` (admin-only endpoints: every role except `admin`). | Beta | US-12, US-13 |
@@ -231,10 +233,10 @@ Every Admin is also a logged-in user, so they can log out, edit their profile an
 
 | ID | Requirement | Release | Story |
 |---|---|---|---|
-| FR-25 | A gym manager or admin shall be able to create a class with `name`, `starts_at`, `duration_minutes` and `capacity` (and optional `description`, `trainer_name`). | Beta | US-14 |
+| FR-25 | A gym manager or admin shall be able to create a class with `name`, `starts_at`, `duration_minutes` and `capacity` (and optional `description` and trainer, FR-69). | Beta | US-14 |
 | FR-26 | Any logged-in user shall be able to list classes (optionally only upcoming, ordered by start time) and view one class. Each class shows `booked_count` and, for members, whether they booked it (`is_booked_by_me`). | Beta | US-15 |
 | FR-27 | A gym manager or admin shall be able to edit or delete a class. Lowering `capacity` below the current number of bookings returns `422`. Deleting a class deletes its bookings. | Beta | US-14 |
-| FR-28 | A gym manager or admin shall be able to list the bookings of a class (member name and booking time). | Beta | US-17 |
+| FR-28 | A gym manager or admin shall be able to list the bookings of a class (member name and booking time); a trainer only for the classes they teach (FR-71). | Beta | US-17 |
 | FR-29 | A member with a valid membership shall be able to book a class that has not started yet, and cancel their own booking. Booking returns `400` if the membership is not valid or the class already started, `409` if the class is full or the member already booked it. A member can book or cancel only for themself, and (Beta, built) cannot cancel once the class has started (`400`). | Beta | US-16 |
 
 > **Built so far (gym manager):** FR-25, FR-26 (with `booked_count`), FR-27 and FR-28. Deleting a member also deletes their bookings.
@@ -310,6 +312,18 @@ Every Admin is also a logged-in user, so they can log out, edit their profile an
 | FR-65 | After a reset, the account shall be able to call only `GET /users/me` and `POST /users/me/password`; every other request returns `403` ("Choose a new password first"), and the app shows only a Choose a new password screen. | Beta | US-24 |
 | FR-66 | Changing the password shall refuse a new password equal to the current one (`400`), end the must-choose-a-new-password state, and end every earlier login, including the one made with the temporary password. | Beta | US-24 |
 
+### 3.7f Trainers — Beta
+
+| ID | Requirement | Release | Story |
+|---|---|---|---|
+| FR-67 | An admin shall be able to give an account the `trainer` role on the Users page (FR-22). A trainer can use their own account pages and My classes, and gets `403` on member, payment, check-in, overview and admin endpoints. | Beta | US-12 |
+| FR-68 | A gym manager or admin shall be able to list the trainers: every account with the `trainer` role, `{id, name}`, by name. A user or trainer gets `403`. | Beta | US-14 |
+| FR-69 | A class shall have an optional `trainer_id`, which must be an account with the `trainer` role (`422` otherwise). Every class response shall show the trainer's current account name as `trainer_name`. A class without a trainer account keeps its old text `trainer_name`; sending `trainer_id` (a trainer, or `null` for none) replaces it. When an admin changes a trainer's role, their classes keep their name as text and no longer point at them. | Beta | US-14, US-15 |
+| FR-70 | A trainer shall be able to list the classes they teach with `booked_count`: `when=upcoming` (soonest first, the default) or `when=past` (latest first), paginated, and shall land on My classes after logging in. Other roles get `403`. | Beta | US-17 |
+| FR-71 | A trainer shall be able to list the bookings of the classes they teach only; for any other class the response is `403`. | Beta | US-17 |
+
+> **Built so far (trainers):** FR-67 to FR-71. The class form picks the trainer from a list, offering an old class's text name until it is replaced; the admin dashboard also counts trainers.
+
 > **Built so far (password reset):** FR-64 to FR-66. Tokens now record their issue time to the fraction of a second, so a change or reset ends a login made earlier in the same second.
 
 > **Built so far (overview):** FR-62 and FR-63. The payments list also opens on a date range given in its address (`#/payments?from=&to=`), which the overview's payments number links to.
@@ -337,12 +351,12 @@ Every Admin is also a logged-in user, so they can log out, edit their profile an
 | `email` | Valid email, max 254 characters, stored lowercase | Beta |
 | `name` (user) | 1–100 characters | Beta |
 | `password` | 8–128 characters | Beta |
-| `role` | `member` or `admin` | Beta |
+| `role` | `user`, `trainer`, `gym_manager` or `admin` | Beta |
 | `reason` (ban) | Optional, max 500 characters | Beta |
 | `user_id` (member link) | Optional; must be an existing user not linked to another member | Beta |
 | `name` (class) | 1–100 characters | Beta |
 | `description` (class) | Optional, max 500 characters | Beta |
-| `trainer_name` | Optional, max 100 characters | Beta |
+| `trainer_id` (class) | Optional; an account with the role `trainer` (`422` otherwise), or `null` for none. `trainer_name` is no longer sent: it is read-only and kept only on classes from before trainers were accounts | Beta |
 | `starts_at` | Date and time (ISO 8601, stored in UTC) | Beta |
 | `duration_minutes` | Integer 15–240 | Beta |
 | `capacity` | Integer 1–200 | Beta |
@@ -365,29 +379,31 @@ A new member always starts as `Active` if `expires_on` is today or later. "Expir
 
 ### 3.11 Permission matrix — Beta
 
-| Action | Guest | User | Gym Manager | Admin |
-|---|---|---|---|---|
-| Sign up, log in | Yes | — | — | — |
-| Log out, view own profile, change own name and password | No | Yes | Yes | Yes |
-| View own membership and check-in history | No | Yes (`404` if no membership linked) | Only if linked | Only if linked |
-| Create, list, view, update, delete members | No | No (`403`) | Yes | Yes |
-| Link a member record to a user account | No | No (`403`) | Yes | Yes |
-| Record or list check-ins for a member | No | No (`403`) | Yes | Yes |
-| List and view classes | No | Yes | Yes | Yes |
-| Create, edit, delete classes | No | No (`403`) | Yes | Yes |
-| View a class's bookings | No | No (`403`) | Yes | Yes |
-| Book or cancel own class booking | No | Yes (valid membership needed to book) | Only if linked | Only if linked |
-| List own bookings | No | Yes | Yes | Yes |
-| List or cancel a member's bookings | No | No (`403`) | Yes | Yes |
-| View today's overview | No | No (`403`) | Yes | Yes |
-| Reset someone's password | No | No (`403`) | No (`403`) | Yes (not self, not other admins) |
-| List users, change roles | No | No (`403`) | No (`403`) | Yes |
-| View dashboard stats and revenue, ban / unban users | No | No (`403`) | No (`403`) | Yes (not self, not other admins) |
-| List members expiring soon | No | No (`403`) | Yes | Yes |
-| Search members, list accounts waiting for a membership | No | No (`403`) | Yes | Yes |
-| View own payments | No | Yes | Yes | Yes |
-| Record payments, list a member's payments and all payments | No | No (`403`) | Yes | Yes |
-| Void a payment, export payments as CSV | No | No (`403`) | No (`403`) | Yes |
+| Action | Guest | User | Trainer | Gym Manager | Admin |
+|---|---|---|---|---|---|
+| Sign up, log in | Yes | — | — | — | — |
+| Log out, view own profile, change own name and password | No | Yes | Yes | Yes | Yes |
+| View own membership and check-in history | No | Yes (`404` if no membership linked) | Only if linked | Only if linked | Only if linked |
+| Create, list, view, update, delete members | No | No (`403`) | No (`403`) | Yes | Yes |
+| Link a member record to a user account | No | No (`403`) | No (`403`) | Yes | Yes |
+| Record or list check-ins for a member | No | No (`403`) | No (`403`) | Yes | Yes |
+| List and view classes | No | Yes | Yes | Yes | Yes |
+| Create, edit, delete classes | No | No (`403`) | No (`403`) | Yes | Yes |
+| List trainers (the class form's choices) | No | No (`403`) | No (`403`) | Yes | Yes |
+| View a class's bookings | No | No (`403`) | Own classes only (`403` for others) | Yes | Yes |
+| List the classes I teach | No | No (`403`) | Yes | No (`403`) | No (`403`) |
+| Book or cancel own class booking | No | Yes (valid membership needed to book) | Only if linked | Only if linked | Only if linked |
+| List own bookings | No | Yes | Yes | Yes | Yes |
+| List or cancel a member's bookings | No | No (`403`) | No (`403`) | Yes | Yes |
+| View today's overview | No | No (`403`) | No (`403`) | Yes | Yes |
+| Reset someone's password | No | No (`403`) | No (`403`) | No (`403`) | Yes (not self, not other admins) |
+| List users, change roles | No | No (`403`) | No (`403`) | No (`403`) | Yes |
+| View dashboard stats and revenue, ban / unban users | No | No (`403`) | No (`403`) | No (`403`) | Yes (not self, not other admins) |
+| List members expiring soon | No | No (`403`) | No (`403`) | Yes | Yes |
+| Search members, list accounts waiting for a membership | No | No (`403`) | No (`403`) | Yes | Yes |
+| View own payments | No | Yes | Yes | Yes | Yes |
+| Record payments, list a member's payments and all payments | No | No (`403`) | No (`403`) | Yes | Yes |
+| Void a payment, export payments as CSV | No | No (`403`) | No (`403`) | No (`403`) | Yes |
 
 Every endpoint except sign up, log in, refresh, health and the docs returns `401` when no valid token is sent.
 
@@ -403,7 +419,7 @@ Every endpoint except sign up, log in, refresh, health and the docs returns `401
 | Unexpected server error | `500 Internal Server Error` | MVP |
 | Bad request (e.g. membership not valid, class already started, admin changing own role) | `400 Bad Request` | Beta |
 | Missing, invalid or expired token; wrong login | `401 Unauthorized` | Beta |
-| Logged in but role not allowed, or account banned | `403 Forbidden` | Beta |
+| Logged in but role not allowed (including a trainer and another class's bookings), or account banned | `403 Forbidden` | Beta |
 | Duplicate or full (email taken, already booked, class full, account already linked) | `409 Conflict` | Beta |
 | Too many failed logins | `429 Too Many Requests` | Beta |
 
@@ -641,6 +657,14 @@ Every endpoint except sign up, log in, refresh, health and the docs returns `401
 - With that login, `GET /api/v1/users/me` is `200` but `GET /api/v1/classes` is `403`; setting the temporary password again is `400`; a new password is `204`.
 - Then the temporary login and password stop working, and the new password logs in with `must_change_password = false`.
 
+**AC-39 Trainers (FR-67 – FR-71)**
+- Given trainers Zara and Bilal, member A booked on Spin (tomorrow, trainer Zara), and Old Yoga with the text trainer name "Lina"
+- When a gym manager sends `GET /api/v1/trainers`, the response is `200` with Bilal and Zara, in that order; a user or trainer gets `403`.
+- `POST /api/v1/classes` with the `trainer_id` of a User is `422`; with Zara's id the class shows `trainer_name = "Zara"`, and after Zara's name is changed on My account the class shows the new one.
+- Editing Old Yoga without `trainer_id` keeps "Lina"; sending Bilal's id shows Bilal and clears "Lina".
+- When Zara sends `GET /api/v1/trainers/me/classes`, only Zara's classes are listed, soonest first; `GET /api/v1/classes/{Spin}/bookings` lists A; for Old Yoga it is `403`. A gym manager gets `403` for `/trainers/me/classes`.
+- After an admin changes Zara's role to User, Spin shows `trainer_id = null` and `trainer_name = "Zara"`, and Zara gets `403` for `/trainers/me/classes`.
+
 ## 6. Traceability
 
 | Story | Requirements | Endpoint (see [TDD, section 6](03-tdd.md#6-rest-api-design)) | Release |
@@ -667,6 +691,7 @@ Every endpoint except sign up, log in, refresh, health and the docs returns `401
 | US-21 | FR-36, FR-37, FR-39 | `POST /api/v1/admin/users/{id}/ban`, `GET /api/v1/admin/users` | Beta |
 | US-22 | FR-38 | `POST /api/v1/admin/users/{id}/unban` | Beta |
 | US-23, US-24 | FR-16, FR-40, FR-41 | `GET` / `PATCH /api/v1/users/me`, `POST /api/v1/users/me/password` | Beta |
+| US-12, US-14, US-15, US-17 | FR-67 – FR-71 | `GET /api/v1/trainers`, `GET /api/v1/trainers/me/classes`, `POST` / `PATCH /api/v1/classes`, `GET /api/v1/classes/{id}/bookings`, `PATCH /api/v1/admin/users/{id}/role` | Beta |
 | US-24 | FR-64 – FR-66 | `POST /api/v1/admin/users/{id}/reset-password`, `POST /api/v1/users/me/password` | Beta |
 | US-20 | FR-62, FR-63 | `GET /api/v1/overview` | Beta |
 | US-11, US-16, US-17 | FR-58 – FR-61 | `GET /api/v1/members/{id}/bookings`, `DELETE /api/v1/members/{id}/bookings/{class_id}`, `GET /api/v1/users/me/bookings` | Beta |

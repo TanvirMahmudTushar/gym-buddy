@@ -99,8 +99,15 @@ export default function UsersPage() {
     }
   }
 
-  const handleRoleChange = (target: AdminUser, role: Role) =>
-    change(target, () => changeRole(target.id, role), (u) => `${u.name} is now ${ROLES.find((r) => r.value === role)?.label}. They get the new access when they log in again.`)
+  function handleRoleChange(target: AdminUser, role: Role) {
+    // The API keeps an ex-trainer's name on their classes as plain text, so the timetable still shows it.
+    const classes = target.role === "trainer" && role !== "trainer" ? " Their classes keep their name but no longer show on their My classes." : ""
+    return change(
+      target,
+      () => changeRole(target.id, role),
+      (u) => `${u.name} is now ${ROLES.find((r) => r.value === role)?.label}. They get the new access when they log in again.${classes}`,
+    )
+  }
 
   async function handleBan(e: FormEvent, target: AdminUser) {
     e.preventDefault()
@@ -319,7 +326,8 @@ export default function UsersPage() {
         />
       </div>
       <p className="hint">
-        Everyone starts as a User. Make someone a Gym Manager to let them manage members. A banned user is locked out
+        Everyone starts as a User. Make someone a Trainer to let them be picked for classes and see who booked them,
+        or a Gym Manager to let them manage members. A banned user is locked out
         at once, and you can unban them later. Reset password gives someone who forgot theirs a temporary one.
       </p>
       {error && (

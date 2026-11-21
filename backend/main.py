@@ -7,7 +7,7 @@ from fastapi.responses import JSONResponse
 
 from app.database import create_db_and_tables
 from app.models import utc_now
-from app.routers import admin, auth, check_ins, classes, members, overview, payments, plans, users
+from app.routers import admin, auth, check_ins, classes, members, overview, payments, plans, trainers, users
 from app.services.auth_service import (
     ACCOUNT_BANNED_MESSAGE,
     AccountBannedError,
@@ -25,6 +25,8 @@ from app.services.class_service import (
     ClassFullError,
     ClassNotFoundError,
     ClassStartedError,
+    NotYourClassError,
+    TrainerNotFoundError,
 )
 from app.services.member_service import (
     AccountNotFoundError,
@@ -61,6 +63,7 @@ app.include_router(classes.router)
 app.include_router(plans.router)
 app.include_router(payments.router)
 app.include_router(overview.router)
+app.include_router(trainers.router)
 
 # Run at import (not in a lifespan hook) so it also works on Vercel's serverless functions.
 create_db_and_tables()
@@ -115,6 +118,8 @@ _plain_error(ClassStartedError, 400, "This class has already started")
 _plain_error(ClassFullError, 409, "This class is full")
 _plain_error(AlreadyBookedError, 409, "You have already booked this class")
 _plain_error(BookingNotFoundError, 404, "You have not booked this class")
+_plain_error(TrainerNotFoundError, 422, "trainer_id: pick an account with the Trainer role")
+_plain_error(NotYourClassError, 403, "You can only see the bookings of the classes you teach")
 _plain_error(PaymentNotFoundError, 404, "Payment not found")
 
 

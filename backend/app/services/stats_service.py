@@ -35,6 +35,7 @@ def user_stats(session: Session) -> dict:
     return {
         "total": sum(by_role.values()),
         "users": by_role.get("user", 0),
+        "trainers": by_role.get("trainer", 0),
         "gym_managers": by_role.get("gym_manager", 0),
         "admins": by_role.get("admin", 0),
         "banned": banned,

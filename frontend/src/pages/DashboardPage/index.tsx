@@ -84,6 +84,7 @@ export default function DashboardPage() {
             <dl className="stats">
               <Stat label="Total" value={stats.users.total} />
               <Stat label="Users" value={stats.users.users} />
+              <Stat label="Trainers" value={stats.users.trainers} />
               <Stat label="Gym Managers" value={stats.users.gym_managers} />
               <Stat label="Admins" value={stats.users.admins} />
               <Stat label="Banned" value={stats.users.banned} alert />

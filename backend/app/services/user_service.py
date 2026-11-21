@@ -5,6 +5,7 @@ from sqlmodel import Session, col, func, select
 
 from app.models import Role, User, utc_now
 from app.security import hash_password
+from app.services import class_service
 from app.services.search import contains_any
 
 
@@ -50,10 +51,19 @@ def list_users(session: Session, offset: int, limit: int, q: str | None = None) 
     return list(session.exec(query).all()), total
 
 
+def list_trainers(session: Session) -> list[User]:
+    """Every account with the Trainer role, by name: the choices for a class's trainer. A gym has only a few."""
+    query = select(User).where(col(User.role) == "trainer").order_by(col(User.name), col(User.id))
+    return list(session.exec(query).all())
+
+
 def change_role(session: Session, acting_admin: User, user_id: int, role: Role) -> User:
     if acting_admin.id == user_id:
         raise CannotChangeOwnRoleError
     user = get_user(session, user_id)
+    # A class's trainer is always an account with the Trainer role, so classes keep only the name of an ex-trainer.
+    if user.role == "trainer" and role != "trainer":
+        class_service.release_trainer(session, user)
     user.role = role
     session.add(user)
     session.commit()

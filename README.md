@@ -11,7 +11,7 @@ backend/          FastAPI app (routes under /api)
   app/models.py   tables (a member is a user with a membership) and request / response schemas
   app/security.py password hashing (Argon2) and login tokens (JWT)
   app/deps.py     who is calling, and the role check
-  app/routers/    members.py, auth.py, users.py, admin.py, check_ins.py, classes.py, plans.py, payments.py: the endpoints (HTTP only)
+  app/routers/    members.py, auth.py, users.py, admin.py, check_ins.py, classes.py, plans.py, payments.py, overview.py, trainers.py: the endpoints (HTTP only)
   app/services/   member_service.py, auth_service.py, user_service.py, checkin_service.py, class_service.py, payment_service.py, stats_service.py, revenue_service.py: rules and database queries
 frontend/         Vite + React + TypeScript, one page (src/pages/HomePage/index.tsx)
   src/components/ add form, member list, details panel
@@ -39,10 +39,11 @@ Everyone who signs up is a **User**. Only an admin can change a role.
 | Role | Can do |
 |---|---|
 | User | Log in, see and rename their own account, see their own membership, visits and payments, book and cancel classes, change their password |
+| Trainer | Log in, see and rename their own account, change their password, and see the classes they teach with who booked each one |
 | Gym Manager | Everything a User can, plus manage gym members (add, edit, renew, freeze, delete), record check-ins, take payments and see the list of all payments, and run the class timetable |
-| Admin | Everything a Gym Manager can, plus list users and change their roles, set plan prices, void payments and export them as CSV |
+| Admin | Everything a Gym Manager can, plus list users and change their roles (including giving the Trainer role), set plan prices, void payments and export them as CSV |
 
-Pages: `#/login`, `#/signup`, `#/dashboard` (Admin), `#/overview` (Gym Manager, Admin), `#/members` (Gym Manager, Admin), `#/classes` (Gym Manager, Admin), `#/payments` (Gym Manager, Admin), `#/users` (Admin), `#/plans` (Admin), `#/membership` and `#/timetable` (User), `#/account` (everyone). After logging in, an Admin lands on the Dashboard, a Gym Manager on the Overview and a User on My membership.
+Pages: `#/login`, `#/signup`, `#/dashboard` (Admin), `#/overview` (Gym Manager, Admin), `#/members` (Gym Manager, Admin), `#/classes` (Gym Manager, Admin), `#/payments` (Gym Manager, Admin), `#/users` (Admin), `#/plans` (Admin), `#/membership` and `#/timetable` (User), `#/my-classes` (Trainer), `#/account` (everyone). After logging in, an Admin lands on the Dashboard, a Gym Manager on the Overview, a Trainer on My classes and a User on My membership.
 
 **Gym Manager features (also available to Admins)**
 - **Check in a member:** open a member on the Members page and click **Check in**. Frozen and expired members cannot be checked in (the page says why; renew or unfreeze first). The same member can check in more than once a day.
@@ -55,7 +56,7 @@ Pages: `#/login`, `#/signup`, `#/dashboard` (Admin), `#/overview` (Gym Manager, 
 - **Add a member:** the person signs up first. On the Members page, **Add member** takes the email they signed up with, plus plan, expiry date and optional phone and notes; their name comes from their account. An email with no account is refused ("Ask the person to sign up first"), and so is an account that already has a membership.
 - **Open a member from anywhere:** every member's name in the Payments list, a class's bookings and Checked in today opens that member on the Members page. The address keeps the open member and the filter (`#/members?filter=expiring_soon&member=5`), so a reload or a shared link shows the same.
 - **Delete a member:** deletes the person's whole account. They can no longer log in, and their check-ins and class bookings are removed; their payments stay on record. Only a User's account can be deleted here: a Gym Manager or Admin who has a membership must have their role changed first.
-- **Classes:** the **Classes** page lists upcoming classes (or all of them), in start-time order. Add a class with a name, start time, length (15 to 240 minutes) and places (1 to 200), plus an optional trainer and description. Edit or delete a class, and open **Bookings** to see who has booked it. Capacity cannot be lowered below the bookings already made, and deleting a class deletes its bookings. A member's bookings are made by the member (see **User features**).
+- **Classes:** the **Classes** page lists upcoming classes (or all of them), in start-time order. Add a class with a name, start time, length (15 to 240 minutes) and places (1 to 200), plus an optional description and an optional trainer, picked from the accounts with the Trainer role. The class shows the trainer's current name, so a trainer who changes their name on My account shows the new one everywhere. A class from before trainers were accounts keeps its old text name: editing it offers that name ("Lina (name only)") until a trainer or **No trainer** is chosen. Edit or delete a class, and open **Bookings** to see who has booked it. Capacity cannot be lowered below the bookings already made, and deleting a class deletes its bookings. A member's bookings are made by the member (see **User features**).
 
 - **Payments:** in a member's details, **Payments** records what the member paid (amount in whole taka, and cash, card, bank transfer or mobile banking, with an optional note). Tick **Renew the membership with this payment**, pick the plan, and the amount fills in from the plan's price and the new expiry date is shown. An active member renews from their current expiry, so no paid days are lost; an expired member renews from today. The member's payments are listed below, newest first; a voided one is struck through with the reason. A payment stays on record when its member's account is deleted.
 - **Overview:** a Gym Manager's start page (Admins can open it too) with what needs attention today: members checked in today, memberships expiring in 7 days, people waiting for a membership, and payments taken today (amount and count, voided left out), plus the next 5 classes with places booked. Each number links to its list, which shows the same number: Checked in today on Members, the Expiring soon filter, the waiting list, and the Payments page filtered to today. Revenue history and account numbers stay on the admin Dashboard.
@@ -69,8 +70,12 @@ Pages: `#/login`, `#/signup`, `#/dashboard` (Admin), `#/overview` (Gym Manager, 
 - **Classes:** upcoming classes with places left. **Book** takes a place, **Cancel booking** frees it (until the class starts; after that the booking is history and cannot be cancelled by anyone). Booking needs a valid membership (not frozen or expired) and a class that has not started; a full class or one you already booked is refused with a clear message. Two people booking the last place at the same moment cannot both get it.
 - **My account:** change your name, and change your password. After a password change every earlier login stops working and you log in again with the new password.
 
+**Trainer features**
+- **My classes:** the classes the trainer teaches, upcoming ones soonest first, with places booked; **Past** lists the classes that have started, latest first. **Who booked** lists the people booked on a class, in booking order (the next class opens with it showing). A trainer can read the bookings of their own classes only: any other class's bookings answer `403`. Trainers land here after logging in.
+- **Becoming a trainer:** an admin gives the **Trainer** role on the Users page; the person logs in again and a Gym Manager can then pick them for classes. If an admin changes a trainer's role, their classes keep their name as plain text and no longer show on their My classes.
+
 **Admin features**
-- **Dashboard:** members (total, active, expired, frozen, new in the last 7 days, and **Expiring in 7 days**, which links to that list), check-ins (today, last 7 days), classes (total, upcoming) and accounts (total, users, gym managers, admins, banned).
+- **Dashboard:** members (total, active, expired, frozen, new in the last 7 days, and **Expiring in 7 days**, which links to that list), check-ins (today, last 7 days), classes (total, upcoming) and accounts (total, users, trainers, gym managers, admins, banned).
 - **Revenue:** a card on the Dashboard with the money taken today, this month and in the last 30 days (today included), the last 30 days split by payment method, and a column chart of the last 6 months (hover or focus a column for its amount; **Show as a table** lists every month). Days are UTC days, the same as the Payments page filters, so each number matches the Payments page total for the same dates. Voided payments are never counted.
 - **Plans and prices:** the **Plans** page sets the price (whole taka) and the number of days a renewal adds for the monthly, quarterly and yearly plans. The price fills in the amount when staff take a payment, and the days decide how far a renewal extends a membership. Payments already taken are not changed.
 - **Void a payment:** on the **Payments** page, **Void** marks a mistaken payment, with a reason that must be given. The payment stays on record (struck through, with who voided it, when and why) but is left out of every total. Voiding an already voided payment changes nothing. Voiding does not change the member's expiry date; edit it on the Members page if a renewal was wrong.
@@ -109,12 +114,14 @@ Interactive docs: `/api/docs` (for example http://localhost:8000/api/docs).
 | Check in a member | `POST /api/v1/members/{id}/check-ins` | `201` check-in | `400` (frozen or expired), `403`, `404` |
 | Member's visits | `GET /api/v1/members/{id}/check-ins?offset=0&limit=20` | `200` `{items, total, offset, limit}`, newest first | `403`, `404`, `422` |
 | Checked in today | `GET /api/v1/check-ins/today?offset=0&limit=50` | `200` `{items, total, offset, limit}`, newest first | `401`, `403` |
-| Add a class | `POST /api/v1/classes` `{name, starts_at, duration_minutes, capacity, ...}` | `201` class | `403`, `422` |
+| Add a class | `POST /api/v1/classes` `{name, starts_at, duration_minutes, capacity, description?, trainer_id?}` | `201` class, with `trainer_id` and `trainer_name` (the trainer's current name) | `403`, `422` (including a `trainer_id` that is not a Trainer) |
+| List trainers (Gym Manager, Admin) | `GET /api/v1/trainers` | `200` list of `{id, name}`, by name | `401`, `403` |
+| My classes (Trainer) | `GET /api/v1/trainers/me/classes?when=upcoming&offset=0&limit=20` (`when=past` for started classes) | `200` `{items, total, offset, limit}` of classes I teach | `401`, `403`, `422` |
 | List classes | `GET /api/v1/classes?upcoming=true&offset=0&limit=20` (any logged-in user) | `200` `{items, total, offset, limit}` ordered by start time, each with `booked_count` | `401`, `422` |
 | One class | `GET /api/v1/classes/{id}` (any logged-in user) | `200` class | `401`, `404` |
-| Edit a class | `PATCH /api/v1/classes/{id}` | `200` class | `403`, `404`, `422` (including capacity below the bookings) |
+| Edit a class | `PATCH /api/v1/classes/{id}` (`trainer_id`: a Trainer, or `null` for none; either replaces an old text name) | `200` class | `403`, `404`, `422` (including capacity below the bookings, or a `trainer_id` that is not a Trainer) |
 | Delete a class | `DELETE /api/v1/classes/{id}` | `204` | `403`, `404` |
-| Class bookings | `GET /api/v1/classes/{id}/bookings` | `200` `{items, total, offset, limit}` with member name and time | `403`, `404` |
+| Class bookings | `GET /api/v1/classes/{id}/bookings` (Gym Manager, Admin; a Trainer for the classes they teach) | `200` `{items, total, offset, limit}` with member name and time | `403` (including a Trainer and another class), `404` |
 | Book a class | `POST /api/v1/classes/{id}/bookings` (for the logged-in user) | `201` booking | `400` (membership not valid or class started), `404` (no membership, or no such class), `409` (full or already booked) |
 | Cancel my booking | `DELETE /api/v1/classes/{id}/bookings` | `204` | `400` (class has started), `404` |
 | A member's bookings | `GET /api/v1/members/{id}/bookings?when=upcoming&offset=0&limit=20` | `200` same shape as My bookings | `403`, `404`, `422` |
@@ -131,7 +138,7 @@ Interactive docs: `/api/docs` (for example http://localhost:8000/api/docs).
 | Revenue (admin) | `GET /api/v1/admin/revenue` | `200` `{today, this_month, last_30_days, last_30_days_from, by_method, months}` in whole taka, voided left out | `401`, `403` |
 | Waiting for a membership | `GET /api/v1/members/waiting?offset=0&limit=20&q=` | `200` `{items, total, offset, limit}` of `{id, name, email, role, created_at}`: User accounts with no membership, newest first | `401`, `403` |
 | List users (admin) | `GET /api/v1/admin/users?offset=0&limit=20&q=` (`q`: part of the name or email) | `200` `{items, total, offset, limit}`; each user has `is_banned`, `banned_at`, `ban_reason`, `plan`, `expires_on`, `is_frozen` | `401`, `403` |
-| Change role (admin) | `PATCH /api/v1/admin/users/{id}/role` `{"role": "gym_manager"}` | `200` user | `400` (own role), `403`, `404`, `422` |
+| Change role (admin) | `PATCH /api/v1/admin/users/{id}/role` `{"role": "trainer"}` (`user`, `trainer`, `gym_manager` or `admin`) | `200` user | `400` (own role), `403`, `404`, `422` |
 | Ban (admin) | `POST /api/v1/admin/users/{id}/ban` `{"reason": "optional"}` | `200` user | `400` (self or another admin), `403`, `404`, `422` |
 | Unban (admin) | `POST /api/v1/admin/users/{id}/unban` | `200` user | `403`, `404` |
 | Reset a password (admin) | `POST /api/v1/admin/users/{id}/reset-password` | `200` `{user, temporary_password}` (`Cache-Control: no-store`); the user's `must_change_password` is `true` until they choose a new one | `400` (yourself or another admin), `403`, `404` |
@@ -194,7 +201,7 @@ vercel dev -L
 2. **Connect** → **Transaction pooler** → copy the URI (port `6543`).
 3. In Vercel → Project → **Settings** → **Environment Variables**, add it as `DATABASE_URL`, then redeploy.
 
-The backend accepts `postgres://` or `postgresql://` URLs and creates the `app_user`, `check_in`, `gym_class`, `class_booking`, `plan_price` and `payment` tables on start (and fills `plan_price` with monthly 1,500 / 30 days, quarterly 4,000 / 90 days and yearly 14,000 / 365 days), and adds any columns an older `app_user` table is missing (the ban and membership columns), keeping existing data.
+The backend accepts `postgres://` or `postgresql://` URLs and creates the `app_user`, `check_in`, `gym_class`, `class_booking`, `plan_price` and `payment` tables on start (and fills `plan_price` with monthly 1,500 / 30 days, quarterly 4,000 / 90 days and yearly 14,000 / 365 days), and adds any columns an older table is missing (the ban and membership columns on `app_user`, `trainer_id` and its index on `gym_class`), keeping existing data.
 
 **Upgrading a database from before members became users:** on its first start the backend drops the old `member` table together with `check_in`, `class_booking` and `payment` (all of their rows are deleted) and creates the last three again, pointing at `app_user`. Accounts, classes and plan prices are kept. Staff then start memberships again for the people who need one. To use Supabase locally as well, set `DATABASE_URL` in your terminal before `fastapi dev main.py`.
 

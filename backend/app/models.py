@@ -8,8 +8,9 @@ from sqlmodel import Field, SQLModel
 
 Plan = Literal["monthly", "quarterly", "yearly"]
 FullName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
-# The id column is a 32-bit integer, so anything larger cannot match a member.
-MemberId = Annotated[int, Field(gt=0, le=2_147_483_647)]
+# The id column is a 32-bit integer, so anything larger cannot match an account (a member's id is their account's).
+AccountId = Annotated[int, Field(gt=0, le=2_147_483_647)]
+MemberId = AccountId
 
 
 def utc_now() -> datetime:
@@ -141,7 +142,7 @@ class MemberBulkDeleteResult(SQLModel):
 
 # --- Accounts and roles ---
 
-Role = Literal["user", "gym_manager", "admin"]
+Role = Literal["user", "trainer", "gym_manager", "admin"]
 Password = Annotated[str, StringConstraints(min_length=8, max_length=128)]
 
 
@@ -244,6 +245,7 @@ class MemberStats(SQLModel):
 class UserStats(SQLModel):
     total: int
     users: int
+    trainers: int
     gym_managers: int
     admins: int
     banned: int
@@ -269,6 +271,13 @@ class UserRoleUpdate(SQLModel):
     role: Role
 
 
+class TrainerRead(SQLModel):
+    """An account with the Trainer role, as a choice for a class's trainer."""
+
+    id: int
+    name: str
+
+
 # --- Classes and bookings ---
 
 DurationMinutes = Annotated[int, Field(ge=15, le=240)]
@@ -282,6 +291,9 @@ class GymClass(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     name: str = Field(max_length=100)
     description: str | None = Field(default=None, max_length=500)
+    # The trainer: an account with the Trainer role. Classes from before trainers were accounts have only
+    # trainer_name (free text); choosing a trainer, or none, clears it.
+    trainer_id: int | None = Field(default=None, foreign_key="app_user.id", ondelete="SET NULL", index=True)
     trainer_name: str | None = Field(default=None, max_length=100)
     starts_at: datetime = Field(index=True)
     duration_minutes: int
@@ -303,7 +315,8 @@ class ClassBooking(SQLModel, table=True):
 class ClassCreate(SQLModel):
     name: FullName
     description: str | None = Field(default=None, max_length=500)
-    trainer_name: str | None = Field(default=None, max_length=100)
+    # An account with the Trainer role (GET /api/v1/trainers lists them), or none.
+    trainer_id: AccountId | None = None
     starts_at: datetime
     duration_minutes: DurationMinutes
     capacity: Capacity
@@ -317,7 +330,8 @@ class ClassCreate(SQLModel):
 class ClassUpdate(SQLModel):
     name: FullName | None = None
     description: str | None = Field(default=None, max_length=500)
-    trainer_name: str | None = Field(default=None, max_length=100)
+    # Sent: this trainer, or null for none, replacing any old text name. Left out: the trainer stays as it is.
+    trainer_id: AccountId | None = None
     starts_at: datetime | None = None
     duration_minutes: DurationMinutes | None = None
     capacity: Capacity | None = None
@@ -340,6 +354,8 @@ class ClassRead(SQLModel):
     id: int
     name: str
     description: str | None
+    trainer_id: int | None
+    # The trainer's current account name, or the old text name on a class without a trainer account.
     trainer_name: str | None
     starts_at: UtcDateTime
     duration_minutes: int

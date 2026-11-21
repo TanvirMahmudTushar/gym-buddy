@@ -2,7 +2,8 @@ import { useEffect, useState } from "react"
 import ClassForm from "../../components/ClassForm"
 import ClassItem from "../../components/ClassItem"
 import { createClass, listClasses } from "../../services/classService"
-import type { ClassBody, GymClass } from "../../types/gymClass"
+import { listTrainers } from "../../services/trainerService"
+import type { ClassBody, GymClass, Trainer } from "../../types/gymClass"
 import { errorText } from "../../utils/member"
 
 type Filter = "upcoming" | "all"
@@ -20,6 +21,19 @@ export default function ClassesPage() {
   // Changing this remounts the add form, which clears it after a class is added.
   const [formKey, setFormKey] = useState(0)
   const [reloadKey, setReloadKey] = useState(0)
+  const [trainers, setTrainers] = useState<Trainer[]>([])
+  const [trainersError, setTrainersError] = useState("")
+
+  // The trainer choices for the add and edit forms, loaded once.
+  useEffect(() => {
+    let ignore = false
+    listTrainers()
+      .then((list) => !ignore && setTrainers(list))
+      .catch((err) => !ignore && setTrainersError(`Could not load the trainers: ${errorText(err)}`))
+    return () => {
+      ignore = true
+    }
+  }, [])
 
   useEffect(() => {
     let ignore = false
@@ -82,7 +96,7 @@ export default function ClassesPage() {
     body = (
       <ul className="class-list">
         {classes.map((c) => (
-          <ClassItem key={c.id} gymClass={c} onChanged={handleChanged} onDeleted={handleDeleted} />
+          <ClassItem key={c.id} gymClass={c} trainers={trainers} onChanged={handleChanged} onDeleted={handleDeleted} />
         ))}
       </ul>
     )
@@ -91,7 +105,12 @@ export default function ClassesPage() {
     <div className="column narrow-wide">
       <section className="card" aria-labelledby="add-class-heading">
         <h2 id="add-class-heading">Add class</h2>
-        <ClassForm key={formKey} saving={creating} error={createError} onSave={handleCreate} />
+        {trainersError && (
+          <p className="error" role="alert">
+            {trainersError}
+          </p>
+        )}
+        <ClassForm key={formKey} trainers={trainers} saving={creating} error={createError} onSave={handleCreate} />
       </section>
       <section className="card" aria-labelledby="classes-heading">
         <div className="toolbar">

@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { deleteClass, updateClass } from "../services/classService"
-import type { ClassBody, GymClass } from "../types/gymClass"
+import type { ClassBody, GymClass, Trainer } from "../types/gymClass"
 import { formatClassTime, isUpcoming } from "../utils/gymClass"
 import { errorText } from "../utils/member"
 import ClassBookings from "./ClassBookings"
@@ -8,12 +8,14 @@ import ClassForm from "./ClassForm"
 
 interface Props {
   gymClass: GymClass
+  /** The choices for the class's trainer when editing. */
+  trainers: Trainer[]
   onChanged: (updated: GymClass) => void
   onDeleted: (id: number) => void
 }
 
 // One class in the list: its details, the people who booked it, and Edit / Delete.
-export default function ClassItem({ gymClass: c, onChanged, onDeleted }: Props) {
+export default function ClassItem({ gymClass: c, trainers, onChanged, onDeleted }: Props) {
   const [editing, setEditing] = useState(false)
   const [showBookings, setShowBookings] = useState(false)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
@@ -54,6 +56,7 @@ export default function ClassItem({ gymClass: c, onChanged, onDeleted }: Props) 
         <h3>Edit class</h3>
         <ClassForm
           gymClass={c}
+          trainers={trainers}
           saving={busy}
           error={error}
           onSave={save}
