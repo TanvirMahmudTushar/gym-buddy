@@ -39,6 +39,7 @@ from app.services.member_service import (
 )
 from app.services.payment_service import PaymentNotFoundError
 from app.services.profile_service import IncompleteEmergencyContactError
+from app.services.session_service import SessionNotFoundError
 from app.services.user_service import (
     CannotBanError,
     CannotChangeOwnRoleError,
@@ -125,6 +126,7 @@ _plain_error(TrainerNotFoundError, 422, "trainer_id: pick an account with the Tr
 _plain_error(NotYourClassError, 403, "You can only see the bookings of the classes you teach")
 _plain_error(PaymentNotFoundError, 404, "Payment not found")
 _plain_error(AnnouncementNotFoundError, 404, "Announcement not found")
+_plain_error(SessionNotFoundError, 404, "Session not found")
 _plain_error(
     IncompleteEmergencyContactError,
     422,

@@ -4,7 +4,7 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, Query, Response
 
 from app.database import SessionDep
-from app.deps import CurrentUser, LoggedInUser
+from app.deps import AuthDep, CurrentUser, LoggedInUser
 from app.models import (
     BookedClassPage,
     CheckInPage,
@@ -13,6 +13,7 @@ from app.models import (
     PaymentPage,
     ProfileRead,
     ProfileUpdate,
+    SessionRead,
     User,
     UserNameUpdate,
     UserRead,
@@ -24,6 +25,7 @@ from app.services import (
     member_service,
     payment_service,
     profile_service,
+    session_service,
     user_service,
 )
 
@@ -101,8 +103,25 @@ def list_my_payments(
 
 
 @router.post("/me/password", status_code=204)
-def change_my_password(body: PasswordChange, user: LoggedInUser, session: SessionDep) -> Response:
-    """400 if the current password is wrong or the new one is the same. Logins made before the change stop
-    working. Also the way out of must_change_password after an admin reset."""
-    auth_service.change_password(session, user, body.current_password, body.new_password)
+def change_my_password(body: PasswordChange, auth: AuthDep, session: SessionDep) -> Response:
+    """400 if the current password is wrong or the new one is the same. Every other session is logged out; this
+    one stays. Also the way out of must_change_password after an admin reset."""
+    auth_service.change_password(session, auth.user, body.current_password, body.new_password, auth.session_id)
+    return Response(status_code=204)
+
+
+@router.get("/me/sessions", response_model=list[SessionRead])
+def list_my_sessions(user: CurrentUser, auth: AuthDep, session: SessionDep) -> list[dict]:
+    """The browsers where I am logged in, most recently used first. `current` marks the one asking."""
+    return [
+        {**s.model_dump(), "current": s.id == auth.session_id}
+        for s in session_service.list_active_sessions(session, user.id)
+    ]
+
+
+@router.delete("/me/sessions/{session_id}", status_code=204)
+def revoke_my_session(session_id: int, user: CurrentUser, session: SessionDep) -> Response:
+    """Logs that browser out: its refresh cookie and its access token stop working at once. Revoking the current
+    session is the same as logging out here. 404 for a session that is not mine or no longer active."""
+    session_service.revoke_own_session(session, user.id, session_id)
     return Response(status_code=204)

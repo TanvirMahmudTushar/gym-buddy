@@ -1,5 +1,5 @@
-// fetch helpers for sign up, log in and the logged-in user's own account.
-import type { LoginResult, SignupBody, User } from "../types/auth"
+// fetch helpers for sign up, log in, log out, sessions and the logged-in user's own account.
+import type { LoginResult, SessionInfo, SignupBody, User } from "../types/auth"
 import { request } from "./api"
 
 export const signup = (body: SignupBody) =>
@@ -7,6 +7,13 @@ export const signup = (body: SignupBody) =>
 
 export const login = (email: string, password: string) =>
   request<LoginResult>("/api/v1/auth/login", { method: "POST", body: JSON.stringify({ email, password }) })
+
+/** Ends this browser's session on the server and clears the refresh cookie. */
+export const logout = () => request<void>("/api/v1/auth/logout", { method: "POST" })
+
+export const listMySessions = () => request<SessionInfo[]>("/api/v1/users/me/sessions")
+
+export const revokeMySession = (id: number) => request<void>(`/api/v1/users/me/sessions/${id}`, { method: "DELETE" })
 
 export const getMe = () => request<User>("/api/v1/users/me")
 

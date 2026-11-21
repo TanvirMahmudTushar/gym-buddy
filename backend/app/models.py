@@ -85,6 +85,31 @@ class User(SQLModel, table=True):
     notes: str | None = Field(default=None, max_length=500)
 
 
+class AuthSession(SQLModel, table=True):
+    """One login on one browser (TDD 10.1). The refresh cookie holds a random token; only its hash is kept here, and
+    every refresh replaces it (rotation). Each access token names its session (sid), so revoking the session ends
+    the access token at once, not only when it expires."""
+
+    __tablename__ = "auth_session"
+
+    id: int | None = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="app_user.id", ondelete="CASCADE", index=True)
+    # SHA-256 of the refresh token in the cookie now.
+    token_hash: str = Field(max_length=64, unique=True, index=True)
+    # The token the last refresh replaced. Sent again after a short grace period, it can only be a stolen copy.
+    previous_token_hash: str | None = Field(default=None, max_length=64, index=True)
+    rotated_at: datetime | None = None
+    created_at: datetime = Field(default_factory=utc_now)
+    # Updated on login and on every refresh (at least every 15 minutes while the app is open).
+    last_used_at: datetime = Field(default_factory=utc_now)
+    # 7 days after the last refresh. Each refresh pushes it on, so a session ends after a week unused.
+    expires_at: datetime
+    ip: str | None = Field(default=None, max_length=45)
+    user_agent: str | None = Field(default=None, max_length=300)
+    # Set by logout, a revoke, a password change, a password reset, a ban or a reused refresh token.
+    revoked_at: datetime | None = None
+
+
 class CheckIn(SQLModel, table=True):
     """One arrival at the gym, recorded by a gym manager or admin (TDD 5.2)."""
 
@@ -227,9 +252,26 @@ class AccountPage(SQLModel):
 
 
 class TokenResponse(SQLModel):
+    """Login and refresh. The refresh token is not here: it travels only in the HttpOnly cookie."""
+
     access_token: str
     token_type: Literal["bearer"] = "bearer"
+    # Seconds until the access token expires.
+    expires_in: int
     user: UserRead
+
+
+class SessionRead(SQLModel):
+    """One of my active logins (a browser where I am logged in)."""
+
+    id: int
+    created_at: UtcDateTime
+    last_used_at: UtcDateTime
+    expires_at: UtcDateTime
+    ip: str | None
+    user_agent: str | None
+    # True for the session this request was sent from.
+    current: bool
 
 
 class AdminUserRead(UserRead):

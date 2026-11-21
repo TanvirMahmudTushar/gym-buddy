@@ -1,16 +1,19 @@
 import { type ReactNode, createContext, useCallback, useContext, useEffect, useMemo, useState } from "react"
 import * as authService from "../services/authService"
-import { getToken, setSessionExpiredHandler, setToken } from "../services/api"
+import { refreshSession, setSessionExpiredHandler, setToken } from "../services/api"
 import type { SignupBody, User } from "../types/auth"
 
 interface AuthValue {
   user: User | null
-  /** True while a saved login is being checked on first load. */
+  /** True while the app asks the server, on first load, whether this browser is still logged in. */
   loading: boolean
   login: (email: string, password: string) => Promise<void>
   /** Creates the account, then logs in with it. */
   signup: (body: SignupBody) => Promise<void>
-  logout: () => void
+  /** Ends the session on the server too, so the refresh cookie and the access token stop working. */
+  logout: () => Promise<void>
+  /** Forget the login in this tab only, after the server has already ended the session. */
+  endSession: () => void
   setUser: (user: User) => void
 }
 
@@ -18,32 +21,40 @@ const AuthContext = createContext<AuthValue | null>(null)
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
-  const [loading, setLoading] = useState(() => getToken() !== null)
+  // Starts true on every load: the refresh cookie cannot be read by scripts, so only the server can say whether
+  // there is a session. Until it answers the app shows "Loading…", never the Log in page for a split second.
+  const [loading, setLoading] = useState(true)
 
-  const logout = useCallback(() => {
+  const endSession = useCallback(() => {
     setToken(null)
     setUser(null)
   }, [])
 
-  // An expired or rejected token logs the person out wherever the request came from.
-  useEffect(() => {
-    setSessionExpiredHandler(logout)
-    return () => setSessionExpiredHandler(null)
-  }, [logout])
+  const logout = useCallback(async () => {
+    try {
+      await authService.logout()
+    } catch {
+      // Offline: the session still ends here, and on the server when its refresh token expires.
+    }
+    endSession()
+  }, [endSession])
 
-  // Pick the login back up after a page reload.
+  // A refused refresh or a ban ends the login wherever the request came from.
   useEffect(() => {
-    if (getToken() === null) return
+    setSessionExpiredHandler(endSession)
+    return () => setSessionExpiredHandler(null)
+  }, [endSession])
+
+  // Pick the login back up after a reload: swap the refresh cookie for a new access token.
+  useEffect(() => {
     let ignore = false
-    authService
-      .getMe()
-      .then((me) => !ignore && setUser(me))
-      .catch(() => !ignore && logout())
+    refreshSession()
+      .then((result) => !ignore && result && setUser(result.user))
       .finally(() => !ignore && setLoading(false))
     return () => {
       ignore = true
     }
-  }, [logout])
+  }, [])
 
   const login = useCallback(async (email: string, password: string) => {
     const result = await authService.login(email, password)
@@ -59,7 +70,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [login],
   )
 
-  const value = useMemo(() => ({ user, loading, login, signup, logout, setUser }), [user, loading, login, signup, logout])
+  const value = useMemo(
+    () => ({ user, loading, login, signup, logout, endSession, setUser }),
+    [user, loading, login, signup, logout, endSession],
+  )
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }
 

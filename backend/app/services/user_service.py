@@ -5,7 +5,7 @@ from sqlmodel import Session, col, func, select
 
 from app.models import Role, User, utc_now
 from app.security import hash_password
-from app.services import class_service
+from app.services import class_service, session_service
 from app.services.search import contains_any
 
 
@@ -80,7 +80,8 @@ def rename_user(session: Session, user: User, name: str) -> User:
 
 
 def ban_user(session: Session, acting_admin: User, user_id: int, reason: str | None) -> User:
-    """Banning an already banned user changes nothing, so a double click is harmless."""
+    """Banning an already banned user changes nothing, so a double click is harmless. Every session of the user is
+    revoked in the same transaction (FR-36), so their refresh cookie stops working too."""
     if acting_admin.id == user_id:
         raise CannotBanError("You cannot ban yourself")
     user = get_user(session, user_id)
@@ -91,6 +92,7 @@ def ban_user(session: Session, acting_admin: User, user_id: int, reason: str | N
         user.banned_at = utc_now()
         user.ban_reason = reason or None
         session.add(user)
+        session_service.revoke_all(session, user.id)
         session.commit()
         session.refresh(user)
     return user
@@ -110,7 +112,7 @@ def unban_user(session: Session, user_id: int) -> User:
 
 
 def reset_password(session: Session, acting_admin: User, user_id: int) -> tuple[User, str]:
-    """Give the account a random temporary password, which the admin hands over. Earlier logins end, any login
+    """Give the account a random temporary password, which the admin hands over. Every session is revoked, any login
     lockout is cleared, and the account must choose a new password before it can do anything else."""
     if acting_admin.id == user_id:
         raise CannotResetPasswordError("Change your own password on My account")
@@ -124,6 +126,7 @@ def reset_password(session: Session, acting_admin: User, user_id: int) -> tuple[
     user.failed_login_count = 0
     user.locked_until = None
     session.add(user)
+    session_service.revoke_all(session, user.id)
     session.commit()
     session.refresh(user)
     return user, temporary

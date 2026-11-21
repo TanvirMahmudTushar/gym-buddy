@@ -81,13 +81,19 @@ sequenceDiagram
     participant A as Auth router
     participant D as Database
     C->>A: POST /api/v1/auth/login {email, password}
-    A->>D: find user, check lockout, verify Argon2 hash
-    A->>D: store hash of new refresh token
-    A-->>C: 200 {access_token} + Set-Cookie refresh_token (HttpOnly)
-    Note over C: send Authorization: Bearer access_token on each request
-    C->>A: POST /api/v1/auth/refresh (cookie)
-    A->>D: look up token hash, revoke it, store new one
-    A-->>C: 200 {access_token} + new refresh_token cookie
+    A->>D: find user, check lockout, verify Argon2 hash (peppered)
+    A->>D: insert auth_session (hash of a new refresh token, IP, browser)
+    A-->>C: 200 {access_token (sub, role, sid; 15 min)} + Set-Cookie refresh_token (HttpOnly)
+    Note over C: keep the access token in memory; send Authorization: Bearer on each request
+    C->>A: GET /api/v1/... (Bearer)
+    A->>D: get_auth(): verify signature and exp, load user, check ban, check session sid is active
+    A-->>C: 200, or 401 once the token expired or the session was revoked
+    C->>A: POST /api/v1/auth/refresh (cookie, after a 401 or on page load)
+    A->>D: find session by token hash; swap in a new hash only if it is unchanged (rotation)
+    A-->>C: 200 {access_token} + new refresh_token cookie; the client repeats the request
+    C->>A: POST /api/v1/auth/logout (cookie)
+    A->>D: set auth_session.revoked_at
+    A-->>C: 204 + cookie cleared; the old access token now gets 401
 ```
 
 ### 3.3 Class booking flow — Beta
@@ -119,13 +125,14 @@ backend/
     config.py          # (Beta) settings from env vars: JWT secret, token lifetimes
     database.py        # engine, get_session()
     models.py          # tables + Create / Update / Read schemas
-    security.py        # password hashing (Argon2), JWT create/verify; (Beta) refresh tokens
-    deps.py            # get_current_user, require_roles; (Beta) get_own_member, get_class_or_404
+    security.py        # password hashing (Argon2 + pepper), access tokens (JWT create/verify), refresh token generation and hashing
+    deps.py            # get_auth (token + session check), get_current_user, require_roles
+    request_info.py    # client_ip() (X-Forwarded-For on Vercel) and user_agent() for the session list
     routers/
       __init__.py
       members.py       # /api/v1/members (+ check-ins in Beta)
-      auth.py          # /api/v1/auth/signup, /login
-      users.py         # /api/v1/users/me (profile, change name); (Beta) change password
+      auth.py          # /api/v1/auth/signup, /login, /refresh, /logout (sets and clears the refresh cookie)
+      users.py         # /api/v1/users/me (profile, change name, change password, my sessions)
       admin.py         # /api/v1/admin/stats, /revenue, /users (list, change role, ban, unban), /plans (set prices)
       check_ins.py     # /api/v1/check-ins/today
       classes.py       # /api/v1/classes (read: anyone logged in; change and bookings: gym manager, admin)
@@ -138,7 +145,8 @@ backend/
     services/
       __init__.py
       member_service.py  # member rules and queries; raises MemberNotFoundError / InvalidExpiryError
-      auth_service.py    # sign up (always role user) and log in; raises EmailTakenError / InvalidCredentialsError
+      auth_service.py    # sign up (always role user), log in (re-hashes a pre-pepper hash), change password; raises EmailTakenError / InvalidCredentialsError
+      session_service.py # login sessions: start, rotate the refresh token (grace period, reuse detection), list, revoke one or all; raises InvalidRefreshTokenError / SessionNotFoundError
       user_service.py    # list users and trainers, change role (an ex-trainer's classes keep the name as text), rename, ban / unban; raises UserNotFoundError / CannotChangeOwnRoleError / CannotBanError
       stats_service.py   # member, check-in, class and user counts for the admin dashboard and the gym manager overview (each reuses the rule of the list it links to)
       revenue_service.py # revenue today, this month, last 30 days, by method and by month (voided left out)
@@ -155,10 +163,10 @@ frontend/
   src/
     App.tsx            # shows HomePage
     components/        # add form, member list, details panel
-    context/           # AuthContext: who is logged in, login / signup / logout
+    context/           # AuthContext: who is logged in, login / signup / logout; restores the login with a refresh on load
     layouts/           # AppLayout: header, and the pages each role may open
     pages/             # HomePage (members), LoginPage, SignupPage, AccountPage, DashboardPage (admin), OverviewPage (gym manager, admin), UsersPage (admin), ClassesPage (gym manager, admin), PaymentsPage (gym manager, admin), MembershipPage and TimetablePage (user), MyClassesPage (trainer), PlansPage (admin), AnnouncementsPage (gym manager, admin); (Later) AboutPage, MemberDetailsPage; (Beta, Could) MyMembership, Classes, AdminDashboard
-    services/          # fetch calls to the API
+    services/          # fetch calls to the API; api.ts keeps the access token in memory and refreshes it once on a 401
     types/             # TypeScript types
     utils/             # display helpers; membersLink() builds the #/members?filter=&member= address
     hooks/             # useDebouncedValue: search boxes ask the API once typing pauses
@@ -209,7 +217,7 @@ erDiagram
 
 **`app_user`**
 
-> Built so far: `id`, `email`, `name`, `password_hash`, `role`, `is_banned`, `banned_at`, `ban_reason`, `password_changed_at`, `failed_login_count`, `locked_until` and `created_at` (the lockout columns are added to an existing table on start). Tokens issued before `password_changed_at` are refused, which is how a password change ends earlier logins.
+> Built so far: `id`, `email`, `name`, `password_hash`, `role`, `is_banned`, `banned_at`, `ban_reason`, `password_changed_at`, `failed_login_count`, `locked_until` and `created_at` (the lockout columns are added to an existing table on start). `password_changed_at` only records the last change: a password change or reset ends logins by revoking `auth_session` rows. `password_hash` starts with `peppered$` once it is made with the pepper (section 10.2).
 
 | Column | Type | Rules |
 |---|---|---|
@@ -232,16 +240,23 @@ erDiagram
 
 `phone`, `date_of_birth` and the emergency contact are read only through `MemberRead` (member endpoints: gym managers and admins; `/users/me/membership`: the member) and `ProfileRead` (`/users/me/profile`: the person), never through `UserRead`, so they stay out of the login response and every account list (NFR-20).
 
-**`refresh_token`**
+**`auth_session`** (one row per login on one browser; holds the current refresh token's hash)
 
 | Column | Type | Rules |
 |---|---|---|
-| `id` | integer | Primary key |
-| `user_id` | integer | FK → `app_user.id`, on delete cascade |
-| `token_hash` | char(64) | SHA-256 of the token, unique |
-| `expires_at` | timestamp (UTC) | Not null (now + 7 days) |
-| `revoked_at` | timestamp (UTC) | Nullable |
-| `created_at` | timestamp (UTC) | Not null |
+| `id` | integer | Primary key; the `sid` claim of every access token issued for this login |
+| `user_id` | integer | FK → `app_user.id`, on delete cascade, indexed |
+| `token_hash` | varchar(64) | SHA-256 of the current refresh token, unique |
+| `previous_token_hash` | varchar(64) | Nullable, indexed: the token the last refresh replaced (reuse detection) |
+| `rotated_at` | timestamp (UTC) | Nullable: time of the last refresh |
+| `created_at` | timestamp (UTC) | Not null: the login time |
+| `last_used_at` | timestamp (UTC) | Not null: the login or the last refresh |
+| `expires_at` | timestamp (UTC) | Not null: last refresh + 7 days |
+| `ip` | varchar(45) | Nullable: client address at login |
+| `user_agent` | varchar(300) | Nullable: browser at login |
+| `revoked_at` | timestamp (UTC) | Nullable: set by logout, a revoke, a password change (other sessions) or reset, a ban, or a reused refresh token |
+
+A session is active while `revoked_at IS NULL AND expires_at > now`. Rows are kept after they end; `member_service._delete_accounts()` deletes them with the account.
 
 **`member` (new column in Beta)**
 
@@ -332,12 +347,12 @@ Voiding is a conditional `UPDATE ... WHERE voided_at IS NULL`, so voiding twice 
 
 "Current" is worked out from the date on every read (`ends_on IS NULL OR ends_on >= today`), like an expired membership, so nothing has to run when an announcement ends.
 
-Indexes: `member(user_id)`, `class_booking(member_id)`, `check_in(member_id, checked_in_at)`, `gym_class(starts_at)`, `gym_class(trainer_id)`, `announcement(posted_at)`, `refresh_token(user_id)`.
+Indexes: `member(user_id)`, `class_booking(member_id)`, `check_in(member_id, checked_in_at)`, `gym_class(starts_at)`, `gym_class(trainer_id)`, `announcement(posted_at)`, `auth_session(user_id)`, `auth_session(token_hash)` (unique), `auth_session(previous_token_hash)`.
 
 ```mermaid
 erDiagram
     APP_USER ||--o| MEMBER : "linked to"
-    APP_USER ||--o{ REFRESH_TOKEN : has
+    APP_USER ||--o{ AUTH_SESSION : has
     APP_USER ||--o{ GYM_CLASS : creates
     APP_USER |o--o{ GYM_CLASS : teaches
     APP_USER |o--o{ ANNOUNCEMENT : posts
@@ -360,11 +375,16 @@ erDiagram
         string emergency_contact_name
         string emergency_contact_phone
     }
-    REFRESH_TOKEN {
+    AUTH_SESSION {
         int id PK
         int user_id FK
         string token_hash UK
+        string previous_token_hash
+        datetime rotated_at
+        datetime last_used_at
         datetime expires_at
+        string ip
+        string user_agent
         datetime revoked_at
     }
     MEMBER {
@@ -427,7 +447,8 @@ erDiagram
 | `MemberBulkDeleteResult` | Bulk delete response | `deleted` (how many members were deleted) | MVP |
 | `SignupRequest` | Sign up | `email`, `name`, `password` | Beta |
 | `LoginRequest` | Log in | `email`, `password` | Beta |
-| `TokenResponse` | Login / refresh | `access_token`, `token_type: "bearer"`, `expires_in` | Beta |
+| `TokenResponse` | Login / refresh | `access_token`, `token_type: "bearer"`, `expires_in` (900), `user` (`UserRead`); the refresh token is only in the cookie | Beta |
+| `SessionRead` | My sessions | `id`, `created_at`, `last_used_at`, `expires_at`, `ip`, `user_agent`, `current` (the session of this request); never the token hashes | Beta |
 | `UserRead` | User responses | `id`, `email`, `name`, `role`, `created_at` (never `password_hash`) | Beta |
 | `RoleUpdate` | Change role | `role` | Beta |
 | `ProfileUpdate` | Change own name | `name` | Beta |
@@ -525,11 +546,13 @@ In the MVP no login is needed. In the Beta the member endpoints become admin-onl
 |---|---|---|---|---|---|---|
 | `POST` | `/api/v1/auth/signup` | Guest | `SignupRequest` | `201` `UserRead` | `409`, `422` | FR-12 |
 | `POST` | `/api/v1/auth/login` | Guest | `LoginRequest` | `200` `TokenResponse` + cookie | `401`, `429` | FR-13, FR-34 |
-| `POST` | `/api/v1/auth/refresh` | Refresh cookie | — | `200` `TokenResponse` + new cookie | `401` | FR-14 |
-| `POST` | `/api/v1/auth/logout` | Refresh cookie | — | `204`, cookie cleared | — | FR-15 |
+| `POST` | `/api/v1/auth/refresh` | Refresh cookie | — | `200` `TokenResponse` + new cookie (none when another request rotated the same token within 30 s); `204` with no cookie | `401` + cookie cleared (expired, revoked, unknown or reused) | FR-14, FR-82 |
+| `POST` | `/api/v1/auth/logout` | Refresh cookie | — | `204`, session revoked, cookie cleared (always `204`) | — | FR-15 |
 | `GET` | `/api/v1/users/me` | Member | — | `200` `UserRead` | `401` | FR-16 |
 | `PATCH` | `/api/v1/users/me` | Member | `ProfileUpdate` | `200` `UserRead` | `422` | FR-40 |
-| `POST` | `/api/v1/users/me/password` | Any logged-in user, also while a new password is due | `PasswordChange` | `204` (tokens issued before the change stop working; clears `must_change_password`) | `400` (wrong current password or same password), `401`, `422` | FR-41, FR-66 |
+| `POST` | `/api/v1/users/me/password` | Any logged-in user, also while a new password is due | `PasswordChange` | `204` (every other session is revoked, this one stays; clears `must_change_password`) | `400` (wrong current password or same password), `401`, `422` | FR-41, FR-66 |
+| `GET` | `/api/v1/users/me/sessions` | Any logged-in user | — | `200` `SessionRead[]`, active only, most recently used first | `401` | FR-80 |
+| `DELETE` | `/api/v1/users/me/sessions/{id}` | Any logged-in user | — | `204` (that session's refresh and access tokens stop working) | `401`, `404` (not mine or not active) | FR-81 |
 | `GET` | `/api/v1/users/lookup?email` or `?id` | Gym Manager, Admin | — | `200` `AccountLookup` (`id`, `name`, `email`) | `403`, `404`, `422` | FR-23 |
 | `GET` | `/api/v1/users/me/profile` | Any logged-in user | — | `200` `ProfileRead` (my own only) | `401` | FR-77 |
 | `PATCH` | `/api/v1/users/me/profile` | Any logged-in user | `ProfileUpdate` | `200` `ProfileRead` | `401`, `422` (date of birth out of range, too long, emergency contact with only a name or a phone) | FR-76, FR-77 |
@@ -660,7 +683,8 @@ Content-Type: application/json
 200 OK
 Set-Cookie: refresh_token=...; HttpOnly; Secure; SameSite=Strict; Path=/api/v1/auth; Max-Age=604800
 
-{ "access_token": "eyJhbGciOi...", "token_type": "bearer", "expires_in": 900 }
+{ "access_token": "eyJhbGciOi...", "token_type": "bearer", "expires_in": 900,
+  "user": { "id": 7, "email": "a@x.com", "name": "Rafi", "role": "user", "created_at": "...", "must_change_password": false } }
 ```
 
 ### 6.4 Error format
@@ -704,10 +728,11 @@ A catch-all exception handler returns `500` with `{"detail": "Internal server er
 | Variable | Local | Vercel | Release |
 |---|---|---|---|
 | `DATABASE_URL` | not set (SQLite default) | Supabase transaction pooler URL (port `6543`) | MVP |
-| `JWT_SECRET` | any long random string in `.env` | Random 32+ byte secret (`python -c "import secrets; print(secrets.token_urlsafe(48))"`) | Beta |
-| `ACCESS_TOKEN_MINUTES` | `15` | `15` | Beta |
-| `REFRESH_TOKEN_DAYS` | `7` | `7` | Beta |
+| `JWT_SECRET` | optional (a temporary secret per run) | Required: random 32+ byte secret (`python -c "import secrets; print(secrets.token_urlsafe(48))"`) | Beta |
+| `PASSWORD_PEPPER` | optional (a fixed development pepper) | Required: random 32+ byte secret, generated the same way. Never changed once set: every password hashed with it would stop verifying | Beta |
 | `MIGRATION_DATABASE_URL` | not needed | Not on Vercel. Used only on a developer machine to run Alembic against Supabase (session pooler, port `5432`) | Beta |
+
+Token lifetimes are constants, not env vars: `ACCESS_TOKEN_LIFETIME` (15 minutes) in `app/security.py`, `REFRESH_LIFETIME` (7 days) and `ROTATION_GRACE` (30 seconds) in `app/services/session_service.py`.
 
 No secrets are committed. `.env` stays in `.gitignore`.
 
@@ -738,17 +763,21 @@ flowchart LR
 
 | Token | Format | Lifetime | Where it lives |
 |---|---|---|---|
-| Access token | JWT, HS256, claims `sub` (user id), `role`, `iat`, `exp` | 15 min | Frontend memory; sent as `Authorization: Bearer` |
-| Refresh token | Random 32 bytes (`secrets.token_urlsafe`) | 7 days | `refresh_token` cookie (`HttpOnly`, `Secure`, `SameSite=Strict`, `Path=/api/v1/auth`); DB keeps only its SHA-256 hash |
+| Access token | JWT, HS256, claims `sub` (user id), `role`, `sid` (session id), `iat`, `exp` | 15 min | Frontend memory only (a module variable in `services/api.ts`); sent as `Authorization: Bearer` |
+| Refresh token | Random 32 bytes (`secrets.token_urlsafe`) | 7 days from the last refresh | `refresh_token` cookie (`HttpOnly`, `Secure`, `SameSite=Strict`, `Path=/api/v1/auth`); `auth_session.token_hash` keeps only its SHA-256 hash |
 
-- **Refresh rotation:** each refresh revokes the old token and issues a new one. If a revoked token is used again, all of that user's refresh tokens are revoked (it was probably stolen).
-- **Logout:** revokes the current refresh token and clears the cookie. The access token simply expires within 15 minutes.
-- **Built so far:** the access token holds `sub`, `iat` and `exp` only, lasts 8 hours and is kept in the browser's `sessionStorage`; there is no refresh token yet. `JWT_SECRET` is required on Vercel.
+- **Create:** `POST /auth/login` checks the password, inserts an `auth_session` row, sets the cookie and returns an access token naming that row in `sid`.
+- **Verify (every protected request):** `deps.get_auth()` decodes the token with `JWT_SECRET` (a bad signature, an expired `exp` or a missing claim → `401`), loads the user (gone → `401`; banned → `403 Account banned`), then checks that session `sid` belongs to the user and is active (otherwise `401`). Every other dependency builds on it, and FastAPI runs it once per request.
+- **Refresh rotation:** `session_service.rotate()` finds the session by the cookie's hash and replaces the hash with a new token's in one `UPDATE ... WHERE id = ? AND token_hash = <old hash>`. If that matches no row, another request rotated first: this one still gets an access token but no new cookie, so the browser keeps the winner's cookie. The session id stays the same, so `sid` in new access tokens does not change.
+- **Reuse detection:** the replaced hash is kept in `previous_token_hash`. Sent again within `ROTATION_GRACE` (30 s, for example two tabs refreshing at once), it gets an access token without a new cookie. Sent later, only a copy can hold it, so the whole session is revoked (`401`) and both holders must log in again.
+- **Revoke:** logout (`POST /auth/logout`, by the cookie), `DELETE /users/me/sessions/{id}`, a password change (every session but the caller's), an admin reset or a ban (every session) set `revoked_at`. The access tokens of a revoked session fail on their next request, because `get_auth()` checks the session; there is no wait for `exp`.
+- **Expiry:** after 15 minutes the API answers `401`. `services/api.ts` then calls `refreshSession()` once (all requests failing together share one promise) and repeats the request. If the refresh fails, `AuthContext.endSession()` shows Log in. On page load the app always calls refresh (scripts cannot see the HttpOnly cookie); with no cookie the answer is `204`, so a visitor sees no console error, and "Loading…" covers the wait instead of a flash of the Log in page.
 - The `role` claim is only informational; permission checks always use the role loaded from the database, so a role change applies on the next request.
 
 ### 10.2 Passwords and login lockout
 
-- Hash with `pwdlib` (Argon2). Verify on login; never log or return the hash.
+- Hash with Argon2 (`argon2-cffi`) after mixing in the pepper: `argon2(HMAC-SHA256(PASSWORD_PEPPER, password))`, stored as `peppered$<argon2 hash>`. Verify on login; never log or return the hash.
+- A hash without the `peppered$` prefix was made before the pepper: it is verified as it was made, and `auth_service.authenticate()` replaces it with a peppered hash on that successful login (`security.password_needs_rehash()`). Each path runs exactly one Argon2 check, so timing does not show which kind of hash an account has.
 - Unknown email and wrong password both return `401 "Invalid email or password"`, so emails cannot be discovered.
 - Wrong password: `failed_login_count += 1`. At 5, set `locked_until = now + 15 min` and reset the count. While `locked_until > now`, login returns `429`. A successful login resets the count.
 - Stored in the database (not in memory) because serverless functions do not share memory.
@@ -806,13 +835,13 @@ Row-level rules that depend on the data are checked inside the route:
 - Check-in: member must be valid (`400` otherwise); a second check-in for the same member on the same UTC date is allowed but the dashboard counts distinct members.
 - Link account: `user_id` on a member must reference an existing user not already linked to another member, otherwise `409`.
 - Change role: `user_id == caller` → `400`.
-- Ban: target is the caller or an admin → `400`. Otherwise set `is_banned = true`, `banned_at = now`, `ban_reason`, and revoke all the user's refresh tokens in the same transaction. Unban clears the three fields.
-- Login and refresh also reject banned users with `403`.
-- Change password: verify `current_password` (`400` if wrong), hash `new_password`, revoke all the user's refresh tokens; the client then logs in again.
+- Ban: target is the caller or an admin → `400`. Otherwise set `is_banned = true`, `banned_at = now`, `ban_reason`, and revoke all the user's sessions in the same transaction (`session_service.revoke_all()`). Unban clears the three fields; the revoked sessions stay revoked.
+- Login rejects a banned user with `403`; refresh answers `401`, because the ban revoked the sessions (and `rotate()` also refuses a banned user).
+- Change password: verify `current_password` (`400` if wrong), hash `new_password`, and revoke every session except the caller's (`keep=auth.session_id`) in the same transaction; the caller stays logged in.
 - **Built so far (trainers):** `class_service` checks that a sent `trainer_id` is an account with the role `trainer` (`TrainerNotFoundError` → `422`) and clears the old `trainer_name`; lists outer-join the trainer's account and select `coalesce(app_user.name, gym_class.trainer_name)`, so a renamed trainer shows everywhere. `user_service.change_role()` calls `class_service.release_trainer()` when an account stops being a trainer, in the same commit.
 - **Built so far (profile details):** `profile_service.check_emergency_contact()` merges the sent fields with the saved ones before checking, so sending only a new contact phone works, and a refused change leaves the saved contact alone (`IncompleteEmergencyContactError` → `422`). `PATCH /users/me/profile` and `member_service.update_member()` both call it. `start_membership()` keeps a saved phone when the Add member form leaves it empty.
 - **Built so far (announcements):** `announcement_service` filters current ones with `or_(ends_on IS NULL, ends_on >= utc_today())` and outer-joins `app_user` for the poster's name, so an announcement whose poster's account is gone is still listed. An `ends_on` before today is refused by the schemas' validator (`422`); an edit that leaves `ends_on` out keeps an ended announcement's date, so its text can still be corrected. `member_service._delete_accounts()` sets `posted_by` to null before deleting an account.
-- **Built so far (password reset):** `get_logged_in_user` checks the token, the password change time and the ban; `get_current_user` (used by every route and by `require_roles`) also returns `403 Choose a new password first` while `must_change_password` is set. Only `GET /users/me` and `POST /users/me/password` take `LoggedInUser` instead, so a reset account can see who it is and choose a password. Tokens carry `iat` with the fraction of a second and are refused when `iat < password_changed_at`.
+- **Built so far (password reset):** `get_logged_in_user` returns the user from `get_auth` (token, ban and session check); `get_current_user` (used by every route and by `require_roles`) also returns `403 Choose a new password first` while `must_change_password` is set. Only `GET /users/me` and `POST /users/me/password` take `LoggedInUser` instead (the password route takes `AuthDep` to know which session to keep), so a reset account can see who it is and choose a password. The reset revokes every session; after choosing a password the same session goes on working.
 
 ### 10.4 Admin dashboard stats
 
@@ -855,8 +884,8 @@ stats = AdminStats(
 
 | Area | Design |
 |---|---|
-| Passwords | Argon2 via `pwdlib`, minimum 8 characters |
-| Tokens | Section 10.1; `JWT_SECRET` only in env vars |
+| Passwords | Argon2 (`argon2-cffi`) over HMAC-SHA256 with `PASSWORD_PEPPER`, minimum 8 characters |
+| Tokens | Section 10.1: 15-minute access token checked against its session on every request; rotating refresh token with reuse detection; `JWT_SECRET` and `PASSWORD_PEPPER` only in env vars, required on Vercel |
 | Cookies | `HttpOnly`, `Secure`, `SameSite=Strict`, path-limited |
 | CORS | Not enabled: frontend and API share the Vercel origin; locally Vite proxies `/api` |
 | Security headers | Added for all routes in `vercel.json` (below) |

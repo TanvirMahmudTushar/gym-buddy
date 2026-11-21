@@ -646,6 +646,12 @@ h3 {
   font-variant-numeric: tabular-nums;
 }
 
+/* My account: each session's Log out button sits beside its details, or drops below them on a phone. */
+.session-list li {
+  align-items: center;
+  flex-wrap: wrap;
+}
+
 button.linklike {
   border: 0;
   background: none;
