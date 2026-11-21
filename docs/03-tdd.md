@@ -131,16 +131,18 @@ backend/
       classes.py       # /api/v1/classes (read: anyone logged in; change and bookings: gym manager, admin)
       plans.py         # /api/v1/plans (anyone logged in)
       payments.py      # /api/v1/payments (list: gym manager, admin; void and CSV export: admin)
+      overview.py      # /api/v1/overview (gym manager, admin)
+      trainers.py      # /api/v1/trainers (list: gym manager, admin) and /trainers/me/classes (trainer)
       classes.py       # (Beta) /api/v1/classes/* (classes and bookings)
     services/
       __init__.py
       member_service.py  # member rules and queries; raises MemberNotFoundError / InvalidExpiryError
       auth_service.py    # sign up (always role user) and log in; raises EmailTakenError / InvalidCredentialsError
-      user_service.py    # list users, change role, rename, ban / unban; raises UserNotFoundError / CannotChangeOwnRoleError / CannotBanError
-      stats_service.py   # member, check-in, class and user counts for the admin dashboard (member counts reuse the member list filters)
+      user_service.py    # list users and trainers, change role (an ex-trainer's classes keep the name as text), rename, ban / unban; raises UserNotFoundError / CannotChangeOwnRoleError / CannotBanError
+      stats_service.py   # member, check-in, class and user counts for the admin dashboard and the gym manager overview (each reuses the rule of the list it links to)
       revenue_service.py # revenue today, this month, last 30 days, by method and by month (voided left out)
       payment_service.py # plan prices, record a payment (and renew), payment lists and total, void, CSV export; raises PaymentNotFoundError
-      class_service.py   # classes and bookings: create, list, edit, delete, who booked; raises ClassNotFoundError / CapacityBelowBookingsError
+      class_service.py   # classes and bookings: create, list, edit, delete, who booked, a trainer's own classes; raises ClassNotFoundError / CapacityBelowBookingsError / TrainerNotFoundError / NotYourClassError
       checkin_service.py # record a check-in (membership must be valid), history, today's list; raises MembershipNotValidError
       search.py          # contains_any(): the any-case text search shared by the member, waiting and user lists
   alembic/             # (Beta) migration scripts
@@ -152,7 +154,7 @@ frontend/
     components/        # add form, member list, details panel
     context/           # AuthContext: who is logged in, login / signup / logout
     layouts/           # AppLayout: header, and the pages each role may open
-    pages/             # HomePage (members), LoginPage, SignupPage, AccountPage, DashboardPage (admin), UsersPage (admin), ClassesPage (gym manager, admin), PaymentsPage (gym manager, admin), MembershipPage and TimetablePage (user), PlansPage (admin); (Later) AboutPage, MemberDetailsPage; (Beta, Could) MyMembership, Classes, AdminDashboard
+    pages/             # HomePage (members), LoginPage, SignupPage, AccountPage, DashboardPage (admin), OverviewPage (gym manager, admin), UsersPage (admin), ClassesPage (gym manager, admin), PaymentsPage (gym manager, admin), MembershipPage and TimetablePage (user), MyClassesPage (trainer), PlansPage (admin); (Later) AboutPage, MemberDetailsPage; (Beta, Could) MyMembership, Classes, AdminDashboard
     services/          # fetch calls to the API
     types/             # TypeScript types
     utils/             # display helpers; membersLink() builds the #/members?filter=&member= address
@@ -212,7 +214,8 @@ erDiagram
 | `email` | varchar(254) | Unique, stored lowercase |
 | `name` | varchar(100) | Not null |
 | `password_hash` | varchar | Argon2 hash, never returned by the API |
-| `role` | varchar(20) | `user`, `gym_manager` or `admin`, default `user` |
+| `must_change_password` | boolean | Default false; true after an admin reset until a new password is chosen |
+| `role` | varchar(20) | `user`, `trainer`, `gym_manager` or `admin`, default `user` |
 | `failed_login_count` | integer | Default 0 |
 | `locked_until` | timestamp (UTC) | Nullable |
 | `is_banned` | boolean | Default `false` |
@@ -246,7 +249,8 @@ erDiagram
 | `id` | integer | Primary key |
 | `name` | varchar(100) | Not null |
 | `description` | varchar(500) | Nullable |
-| `trainer_name` | varchar(100) | Nullable |
+| `trainer_id` | integer | FK → `app_user.id`, nullable, on delete set null, index `ix_gym_class_trainer_id`. Always an account with the role `trainer`: changing that account's role sets it to null and copies the name into `trainer_name`. Added to an existing table (with its index) by `create_db_and_tables()` |
+| `trainer_name` | varchar(100) | Nullable. Free text from before trainers were accounts; cleared whenever `trainer_id` is sent. Responses show `coalesce(trainer's account name, trainer_name)` |
 | `starts_at` | timestamp (UTC) | Not null |
 | `duration_minutes` | integer | Not null, 15–240 |
 | `capacity` | integer | Not null, 1–200 |
@@ -303,13 +307,14 @@ Voiding is a conditional `UPDATE ... WHERE voided_at IS NULL`, so voiding twice 
 | `checked_in_at` | timestamp (UTC) | Not null |
 | `recorded_by` | integer | FK → `app_user.id`: the gym manager or admin who recorded it |
 
-Indexes: `member(user_id)`, `class_booking(member_id)`, `check_in(member_id, checked_in_at)`, `gym_class(starts_at)`, `refresh_token(user_id)`.
+Indexes: `member(user_id)`, `class_booking(member_id)`, `check_in(member_id, checked_in_at)`, `gym_class(starts_at)`, `gym_class(trainer_id)`, `refresh_token(user_id)`.
 
 ```mermaid
 erDiagram
     APP_USER ||--o| MEMBER : "linked to"
     APP_USER ||--o{ REFRESH_TOKEN : has
     APP_USER ||--o{ GYM_CLASS : creates
+    APP_USER |o--o{ GYM_CLASS : teaches
     MEMBER ||--o{ CLASS_BOOKING : books
     GYM_CLASS ||--o{ CLASS_BOOKING : has
     MEMBER ||--o{ CHECK_IN : has
@@ -345,6 +350,7 @@ erDiagram
     GYM_CLASS {
         int id PK
         string name
+        int trainer_id FK
         string trainer_name
         datetime starts_at
         int duration_minutes
@@ -390,10 +396,13 @@ erDiagram
 | `AdminUserRead` | Admin user list | `UserRead` + `is_banned`, `banned_at`, `ban_reason`, `plan?`, `expires_on?`, `is_frozen` | Beta |
 | `AccountPage` | Accounts waiting for a membership | `items: UserRead[]`, `total`, `offset`, `limit` | Beta |
 | `BanRequest` | Ban a user | `reason?` | Beta |
-| `AdminStats` | Dashboard | `members {total, active, expired, frozen, new_last_7_days, expiring_soon}`, `classes {total, upcoming}`, `check_ins {today, last_7_days}`, `users {total, users, gym_managers, admins, banned}` | Beta |
+| `PasswordResetResult` | Admin password reset | `user: AdminUserRead`, `temporary_password` (shown once) | Beta |
+| `AdminStats` | Dashboard | `members {total, active, expired, frozen, new_last_7_days, expiring_soon}`, `classes {total, upcoming}`, `check_ins {today, last_7_days}`, `users {total, users, trainers, gym_managers, admins, banned}` | Beta |
+| `Overview` | Gym manager start page | `check_ins_today`, `expiring_soon`, `waiting`, `payments_today {count, amount}`, `next_classes: ClassRead[]` (5) | Beta |
 | `RevenueStats` | Dashboard revenue | `today`, `this_month`, `last_30_days`, `last_30_days_from` (date), `by_method [{method, amount, count}]` (all four methods), `months [{month: "YYYY-MM", amount}]` (6, oldest first) | Beta |
-| `ClassCreate` / `ClassUpdate` | Create / edit class | `name`, `description?`, `trainer_name?`, `starts_at`, `duration_minutes`, `capacity` (all optional on update) | Beta |
-| `ClassRead` | Class responses | all class columns except `created_by` + `booked_count` (`is_booked_by_me` comes with member booking); times are UTC with a trailing `Z` | Beta |
+| `ClassCreate` / `ClassUpdate` | Create / edit class | `name`, `description?`, `trainer_id?` (an account with the role `trainer`, or null), `starts_at`, `duration_minutes`, `capacity` (all optional on update; on update a `trainer_id` left out keeps the trainer) | Beta |
+| `TrainerRead` | Trainer list | `id`, `name` | Beta |
+| `ClassRead` | Class responses | all class columns except `created_by` (`trainer_name` is the trainer's current account name, or the old text name) + `booked_count` (`is_booked_by_me` comes with member booking); times are UTC with a trailing `Z` | Beta |
 | `ClassPage` / `BookingPage` | Class and booking lists | `items`, `total`, `offset`, `limit` | Beta |
 | `BookingRead` | Booking responses | `class_id`, `member_id`, `member_name`, `booked_at` | Beta |
 | `BookedClassRead` / `BookedClassPage` | A member's bookings | `class_id`, `class_name`, `starts_at`, `duration_minutes`, `trainer_name?`, `booked_at` | Beta |
@@ -478,7 +487,7 @@ In the MVP no login is needed. In the Beta the member endpoints become admin-onl
 | `POST` | `/api/v1/auth/logout` | Refresh cookie | — | `204`, cookie cleared | — | FR-15 |
 | `GET` | `/api/v1/users/me` | Member | — | `200` `UserRead` | `401` | FR-16 |
 | `PATCH` | `/api/v1/users/me` | Member | `ProfileUpdate` | `200` `UserRead` | `422` | FR-40 |
-| `POST` | `/api/v1/users/me/password` | Any logged-in user | `PasswordChange` | `204` (tokens issued before the change stop working) | `400` (wrong current password), `401`, `422` | FR-41 |
+| `POST` | `/api/v1/users/me/password` | Any logged-in user, also while a new password is due | `PasswordChange` | `204` (tokens issued before the change stop working; clears `must_change_password`) | `400` (wrong current password or same password), `401`, `422` | FR-41, FR-66 |
 | `GET` | `/api/v1/users/lookup?email` or `?id` | Gym Manager, Admin | — | `200` `AccountLookup` (`id`, `name`, `email`) | `403`, `404`, `422` | FR-23 |
 | `GET` | `/api/v1/users/me/membership` | Any logged-in user | — | `200` `MemberRead` | `401`, `404` (no membership linked) | FR-17 |
 | `GET` | `/api/v1/users/me/check-ins?offset&limit` | Any logged-in user | — | `200` `CheckInPage` (newest first) | `401`, `404` | FR-18 |
@@ -502,15 +511,17 @@ In the MVP no login is needed. In the Beta the member endpoints become admin-onl
 | Method | Path | Who | Body | Success | Errors | FR |
 |---|---|---|---|---|---|---|
 | `GET` | `/api/v1/admin/users?offset&limit&q` | Admin | — | `200` `AdminUserPage` (`AdminUserRead` items, with ban info and membership) | `403` | FR-21, FR-56 |
-| `PATCH` | `/api/v1/admin/users/{user_id}/role` | Admin | `RoleUpdate` | `200` `AdminUserRead` | `400` (own role), `403`, `404` | FR-22 |
+| `PATCH` | `/api/v1/admin/users/{user_id}/role` | Admin | `RoleUpdate` | `200` `AdminUserRead` (from `trainer` to another role: the trainer's classes keep the name as text) | `400` (own role), `403`, `404` | FR-22, FR-67 |
 | `GET` | `/api/v1/admin/stats` | Admin | — | `200` `AdminStats` | `403` | FR-35 |
 | `GET` | `/api/v1/admin/revenue` | Admin | — | `200` `RevenueStats` | `401`, `403` | FR-52 |
+| `GET` | `/api/v1/overview` | Gym Manager, Admin | — | `200` `Overview` (`payment_service.totals_since()`, `checkin_service.count_since()`, the member list's `status_filters("expiring_soon")` and `WAITING`, `class_service.list_classes(upcoming)`) | `401`, `403` | FR-62 |
 | `POST` | `/api/v1/admin/users/{user_id}/ban` | Admin | `BanRequest` | `200` `AdminUserRead` | `400` (self / other admin), `403`, `404` | FR-36 |
 | `POST` | `/api/v1/admin/users/{user_id}/unban` | Admin | — | `200` `AdminUserRead` | `403`, `404` | FR-38 |
+| `POST` | `/api/v1/admin/users/{user_id}/reset-password` | Admin | — | `200` `PasswordResetResult`, `Cache-Control: no-store` | `400` (self or another admin), `403`, `404` | FR-64 |
 
 `GET /api/v1/admin/users` returns `AdminUserRead` items so the Users page can show who is banned, since when and why (FR-39).
 
-`GET /api/v1/admin/stats` returns `{members: {total, active, expired, frozen, new_last_7_days, expiring_soon}, users: {total, users, gym_managers, admins, banned}, check_ins, classes}`. "Active", "expired", "frozen" and "expiring_soon" call the member list's own `status_filters()`, so each count equals the list with that filter.
+`GET /api/v1/admin/stats` returns `{members: {total, active, expired, frozen, new_last_7_days, expiring_soon}, users: {total, users, trainers, gym_managers, admins, banned}, check_ins, classes}`. "Active", "expired", "frozen" and "expiring_soon" call the member list's own `status_filters()`, so each count equals the list with that filter.
 
 Ban rules: banning is idempotent (banning a banned user changes nothing), an admin cannot ban themself or another admin (`400`), and unbanning clears `banned_at` and `ban_reason` but keeps the role. `get_current_user` returns `403 Account banned` for a banned user on every request, and `/auth/login` does the same after the password is checked, so a stranger cannot find out who is banned.
 
@@ -534,12 +545,14 @@ Ban rules: banning is idempotent (banning a banned user changes nothing), an adm
 
 | Method | Path | Who | Body | Success | Errors | FR |
 |---|---|---|---|---|---|---|
-| `POST` | `/api/v1/classes` | Gym Manager, Admin | `ClassCreate` | `201` `ClassRead` | `401`, `403`, `422` | FR-25 |
+| `POST` | `/api/v1/classes` | Gym Manager, Admin | `ClassCreate` | `201` `ClassRead` | `401`, `403`, `422` (including a `trainer_id` that is not a trainer) | FR-25, FR-69 |
 | `GET` | `/api/v1/classes?offset&limit&upcoming=true` | Any logged-in user | — | `200` `ClassPage` (ordered by `starts_at`) | `401`, `422` | FR-26 |
 | `GET` | `/api/v1/classes/{class_id}` | Any logged-in user | — | `200` `ClassRead` | `401`, `404` | FR-26 |
-| `PATCH` | `/api/v1/classes/{class_id}` | Gym Manager, Admin | `ClassUpdate` | `200` `ClassRead` | `403`, `404`, `422` (capacity below current bookings) | FR-27 |
+| `PATCH` | `/api/v1/classes/{class_id}` | Gym Manager, Admin | `ClassUpdate` | `200` `ClassRead` (a sent `trainer_id` clears `trainer_name`) | `403`, `404`, `422` (capacity below current bookings, or a `trainer_id` that is not a trainer) | FR-27, FR-69 |
 | `DELETE` | `/api/v1/classes/{class_id}` | Gym Manager, Admin | — | `204` (its bookings are deleted too) | `403`, `404` | FR-27 |
-| `GET` | `/api/v1/classes/{class_id}/bookings` | Gym Manager, Admin | — | `200` `BookingPage` (in booking order) | `403`, `404` | FR-28 |
+| `GET` | `/api/v1/classes/{class_id}/bookings` | Gym Manager, Admin; Trainer for the classes they teach | — | `200` `BookingPage` (in booking order) | `403` (including a trainer and another class), `404` | FR-28, FR-71 |
+| `GET` | `/api/v1/trainers` | Gym Manager, Admin | — | `200` `TrainerRead[]` (role `trainer`, by name; not paged, like `/plans`) | `401`, `403` | FR-68 |
+| `GET` | `/api/v1/trainers/me/classes?when&offset&limit` | Trainer | — | `200` `ClassPage` (classes with `trainer_id` = me; `upcoming` soonest first, `past` latest first) | `401`, `403`, `422` | FR-70 |
 | `POST` | `/api/v1/classes/{class_id}/bookings` | Any logged-in user with a linked, valid membership | — | `201` `BookingRead` | `400` (membership not valid / class already started), `404`, `409` (full or already booked) | FR-28, FR-29 |
 | `DELETE` | `/api/v1/classes/{class_id}/bookings` | Any logged-in user with a membership | — | `204` (cancel my booking) | `400` (class started), `404` | FR-29 |
 
@@ -726,6 +739,8 @@ def require_valid_membership(member: Member = Depends(get_own_member)) -> Member
 | `/api/v1/users/me/membership`, `/api/v1/users/me/check-ins` | `get_own_member` |
 | `/api/v1/members/*`, `/api/v1/admin/*`, `/api/v1/users/lookup`, `POST/PATCH/DELETE /classes`, `GET /classes/{id}/bookings` | `require_roles("gym_manager", "admin")` (admin-only for `/admin/*`) |
 | `POST/DELETE /classes/{id}/bookings` | `require_valid_membership` (cancel uses `get_own_member`) |
+| `GET /classes/{id}/bookings` | `require_roles("gym_manager", "admin", "trainer")`; the service then refuses a trainer who does not teach the class (`NotYourClassError` → `403`) |
+| `GET /trainers` / `GET /trainers/me/classes` | `require_roles("gym_manager", "admin")` / `require_roles("trainer")` |
 
 Row-level rules that depend on the data are checked inside the route:
 - Own membership: query with `Member.user_id == user.id`; a member can never pass an id to read another member's record.
@@ -738,6 +753,8 @@ Row-level rules that depend on the data are checked inside the route:
 - Ban: target is the caller or an admin → `400`. Otherwise set `is_banned = true`, `banned_at = now`, `ban_reason`, and revoke all the user's refresh tokens in the same transaction. Unban clears the three fields.
 - Login and refresh also reject banned users with `403`.
 - Change password: verify `current_password` (`400` if wrong), hash `new_password`, revoke all the user's refresh tokens; the client then logs in again.
+- **Built so far (trainers):** `class_service` checks that a sent `trainer_id` is an account with the role `trainer` (`TrainerNotFoundError` → `422`) and clears the old `trainer_name`; lists outer-join the trainer's account and select `coalesce(app_user.name, gym_class.trainer_name)`, so a renamed trainer shows everywhere. `user_service.change_role()` calls `class_service.release_trainer()` when an account stops being a trainer, in the same commit.
+- **Built so far (password reset):** `get_logged_in_user` checks the token, the password change time and the ban; `get_current_user` (used by every route and by `require_roles`) also returns `403 Choose a new password first` while `must_change_password` is set. Only `GET /users/me` and `POST /users/me/password` take `LoggedInUser` instead, so a reset account can see who it is and choose a password. Tokens carry `iat` with the fraction of a second and are refused when `iat < password_changed_at`.
 
 ### 10.4 Admin dashboard stats
 

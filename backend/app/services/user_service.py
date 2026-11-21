@@ -1,7 +1,11 @@
 # Looking at users and changing their role or name.
+import secrets
+
 from sqlmodel import Session, col, func, select
 
 from app.models import Role, User, utc_now
+from app.security import hash_password
+from app.services import class_service
 from app.services.search import contains_any
 
 
@@ -15,6 +19,15 @@ class CannotChangeOwnRoleError(Exception):
 
 class CannotBanError(Exception):
     """An admin tried to ban themself or another admin."""
+
+
+class CannotResetPasswordError(Exception):
+    """An admin tried to reset their own password or another admin's. The message says which."""
+
+
+# Letters and digits that cannot be mixed up when read aloud or copied by hand (no 0/O, 1/l/I).
+TEMPORARY_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789"
+TEMPORARY_LENGTH = 12
 
 
 def get_user(session: Session, user_id: int) -> User:
@@ -38,10 +51,19 @@ def list_users(session: Session, offset: int, limit: int, q: str | None = None) 
     return list(session.exec(query).all()), total
 
 
+def list_trainers(session: Session) -> list[User]:
+    """Every account with the Trainer role, by name: the choices for a class's trainer. A gym has only a few."""
+    query = select(User).where(col(User.role) == "trainer").order_by(col(User.name), col(User.id))
+    return list(session.exec(query).all())
+
+
 def change_role(session: Session, acting_admin: User, user_id: int, role: Role) -> User:
     if acting_admin.id == user_id:
         raise CannotChangeOwnRoleError
     user = get_user(session, user_id)
+    # A class's trainer is always an account with the Trainer role, so classes keep only the name of an ex-trainer.
+    if user.role == "trainer" and role != "trainer":
+        class_service.release_trainer(session, user)
     user.role = role
     session.add(user)
     session.commit()
@@ -85,3 +107,23 @@ def unban_user(session: Session, user_id: int) -> User:
         session.commit()
         session.refresh(user)
     return user
+
+
+def reset_password(session: Session, acting_admin: User, user_id: int) -> tuple[User, str]:
+    """Give the account a random temporary password, which the admin hands over. Earlier logins end, any login
+    lockout is cleared, and the account must choose a new password before it can do anything else."""
+    if acting_admin.id == user_id:
+        raise CannotResetPasswordError("Change your own password on My account")
+    user = get_user(session, user_id)
+    if user.role == "admin":
+        raise CannotResetPasswordError("You cannot reset another admin's password; change their role first")
+    temporary = "".join(secrets.choice(TEMPORARY_ALPHABET) for _ in range(TEMPORARY_LENGTH))
+    user.password_hash = hash_password(temporary)
+    user.password_changed_at = utc_now()
+    user.must_change_password = True
+    user.failed_login_count = 0
+    user.locked_until = None
+    session.add(user)
+    session.commit()
+    session.refresh(user)
+    return user, temporary

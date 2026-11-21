@@ -8,8 +8,9 @@ from sqlmodel import Field, SQLModel
 
 Plan = Literal["monthly", "quarterly", "yearly"]
 FullName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
-# The id column is a 32-bit integer, so anything larger cannot match a member.
-MemberId = Annotated[int, Field(gt=0, le=2_147_483_647)]
+# The id column is a 32-bit integer, so anything larger cannot match an account (a member's id is their account's).
+AccountId = Annotated[int, Field(gt=0, le=2_147_483_647)]
+MemberId = AccountId
 
 
 def utc_now() -> datetime:
@@ -46,6 +47,8 @@ class User(SQLModel, table=True):
     ban_reason: str | None = Field(default=None, max_length=500)
     # Tokens issued before this moment stop working (set when the password is changed).
     password_changed_at: datetime | None = None
+    # Set when an admin resets the password: until a new one is chosen, the account can do nothing else.
+    must_change_password: bool = False
     # Login lockout (FR-34): wrong passwords in a row, and the moment logins are blocked until.
     failed_login_count: int = 0
     locked_until: datetime | None = None
@@ -139,7 +142,7 @@ class MemberBulkDeleteResult(SQLModel):
 
 # --- Accounts and roles ---
 
-Role = Literal["user", "gym_manager", "admin"]
+Role = Literal["user", "trainer", "gym_manager", "admin"]
 Password = Annotated[str, StringConstraints(min_length=8, max_length=128)]
 
 
@@ -160,6 +163,8 @@ class UserRead(SQLModel):
     name: str
     role: Role
     created_at: datetime
+    # True after an admin reset the password: the app asks for a new one before anything else.
+    must_change_password: bool
 
 
 class AccountPage(SQLModel):
@@ -194,6 +199,13 @@ class AdminUserPage(SQLModel):
     total: int
     offset: int
     limit: int
+
+
+class PasswordResetResult(SQLModel):
+    """The account after an admin reset its password, and the temporary password (shown only this once)."""
+
+    user: AdminUserRead
+    temporary_password: str
 
 
 class BanRequest(SQLModel):
@@ -233,6 +245,7 @@ class MemberStats(SQLModel):
 class UserStats(SQLModel):
     total: int
     users: int
+    trainers: int
     gym_managers: int
     admins: int
     banned: int
@@ -258,6 +271,13 @@ class UserRoleUpdate(SQLModel):
     role: Role
 
 
+class TrainerRead(SQLModel):
+    """An account with the Trainer role, as a choice for a class's trainer."""
+
+    id: int
+    name: str
+
+
 # --- Classes and bookings ---
 
 DurationMinutes = Annotated[int, Field(ge=15, le=240)]
@@ -271,6 +291,9 @@ class GymClass(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     name: str = Field(max_length=100)
     description: str | None = Field(default=None, max_length=500)
+    # The trainer: an account with the Trainer role. Classes from before trainers were accounts have only
+    # trainer_name (free text); choosing a trainer, or none, clears it.
+    trainer_id: int | None = Field(default=None, foreign_key="app_user.id", ondelete="SET NULL", index=True)
     trainer_name: str | None = Field(default=None, max_length=100)
     starts_at: datetime = Field(index=True)
     duration_minutes: int
@@ -292,7 +315,8 @@ class ClassBooking(SQLModel, table=True):
 class ClassCreate(SQLModel):
     name: FullName
     description: str | None = Field(default=None, max_length=500)
-    trainer_name: str | None = Field(default=None, max_length=100)
+    # An account with the Trainer role (GET /api/v1/trainers lists them), or none.
+    trainer_id: AccountId | None = None
     starts_at: datetime
     duration_minutes: DurationMinutes
     capacity: Capacity
@@ -306,7 +330,8 @@ class ClassCreate(SQLModel):
 class ClassUpdate(SQLModel):
     name: FullName | None = None
     description: str | None = Field(default=None, max_length=500)
-    trainer_name: str | None = Field(default=None, max_length=100)
+    # Sent: this trainer, or null for none, replacing any old text name. Left out: the trainer stays as it is.
+    trainer_id: AccountId | None = None
     starts_at: datetime | None = None
     duration_minutes: DurationMinutes | None = None
     capacity: Capacity | None = None
@@ -329,6 +354,8 @@ class ClassRead(SQLModel):
     id: int
     name: str
     description: str | None
+    trainer_id: int | None
+    # The trainer's current account name, or the old text name on a class without a trainer account.
     trainer_name: str | None
     starts_at: UtcDateTime
     duration_minutes: int
@@ -521,3 +548,24 @@ class PlanUpdate(SQLModel):
 
     price: Annotated[int, Field(ge=1, le=10_000_000)]
     duration_days: Annotated[int, Field(ge=1, le=3_660)]
+
+
+# --- Overview (the Gym Manager's start page) ---
+
+
+class PaymentsToday(SQLModel):
+    """Payments taken since midnight UTC that are not voided."""
+
+    count: int
+    amount: int
+
+
+class Overview(SQLModel):
+    """What needs attention today. Each number uses the same rule as the page it links to."""
+
+    check_ins_today: int
+    expiring_soon: int
+    waiting: int
+    payments_today: PaymentsToday
+    # The next classes that have not started yet, soonest first.
+    next_classes: list[ClassRead]

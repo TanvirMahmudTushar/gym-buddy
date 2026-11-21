@@ -1,5 +1,5 @@
 // fetch helpers for the admin-only endpoints: /api/v1/admin.
-import type { AdminStats, AdminUser, AdminUserPage, Role } from "../types/auth"
+import type { AdminStats, AdminUser, AdminUserPage, PasswordResetResult, Role } from "../types/auth"
 import type { PlanPrice, RevenueStats } from "../types/payment"
 import type { Plan } from "../types/member"
 import { request } from "./api"
@@ -19,6 +19,10 @@ export const changeRole = (id: number, role: Role) =>
 
 export const banUser = (id: number, reason: string) =>
   request<AdminUser>(`${BASE}/users/${id}/ban`, { method: "POST", body: JSON.stringify({ reason: reason || null }) })
+
+/** Gives the account a temporary password (returned once); they must choose a new one when they log in. */
+export const resetPassword = (id: number) =>
+  request<PasswordResetResult>(`${BASE}/users/${id}/reset-password`, { method: "POST" })
 
 export const unbanUser = (id: number) => request<AdminUser>(`${BASE}/users/${id}/unban`, { method: "POST" })
 

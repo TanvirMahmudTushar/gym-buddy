@@ -4,6 +4,7 @@ import { type ProtectedPage, type Page, canOpen, roleLabel } from "../utils/auth
 
 const LINKS: { page: ProtectedPage; label: string }[] = [
   { page: "dashboard", label: "Dashboard" },
+  { page: "overview", label: "Overview" },
   { page: "members", label: "Members" },
   { page: "classes", label: "Classes" },
   { page: "payments", label: "Payments" },
@@ -11,11 +12,19 @@ const LINKS: { page: ProtectedPage; label: string }[] = [
   { page: "plans", label: "Plans" },
   { page: "membership", label: "My membership" },
   { page: "timetable", label: "Classes" },
+  { page: "my-classes", label: "My classes" },
   { page: "account", label: "My account" },
 ]
 
 // The header shared by every page: the name, the pages this role may open, who is logged in, and Log out.
-export default function AppLayout({ page, children }: { page: Page; children: ReactNode }) {
+interface Props {
+  page: Page
+  children: ReactNode
+  /** Hides the page links, such as while a new password must be chosen. */
+  locked?: boolean
+}
+
+export default function AppLayout({ page, children, locked = false }: Props) {
   const { user, logout } = useAuth()
 
   return (
@@ -27,13 +36,15 @@ export default function AppLayout({ page, children }: { page: Page; children: Re
         </div>
         {user && (
           <>
-            <nav aria-label="Main">
-              {LINKS.filter((l) => canOpen(user.role, l.page)).map((l) => (
-                <a key={l.page} href={`#/${l.page}`} aria-current={page === l.page ? "page" : undefined}>
-                  {l.label}
-                </a>
-              ))}
-            </nav>
+            {!locked && (
+              <nav aria-label="Main">
+                {LINKS.filter((l) => canOpen(user.role, l.page)).map((l) => (
+                  <a key={l.page} href={`#/${l.page}`} aria-current={page === l.page ? "page" : undefined}>
+                    {l.label}
+                  </a>
+                ))}
+              </nav>
+            )}
             <div className="who">
               <span>
                 {user.name} <span className={`pill role-${user.role}`}>{roleLabel(user.role)}</span>

@@ -1,9 +1,10 @@
-# Classes and their bookings: what a gym manager runs (SRS FR-25 to FR-28).
+# Classes and their bookings: what a gym manager runs (SRS FR-25 to FR-28),
+# and the classes a trainer teaches (FR-69 to FR-71).
 from typing import Literal
 
 from sqlalchemy import exists, false
 from sqlalchemy.exc import IntegrityError
-from sqlmodel import Session, col, delete, func, select
+from sqlmodel import Session, col, delete, func, select, update
 
 from app.models import ClassBooking, ClassCreate, GymClass, User, as_utc, utc_now
 from app.services import checkin_service
@@ -33,6 +34,33 @@ class BookingNotFoundError(Exception):
     """This member has no booking for this class."""
 
 
+class TrainerNotFoundError(Exception):
+    """The trainer_id sent is not an account with the Trainer role."""
+
+
+class NotYourClassError(Exception):
+    """A trainer asked for the bookings of a class they do not teach."""
+
+
+# Upcoming: not started yet, soonest first. Past: started, latest first.
+# Shared by a member's bookings and a trainer's classes.
+When = Literal["upcoming", "past"]
+
+# Used with an outer join on the trainer's account: a linked trainer shows their current name, and a class from
+# before trainers were accounts keeps its text name (choosing a trainer clears it, so only one of the two is set).
+_TRAINER_NAME = func.coalesce(col(User.name), col(GymClass.trainer_name))
+_TRAINER_JOIN = col(GymClass.trainer_id) == col(User.id)
+
+
+def _when_filter(when: When):
+    now = utc_now()
+    return col(GymClass.starts_at) >= now if when == "upcoming" else col(GymClass.starts_at) < now
+
+
+def _when_order(when: When):
+    return col(GymClass.starts_at) if when == "upcoming" else col(GymClass.starts_at).desc()
+
+
 def _booked_by(member_id: int | None):
     """True for classes the given member booked; always false when there is no member."""
     if member_id is None:
@@ -55,12 +83,27 @@ def _booked_count():
     )
 
 
-def _read(gym_class: GymClass, booked_count: int, booked_by_me: bool = False) -> dict:
+def _read(gym_class: GymClass, trainer_name: str | None, booked_count: int, booked_by_me: bool = False) -> dict:
     return {
         **gym_class.model_dump(exclude={"created_by"}),
+        "trainer_name": trainer_name,
         "booked_count": booked_count,
         "is_booked_by_me": booked_by_me,
     }
+
+
+def _trainer_name(session: Session, gym_class: GymClass) -> str | None:
+    """The trainer name one class shows; the lists get it from _TRAINER_NAME in the same query instead."""
+    if gym_class.trainer_id is None:
+        return gym_class.trainer_name
+    trainer = session.get(User, gym_class.trainer_id)
+    return trainer.name if trainer else None
+
+
+def _check_trainer(session: Session, trainer_id: int) -> None:
+    trainer = session.get(User, trainer_id)
+    if trainer is None or trainer.role != "trainer":
+        raise TrainerNotFoundError(trainer_id)
 
 
 def _get(session: Session, class_id: int) -> GymClass:
@@ -75,33 +118,51 @@ def _count_bookings(session: Session, class_id: int) -> int:
 
 
 def create_class(session: Session, data: ClassCreate, created_by: User) -> dict:
+    if data.trainer_id is not None:
+        _check_trainer(session, data.trainer_id)
     gym_class = GymClass(**data.model_dump(), created_by=created_by.id)
     session.add(gym_class)
     session.commit()
     session.refresh(gym_class)
-    return _read(gym_class, 0)
+    return _read(gym_class, _trainer_name(session, gym_class), 0)
 
 
 def get_class(session: Session, class_id: int, member_id: int | None = None) -> dict:
     gym_class = _get(session, class_id)
     booked_by_me = member_id is not None and session.get(ClassBooking, (class_id, member_id)) is not None
-    return _read(gym_class, _count_bookings(session, class_id), booked_by_me)
+    return _read(gym_class, _trainer_name(session, gym_class), _count_bookings(session, class_id), booked_by_me)
+
+
+def _page(
+    session: Session, filters: list, order, offset: int, limit: int, member_id: int | None
+) -> tuple[list[dict], int]:
+    """One page of the classes matching the filters, each with its trainer's name and number of bookings."""
+    total = session.exec(select(func.count()).select_from(GymClass).where(*filters)).one()
+    query = (
+        select(GymClass, _TRAINER_NAME, _booked_count(), _booked_by(member_id))
+        .outerjoin(User, _TRAINER_JOIN)
+        .where(*filters)
+        .order_by(order, col(GymClass.id))
+        .offset(offset)
+        .limit(limit)
+    )
+    return [_read(c, trainer, booked, bool(mine)) for c, trainer, booked, mine in session.exec(query).all()], total
 
 
 def list_classes(
     session: Session, upcoming: bool, offset: int, limit: int, member_id: int | None = None
 ) -> tuple[list[dict], int]:
     """Ordered by start time. With upcoming, only classes that have not started yet."""
-    filters = [col(GymClass.starts_at) >= utc_now()] if upcoming else []
-    total = session.exec(select(func.count()).select_from(GymClass).where(*filters)).one()
-    query = (
-        select(GymClass, _booked_count(), _booked_by(member_id))
-        .where(*filters)
-        .order_by(col(GymClass.starts_at), col(GymClass.id))
-        .offset(offset)
-        .limit(limit)
-    )
-    return [_read(c, booked, bool(mine)) for c, booked, mine in session.exec(query).all()], total
+    filters = [_when_filter("upcoming")] if upcoming else []
+    return _page(session, filters, col(GymClass.starts_at), offset, limit, member_id)
+
+
+def list_trainer_classes(
+    session: Session, trainer_id: int, when: When, offset: int, limit: int
+) -> tuple[list[dict], int]:
+    """The classes this trainer teaches: upcoming ones soonest first, or past ones latest first."""
+    filters = [col(GymClass.trainer_id) == trainer_id, _when_filter(when)]
+    return _page(session, filters, _when_order(when), offset, limit, None)
 
 
 def update_class(session: Session, class_id: int, changes: dict) -> dict:
@@ -110,12 +171,27 @@ def update_class(session: Session, class_id: int, changes: dict) -> dict:
     booked = _count_bookings(session, class_id)
     if "capacity" in changes and changes["capacity"] < booked:
         raise CapacityBelowBookingsError(f"Capacity cannot be lower than the {booked} booking(s) already made")
+    if "trainer_id" in changes:
+        if changes["trainer_id"] is not None:
+            _check_trainer(session, changes["trainer_id"])
+        # Choosing a trainer, or none, replaces the old text name.
+        changes = {**changes, "trainer_name": None}
     gym_class.sqlmodel_update(changes)
     gym_class.updated_at = utc_now()
     session.add(gym_class)
     session.commit()
     session.refresh(gym_class)
-    return _read(gym_class, booked)
+    return _read(gym_class, _trainer_name(session, gym_class), booked)
+
+
+def release_trainer(session: Session, trainer: User) -> None:
+    """When someone stops being a trainer, their classes keep their name as text and no longer point at them.
+    The caller commits."""
+    session.exec(
+        update(GymClass)
+        .where(col(GymClass.trainer_id) == trainer.id)
+        .values(trainer_id=None, trainer_name=trainer.name)
+    )
 
 
 def delete_class(session: Session, class_id: int) -> None:
@@ -126,9 +202,12 @@ def delete_class(session: Session, class_id: int) -> None:
     session.commit()
 
 
-def list_bookings(session: Session, class_id: int, offset: int, limit: int) -> tuple[list[dict], int]:
-    """Who booked this class: member name and booking time, in the order they booked."""
-    _get(session, class_id)
+def list_bookings(session: Session, class_id: int, offset: int, limit: int, viewer: User) -> tuple[list[dict], int]:
+    """Who booked this class: member name and booking time, in the order they booked.
+    Staff see every class's bookings; a trainer only those of the classes they teach."""
+    gym_class = _get(session, class_id)
+    if viewer.role == "trainer" and gym_class.trainer_id != viewer.id:
+        raise NotYourClassError(class_id)
     total = _count_bookings(session, class_id)
     query = (
         select(ClassBooking, User.name)
@@ -182,23 +261,18 @@ def book_class(session: Session, class_id: int, member: User) -> dict:
 
 
 def list_member_bookings(
-    session: Session, member_id: int, when: Literal["upcoming", "past"], offset: int, limit: int
+    session: Session, member_id: int, when: When, offset: int, limit: int
 ) -> tuple[list[dict], int]:
     """A member's bookings with their classes: upcoming ones soonest first, or past ones latest first."""
-    now = utc_now()
-    upcoming = when == "upcoming"
-    filters = [
-        col(ClassBooking.member_id) == member_id,
-        col(GymClass.starts_at) >= now if upcoming else col(GymClass.starts_at) < now,
-    ]
+    filters = [col(ClassBooking.member_id) == member_id, _when_filter(when)]
     joined = col(ClassBooking.class_id) == col(GymClass.id)
     total = session.exec(select(func.count()).select_from(ClassBooking).join(GymClass, joined).where(*filters)).one()
-    order = col(GymClass.starts_at) if upcoming else col(GymClass.starts_at).desc()
     rows = session.exec(
-        select(ClassBooking, GymClass)
+        select(ClassBooking, GymClass, _TRAINER_NAME)
         .join(GymClass, joined)
+        .outerjoin(User, _TRAINER_JOIN)
         .where(*filters)
-        .order_by(order, col(GymClass.id))
+        .order_by(_when_order(when), col(GymClass.id))
         .offset(offset)
         .limit(limit)
     ).all()
@@ -208,10 +282,10 @@ def list_member_bookings(
             "class_name": c.name,
             "starts_at": c.starts_at,
             "duration_minutes": c.duration_minutes,
-            "trainer_name": c.trainer_name,
+            "trainer_name": trainer,
             "booked_at": b.booked_at,
         }
-        for b, c in rows
+        for b, c, trainer in rows
     ]
     return items, total
 

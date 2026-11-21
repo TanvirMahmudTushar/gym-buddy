@@ -41,6 +41,8 @@ export default function HomePage() {
   const [checkInKey, setCheckInKey] = useState(0)
   // The account whose email Start membership put in the Add member form; key makes a second click on the same one count.
   const [start, setStart] = useState<{ email: string; key: number } | null>(null)
+  // #/members?show=waiting (from the overview) opens with the waiting list in view.
+  const [showWaiting] = useState(() => hashParams().get("show") === "waiting")
 
   const status = filter === "all" ? null : filter
 
@@ -141,7 +143,7 @@ export default function HomePage() {
           onBulkDeleted={handleBulkDeleted}
         />
         {/* Reloads with the member list: starting a membership moves the person from this list to that one. */}
-        <WaitingList refreshKey={reloadKey} onStart={(email) => setStart((s) => ({ email, key: (s?.key ?? 0) + 1 }))} />
+        <WaitingList refreshKey={reloadKey} scrollOnOpen={showWaiting} onStart={(email) => setStart((s) => ({ email, key: (s?.key ?? 0) + 1 }))} />
         <AddMemberForm onCreated={handleCreated} start={start} />
       </div>
       <aside className="column">

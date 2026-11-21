@@ -54,6 +54,7 @@ _ADDED_COLUMNS = [
     ("app_user", "banned_at", "TIMESTAMP"),
     ("app_user", "ban_reason", "VARCHAR(500)"),
     ("app_user", "password_changed_at", "TIMESTAMP"),
+    ("app_user", "must_change_password", "BOOLEAN NOT NULL DEFAULT FALSE"),
     ("app_user", "failed_login_count", "INTEGER NOT NULL DEFAULT 0"),
     ("app_user", "locked_until", "TIMESTAMP"),
     # The membership now lives on the account (there is no member table any more).
@@ -67,7 +68,12 @@ _ADDED_COLUMNS = [
     ("payment", "voided_at", "TIMESTAMP"),
     ("payment", "void_reason", "VARCHAR(200)"),
     ("payment", "voided_by", "INTEGER REFERENCES app_user (id)"),
+    # A class's trainer is an account with the Trainer role.
+    ("gym_class", "trainer_id", "INTEGER REFERENCES app_user (id) ON DELETE SET NULL"),
 ]
+
+# Indexes on the columns above, which create_all() also leaves out on an existing table (names as SQLModel gives them).
+_ADDED_INDEXES = [("ix_gym_class_trainer_id", "gym_class", "trainer_id")]
 
 # Before members became users, these tables pointed at member.id. They are dropped (data and all) and
 # create_all() makes them again pointing at app_user.id. Dependent tables first, member last.
@@ -94,6 +100,9 @@ def _add_missing_columns() -> None:
         for table, column, definition in _ADDED_COLUMNS:
             if column not in existing[table]:
                 conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {guard}{column} {definition}"))
+        # PostgreSQL and SQLite both accept IF NOT EXISTS here.
+        for index, table, column in _ADDED_INDEXES:
+            conn.execute(text(f"CREATE INDEX IF NOT EXISTS {index} ON {table} ({column})"))
 
 
 def _seed_plan_prices() -> None:

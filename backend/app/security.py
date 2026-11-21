@@ -60,14 +60,17 @@ def _dev_secret() -> str:
 
 def create_access_token(user_id: int) -> str:
     now = utc_now()
-    payload = {"sub": str(user_id), "iat": now, "exp": now + ACCESS_TOKEN_LIFETIME}
+    # iat keeps the fraction of a second (JWT allows a fractional NumericDate), so a password change or reset ends
+    # a login made earlier in the same second while a login made just after it keeps working.
+    payload = {"sub": str(user_id), "iat": now.timestamp(), "exp": now + ACCESS_TOKEN_LIFETIME}
     return jwt.encode(payload, _secret(), algorithm=ALGORITHM)
 
 
-def read_access_token(token: str) -> tuple[int, int]:
-    """Return the user id and the time the token was issued (seconds), or raise InvalidTokenError."""
+def read_access_token(token: str) -> tuple[int, float]:
+    """Return the user id and the time the token was issued (Unix seconds, with the fraction), or raise
+    InvalidTokenError. Older tokens carry whole seconds, which still read correctly."""
     try:
         payload = jwt.decode(token, _secret(), algorithms=[ALGORITHM], options={"require": ["sub", "exp", "iat"]})
-        return int(payload["sub"]), int(payload["iat"])
+        return int(payload["sub"]), float(payload["iat"])
     except (jwt.PyJWTError, ValueError) as exc:
         raise InvalidTokenError from exc

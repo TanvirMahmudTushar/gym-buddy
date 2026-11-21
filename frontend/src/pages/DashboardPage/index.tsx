@@ -1,26 +1,10 @@
 import { useCallback, useEffect, useState } from "react"
 import RevenueCard from "../../components/RevenueCard"
+import Stat from "../../components/Stat"
 import { getRevenue, getStats } from "../../services/adminService"
 import type { AdminStats } from "../../types/auth"
 import type { RevenueStats } from "../../types/payment"
 import { errorText } from "../../utils/member"
-
-interface StatProps {
-  label: string
-  value: number
-  alert?: boolean
-  /** Makes the number a link to the list it counts. */
-  href?: string
-}
-
-function Stat({ label, value, alert = false, href }: StatProps) {
-  return (
-    <div className={alert && value > 0 ? "stat alert" : "stat"}>
-      <dt>{label}</dt>
-      <dd>{href ? <a href={href}>{value}</a> : value}</dd>
-    </div>
-  )
-}
 
 // Admins only: how the gym and the app are being used.
 export default function DashboardPage() {
@@ -100,6 +84,7 @@ export default function DashboardPage() {
             <dl className="stats">
               <Stat label="Total" value={stats.users.total} />
               <Stat label="Users" value={stats.users.users} />
+              <Stat label="Trainers" value={stats.users.trainers} />
               <Stat label="Gym Managers" value={stats.users.gym_managers} />
               <Stat label="Admins" value={stats.users.admins} />
               <Stat label="Banned" value={stats.users.banned} alert />

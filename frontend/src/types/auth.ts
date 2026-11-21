@@ -1,7 +1,7 @@
 // Account types matching the FastAPI schemas (TDD 5.3).
 import type { Plan } from "./member"
 
-export type Role = "user" | "gym_manager" | "admin"
+export type Role = "user" | "trainer" | "gym_manager" | "admin"
 
 export interface User {
   id: number
@@ -9,6 +9,8 @@ export interface User {
   name: string
   role: Role
   created_at: string
+  /** True after an admin reset the password: the app shows only Choose a new password until it is changed. */
+  must_change_password: boolean
 }
 
 export interface LoginResult {
@@ -42,6 +44,12 @@ export interface AccountPage {
   limit: number
 }
 
+/** After an admin resets a password: the account and the temporary password, shown only this once. */
+export interface PasswordResetResult {
+  user: AdminUser
+  temporary_password: string
+}
+
 export interface AdminUserPage {
   items: AdminUser[]
   total: number
@@ -51,7 +59,7 @@ export interface AdminUserPage {
 
 export interface AdminStats {
   members: { total: number; active: number; expired: number; frozen: number; new_last_7_days: number; expiring_soon: number }
-  users: { total: number; users: number; gym_managers: number; admins: number; banned: number }
+  users: { total: number; users: number; trainers: number; gym_managers: number; admins: number; banned: number }
   check_ins: { today: number; last_7_days: number }
   classes: { total: number; upcoming: number }
 }

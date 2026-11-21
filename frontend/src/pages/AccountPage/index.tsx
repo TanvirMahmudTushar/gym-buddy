@@ -2,7 +2,7 @@ import { type FormEvent, useState } from "react"
 import ChangePasswordForm from "../../components/ChangePasswordForm"
 import { useAuth } from "../../context/AuthContext"
 import { renameMe } from "../../services/authService"
-import { ROLES, canOpen, roleLabel } from "../../utils/auth"
+import { ROLES, roleLabel } from "../../utils/auth"
 import { errorText, formatDate } from "../../utils/member"
 
 // Every logged-in person sees this page: their details and their role.
@@ -51,7 +51,7 @@ export default function AccountPage() {
           <dd>{formatDate(user.created_at)}</dd>
         </dl>
         <p className="hint">{description}</p>
-        {!canOpen(user.role, "members") && (
+        {user.role === "user" && (
           <p className="hint">To manage gym members, ask an admin to make you a Gym Manager, then log in again.</p>
         )}
       </section>

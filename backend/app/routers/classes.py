@@ -1,5 +1,6 @@
 # Classes and their bookings under /api/v1/classes (TDD 6.2).
-# Anyone logged in can read classes; only gym managers and admins change them or see the bookings.
+# Anyone logged in can read classes; only gym managers and admins change them. They see every class's bookings,
+# and a trainer sees the bookings of the classes they teach.
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
@@ -12,10 +13,12 @@ from app.services import class_service, member_service
 router = APIRouter(prefix="/api/v1/classes", tags=["classes"])
 
 Staff = Annotated[User, Depends(require_roles("gym_manager", "admin"))]
+BookingViewer = Annotated[User, Depends(require_roles("gym_manager", "admin", "trainer"))]
 
 
 @router.post("", status_code=201, response_model=ClassRead)
 def create_class(body: ClassCreate, session: SessionDep, staff: Staff) -> dict:
+    """trainer_id must be an account with the Trainer role (422 otherwise), or left out for none."""
     return class_service.create_class(session, body, staff)
 
 
@@ -40,7 +43,8 @@ def get_class(class_id: int, session: SessionDep, user: CurrentUser) -> dict:
 
 @router.patch("/{class_id}", response_model=ClassRead)
 def update_class(class_id: int, body: ClassUpdate, session: SessionDep, _staff: Staff) -> dict:
-    """Only the fields sent change. Capacity below the current bookings returns 422."""
+    """Only the fields sent change. Capacity below the current bookings returns 422. Sending trainer_id (a Trainer,
+    or null for none) replaces the trainer and any old text name."""
     return class_service.update_class(session, class_id, body.model_dump(exclude_unset=True))
 
 
@@ -54,11 +58,12 @@ def delete_class(class_id: int, session: SessionDep, _staff: Staff) -> None:
 def list_bookings(
     class_id: int,
     session: SessionDep,
-    _staff: Staff,
+    viewer: BookingViewer,
     offset: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
 ) -> dict:
-    items, total = class_service.list_bookings(session, class_id, offset, limit)
+    """Gym managers and admins: any class. A trainer: only the classes they teach (403 for the rest)."""
+    items, total = class_service.list_bookings(session, class_id, offset, limit, viewer)
     return {"items": items, "total": total, "offset": offset, "limit": limit}
 
 

@@ -3,6 +3,9 @@ export interface GymClass {
   id: number
   name: string
   description: string | null
+  /** The trainer's account; null for no trainer, or for a class that only has an old text name. */
+  trainer_id: number | null
+  /** The trainer's current name, or the old text name on a class from before trainers were accounts. */
   trainer_name: string | null
   starts_at: string
   duration_minutes: number
@@ -25,10 +28,17 @@ export interface ClassPage {
 export interface ClassBody {
   name: string
   description: string | null
-  trainer_name: string | null
+  /** A Trainer's account id, or null for none. Left out on an edit, the trainer (or old text name) stays. */
+  trainer_id?: number | null
   starts_at: string
   duration_minutes: number
   capacity: number
+}
+
+/** An account with the Trainer role, as a choice in the class form. */
+export interface Trainer {
+  id: number
+  name: string
 }
 
 export interface Booking {
@@ -38,7 +48,7 @@ export interface Booking {
   booked_at: string
 }
 
-/** Which of a member's bookings to list: classes still to come, or ones that have started. */
+/** Which of a member's bookings, or a trainer's classes, to list: classes still to come, or ones that have started. */
 export type BookingWhen = "upcoming" | "past"
 
 /** One of a member's bookings, with the class it is for. */

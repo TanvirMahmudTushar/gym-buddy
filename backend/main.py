@@ -7,13 +7,14 @@ from fastapi.responses import JSONResponse
 
 from app.database import create_db_and_tables
 from app.models import utc_now
-from app.routers import admin, auth, check_ins, classes, members, payments, plans, users
+from app.routers import admin, auth, check_ins, classes, members, overview, payments, plans, trainers, users
 from app.services.auth_service import (
     ACCOUNT_BANNED_MESSAGE,
     AccountBannedError,
     AccountLockedError,
     EmailTakenError,
     InvalidCredentialsError,
+    SamePasswordError,
     WrongPasswordError,
 )
 from app.services.checkin_service import MembershipNotValidError
@@ -24,6 +25,8 @@ from app.services.class_service import (
     ClassFullError,
     ClassNotFoundError,
     ClassStartedError,
+    NotYourClassError,
+    TrainerNotFoundError,
 )
 from app.services.member_service import (
     AccountNotFoundError,
@@ -34,7 +37,12 @@ from app.services.member_service import (
     NoMembershipError,
 )
 from app.services.payment_service import PaymentNotFoundError
-from app.services.user_service import CannotBanError, CannotChangeOwnRoleError, UserNotFoundError
+from app.services.user_service import (
+    CannotBanError,
+    CannotChangeOwnRoleError,
+    CannotResetPasswordError,
+    UserNotFoundError,
+)
 
 logger = logging.getLogger("gym_buddy")
 
@@ -54,6 +62,8 @@ app.include_router(check_ins.router)
 app.include_router(classes.router)
 app.include_router(plans.router)
 app.include_router(payments.router)
+app.include_router(overview.router)
+app.include_router(trainers.router)
 
 # Run at import (not in a lifespan hook) so it also works on Vercel's serverless functions.
 create_db_and_tables()
@@ -103,10 +113,13 @@ _plain_error(AccountNotFoundError, 422, "No account has that email. Ask the pers
 _plain_error(AlreadyMemberError, 409, "That account already has a membership")
 _plain_error(NoMembershipError, 404, "You do not have a membership yet")
 _plain_error(WrongPasswordError, 400, "Current password is wrong")
+_plain_error(SamePasswordError, 400, "Choose a password different from your current one")
 _plain_error(ClassStartedError, 400, "This class has already started")
 _plain_error(ClassFullError, 409, "This class is full")
 _plain_error(AlreadyBookedError, 409, "You have already booked this class")
 _plain_error(BookingNotFoundError, 404, "You have not booked this class")
+_plain_error(TrainerNotFoundError, 422, "trainer_id: pick an account with the Trainer role")
+_plain_error(NotYourClassError, 403, "You can only see the bookings of the classes you teach")
 _plain_error(PaymentNotFoundError, 404, "Payment not found")
 
 
@@ -139,6 +152,11 @@ async def account_locked(request: Request, exc: AccountLockedError) -> JSONRespo
 @app.exception_handler(AccountBannedError)
 async def account_banned(request: Request, exc: AccountBannedError) -> JSONResponse:
     return JSONResponse(status_code=403, content={"detail": ACCOUNT_BANNED_MESSAGE})
+
+
+@app.exception_handler(CannotResetPasswordError)
+async def cannot_reset_password(request: Request, exc: CannotResetPasswordError) -> JSONResponse:
+    return JSONResponse(status_code=400, content={"detail": str(exc)})
 
 
 @app.exception_handler(CannotBanError)
