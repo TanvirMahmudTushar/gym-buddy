@@ -2,6 +2,7 @@ import { useEffect, useState } from "react"
 import { cancelMemberBooking, deleteMember, getMember, listMemberBookings, updateMember } from "../services/memberService"
 import type { Member, MemberUpdate } from "../types/member"
 import { errorText, formatDate, memberStatus, planLabel } from "../utils/member"
+import { birthDateText, emergencyContactText } from "../utils/profile"
 import BookingsSection from "./BookingsSection"
 import CheckInSection from "./CheckInSection"
 import EditMemberForm from "./EditMemberForm"
@@ -152,6 +153,10 @@ export default function MemberDetail({ memberId, onChanged, onDeleted, onChecked
         <dd>{member.email}</dd>
         <dt>Phone</dt>
         <dd>{member.phone || "Not provided"}</dd>
+        <dt>Date of birth</dt>
+        <dd>{member.date_of_birth ? birthDateText(member.date_of_birth) : "Not provided"}</dd>
+        <dt>Emergency contact</dt>
+        <dd className="wrap-text">{emergencyContactText(member) ?? "Not provided"}</dd>
         <dt>Plan</dt>
         <dd>{planLabel(member.plan)}</dd>
         <dt>Joined</dt>

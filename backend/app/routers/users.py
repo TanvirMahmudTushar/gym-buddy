@@ -11,11 +11,21 @@ from app.models import (
     MemberRead,
     PasswordChange,
     PaymentPage,
+    ProfileRead,
+    ProfileUpdate,
     User,
     UserNameUpdate,
     UserRead,
 )
-from app.services import auth_service, checkin_service, class_service, member_service, payment_service, user_service
+from app.services import (
+    auth_service,
+    checkin_service,
+    class_service,
+    member_service,
+    payment_service,
+    profile_service,
+    user_service,
+)
 
 router = APIRouter(prefix="/api/v1/users", tags=["users"])
 
@@ -30,6 +40,20 @@ def get_me(user: LoggedInUser) -> User:
 def update_me(body: UserNameUpdate, user: CurrentUser, session: SessionDep) -> User:
     """Only the name can be changed here; email and role cannot."""
     return user_service.rename_user(session, user, body.name)
+
+
+@router.get("/me/profile", response_model=ProfileRead)
+def get_my_profile(user: CurrentUser) -> User:
+    """My phone, date of birth and emergency contact. Only I and gym staff (through the member endpoints) can read
+    them; there is no way to ask for anyone else's here."""
+    return user
+
+
+@router.patch("/me/profile", response_model=ProfileRead)
+def update_my_profile(body: ProfileUpdate, user: CurrentUser, session: SessionDep) -> User:
+    """Only the fields sent change; null or blank text clears one. date_of_birth must be between 1900-01-01 and
+    today, and the emergency contact needs both a name and a phone, or neither (422 otherwise)."""
+    return profile_service.update_profile(session, user, body.model_dump(exclude_unset=True))
 
 
 @router.get("/me/membership", response_model=MemberRead)

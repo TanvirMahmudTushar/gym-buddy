@@ -43,6 +43,7 @@ This document lists the requirements for Gym Buddy: the MVP (gym member CRUD RES
 | Class | (Beta) A scheduled workout session with a name, start time, duration, capacity and an optional trainer |
 | Trainer | (Beta) An account with the role `trainer` who teaches classes; a class's `trainer_id` points at one. Classes from before trainers were accounts keep a free-text `trainer_name` |
 | Booking | (Beta) A member's reserved spot in a class |
+| Emergency contact | (Beta) The person to call if something happens to a member at the gym: a name and a phone, kept on the member's account |
 | Announcement | (Beta) News from the gym (a title, a message and an optional end date) that gym managers and admins post and every logged-in user reads until its end date |
 | Check-in | (Beta) A record that a member arrived at the gym, entered by staff |
 | RBAC | Role-Based Access Control: what a caller can do depends on their role |
@@ -334,6 +335,19 @@ Story US-27: as a gym manager, I want to post holiday hours, new classes and oth
 | FR-74 | A gym manager or admin shall be able to list every announcement including ended ones (`include_ended=true`; other roles `403`), edit one (only the fields sent change; `ends_on: null` removes the end date; a new `ends_on` before today is `422`) and delete one (`404` for an unknown id). An edit keeps the poster and `posted_at` and sets `updated_at`. | Beta | US-27 |
 | FR-75 | Members shall see the current announcements on My membership (the card is hidden when there are none), and gym managers and admins on the Overview, which links to the Announcements page. Deleting the account that posted an announcement keeps the announcement, without a poster name. | Beta | US-27 |
 
+### 3.7h Member profile details — Beta
+
+Story US-28: as a member, I want to keep my phone, date of birth and emergency contact up to date myself, so the gym can reach me, or someone close to me, when it matters.
+
+| ID | Requirement | Release | Story |
+|---|---|---|---|
+| FR-76 | Every account shall hold, next to `phone`, an optional `date_of_birth` (from 1900-01-01 to today, UTC) and an optional emergency contact: `emergency_contact_name` (up to 100 characters) and `emergency_contact_phone` (up to 20), set or cleared together (`422` otherwise). Text is trimmed, and blank text counts as not given. | Beta | US-28 |
+| FR-77 | A logged-in user of any role shall be able to read their own phone, date of birth and emergency contact (`GET /users/me/profile`) and change them (`PATCH`, only the fields sent) on My account. | Beta | US-28 |
+| FR-78 | A gym manager or admin shall see a member's date of birth (with their age) and emergency contact in the member details, and edit them through `PATCH /members/{id}` with the FR-76 rules. Starting a membership without a phone keeps a phone the person already saved. | Beta | US-28, US-13 |
+| FR-79 | Only the person themself, gym managers and admins shall be able to read these details (NFR-20). They are not part of `/users/me`, the login response, the waiting list or the admin user list, and a user or trainer gets `403` on every member endpoint. | Beta | US-28 |
+
+> **Built so far (profile details):** FR-76 to FR-79. Photos and health records are out of scope.
+
 > **Built so far (announcements):** FR-72 to FR-75. Email and push notifications are out of scope. Trainers can read the current announcements through the API but have no page showing them yet.
 
 > **Built so far (trainers):** FR-67 to FR-71. The class form picks the trainer from a list, offering an old class's text name until it is replaced; the admin dashboard also counts trainers.
@@ -376,6 +390,9 @@ Story US-27: as a gym manager, I want to post holiday hours, new classes and oth
 | `capacity` | Integer 1–200 | Beta |
 | `title` (announcement) | 1–100 characters after trimming | Beta |
 | `message` (announcement) | 1–1,000 characters after trimming; line breaks are kept | Beta |
+| `date_of_birth` | Optional date in `YYYY-MM-DD` format, from 1900-01-01 to today (UTC) | Beta |
+| `emergency_contact_name` | Optional, max 100 characters after trimming; given together with `emergency_contact_phone` or not at all | Beta |
+| `emergency_contact_phone` | Optional, max 20 characters after trimming; given together with `emergency_contact_name` or not at all | Beta |
 | `ends_on` (announcement) | Optional date in `YYYY-MM-DD` format, not before today (UTC); `null` on edit removes it | Beta |
 
 ### 3.10 Membership states
@@ -421,6 +438,8 @@ A new member always starts as `Active` if `expires_on` is today or later. "Expir
 | View own payments | No | Yes | Yes | Yes | Yes |
 | Record payments, list a member's payments and all payments | No | No (`403`) | No (`403`) | Yes | Yes |
 | Void a payment, export payments as CSV | No | No (`403`) | No (`403`) | No (`403`) | Yes |
+| View and edit own phone, date of birth and emergency contact | No | Yes | Yes | Yes | Yes |
+| View and edit a member's date of birth and emergency contact | No | No (`403`) | No (`403`) | Yes | Yes |
 | Read the current announcements | No | Yes | Yes | Yes | Yes |
 | Post, edit, delete announcements; list ended ones | No | No (`403`) | No (`403`) | Yes | Yes |
 
@@ -465,7 +484,7 @@ Every endpoint except sign up, log in, refresh, health and the docs returns `401
 | NFR-17 | Security | Every permission check runs on the server for every request; the frontend hiding a button is never the only protection. | Beta |
 | NFR-18 | Performance | Sign up and login answer in under 1 s (password hashing is slow on purpose). | Beta |
 | NFR-19 | Maintainability | Database schema changes are made through Alembic migrations, not by hand. | Beta |
-| NFR-20 | Privacy | Member phone numbers and notes are returned only to admins and to the member themself. | Beta |
+| NFR-20 | Privacy | Member phone numbers, dates of birth, emergency contacts and notes are returned only to gym staff (gym managers and admins) and to the member themself. | Beta |
 | NFR-21 | Consistency | Booking a class checks capacity and inserts the booking in one database transaction, so a class is never over capacity and a member never books the same class twice. | Beta |
 
 > **Built so far (security):** NFR-11, NFR-15, NFR-16 (headers set for every response in `vercel.json`), NFR-17, NFR-20 and NFR-21. Access tokens last 8 hours and there are no refresh tokens yet (NFR-12 to NFR-14). Schema changes are applied on start by `create_db_and_tables()` rather than Alembic (NFR-19). Production is deployed with `vercel --prod`; the project is not connected to GitHub, so a push to `main` does not deploy by itself (NFR-10).
@@ -691,6 +710,13 @@ Every endpoint except sign up, log in, refresh, health and the docs returns `401
 - `PATCH` with only a new `title` succeeds on the ended announcement and sets `updated_at`; `ends_on: null` makes it current again; `DELETE` is `204`, then `404`.
 - After the poster's account is deleted, the announcement is still listed with `posted_by_name = null`.
 
+**AC-41 Profile details (FR-76 – FR-79)**
+- Given members A and B, and a gym manager
+- When A sends `PATCH /api/v1/users/me/profile` `{"date_of_birth": "1995-04-12", "emergency_contact_name": "Rina", "emergency_contact_phone": "01811000000"}`, the response is `200`, and the gym manager's `GET /api/v1/members/{A}` shows the same three values.
+- A's `date_of_birth` in the future or before 1900 is `422`; an emergency contact with only a name, or clearing only one of the two, is `422` and the saved contact stays.
+- When the gym manager sends `PATCH /api/v1/members/{A}` with a new `emergency_contact_phone`, A's `GET /api/v1/users/me/profile` shows it.
+- B's `GET /api/v1/members/{A}` is `403`, B's `GET /api/v1/users/me/profile` shows only B's own details, and A's `GET /api/v1/users/me` has none of them.
+
 ## 6. Traceability
 
 | Story | Requirements | Endpoint (see [TDD, section 6](03-tdd.md#6-rest-api-design)) | Release |
@@ -718,6 +744,7 @@ Every endpoint except sign up, log in, refresh, health and the docs returns `401
 | US-22 | FR-38 | `POST /api/v1/admin/users/{id}/unban` | Beta |
 | US-23, US-24 | FR-16, FR-40, FR-41 | `GET` / `PATCH /api/v1/users/me`, `POST /api/v1/users/me/password` | Beta |
 | US-12, US-14, US-15, US-17 | FR-67 – FR-71 | `GET /api/v1/trainers`, `GET /api/v1/trainers/me/classes`, `POST` / `PATCH /api/v1/classes`, `GET /api/v1/classes/{id}/bookings`, `PATCH /api/v1/admin/users/{id}/role` | Beta |
+| US-28 | FR-76 – FR-79, NFR-20 | `GET` / `PATCH /api/v1/users/me/profile`, `GET` / `PATCH /api/v1/members/{id}`, `POST /api/v1/members` | Beta |
 | US-27 | FR-72 – FR-75 | `GET` / `POST /api/v1/announcements`, `PATCH` / `DELETE /api/v1/announcements/{id}` | Beta |
 | US-24 | FR-64 – FR-66 | `POST /api/v1/admin/users/{id}/reset-password`, `POST /api/v1/users/me/password` | Beta |
 | US-20 | FR-62, FR-63 | `GET /api/v1/overview` | Beta |

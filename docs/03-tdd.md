@@ -146,6 +146,7 @@ backend/
       class_service.py   # classes and bookings: create, list, edit, delete, who booked, a trainer's own classes; raises ClassNotFoundError / CapacityBelowBookingsError / TrainerNotFoundError / NotYourClassError
       checkin_service.py # record a check-in (membership must be valid), history, today's list; raises MembershipNotValidError
       search.py          # contains_any(): the any-case text search shared by the member, waiting and user lists
+      profile_service.py # phone, date of birth and emergency contact: update my own, and the both-or-neither contact check member_service also uses; raises IncompleteEmergencyContactError
       announcement_service.py # post, list (current or all, newest first, with the poster's name), edit, delete; raises AnnouncementNotFoundError
   alembic/             # (Beta) migration scripts
   alembic.ini          # (Beta)
@@ -223,7 +224,13 @@ erDiagram
 | `is_banned` | boolean | Default `false` |
 | `banned_at` | timestamp (UTC) | Nullable |
 | `ban_reason` | varchar(500) | Nullable |
+| `phone` | varchar(20) | Nullable |
+| `date_of_birth` | date | Nullable; 1900-01-01 to today when sent. Added to an existing table on start |
+| `emergency_contact_name` | varchar(100) | Nullable; set or cleared together with `emergency_contact_phone`. Added to an existing table on start |
+| `emergency_contact_phone` | varchar(20) | Nullable; set or cleared together with `emergency_contact_name`. Added to an existing table on start |
 | `created_at`, `updated_at` | timestamp (UTC) | Not null |
+
+`phone`, `date_of_birth` and the emergency contact are read only through `MemberRead` (member endpoints: gym managers and admins; `/users/me/membership`: the member) and `ProfileRead` (`/users/me/profile`: the person), never through `UserRead`, so they stay out of the login response and every account list (NFR-20).
 
 **`refresh_token`**
 
@@ -348,6 +355,10 @@ erDiagram
         bool is_banned
         datetime banned_at
         string ban_reason
+        string phone
+        date date_of_birth
+        string emergency_contact_name
+        string emergency_contact_phone
     }
     REFRESH_TOKEN {
         int id PK
@@ -409,8 +420,8 @@ erDiagram
 | Schema | Used for | Fields | Release |
 |---|---|---|---|
 | `MemberCreate` | `POST` member body | `full_name`, `phone?`, `plan`, `joined_on?`, `expires_on`, `notes?` | MVP |
-| `MemberUpdate` | `PATCH` member body | all optional: `full_name`, `phone`, `plan`, `expires_on`, `is_active`, `notes` | MVP |
-| `MemberRead` | Member responses | all member columns (+ `user_id` in Beta) | MVP |
+| `MemberUpdate` | `PATCH` member body | all optional: `full_name`, `phone`, `plan`, `expires_on`, `is_active`, `notes`; (Beta) extends `ProfileUpdate`, so staff also send `date_of_birth` and the emergency contact | MVP |
+| `MemberRead` | Member responses | all member columns (+ `user_id` in Beta; `date_of_birth`, `emergency_contact_name`, `emergency_contact_phone` with the profile details) | MVP |
 | `MemberPage` | Member list response | `items` (`MemberRead[]`), `total` (all members matching the filter), `offset`, `limit` | MVP |
 | `MemberBulkDelete` | Bulk delete body | `ids` (1 to 100 member IDs) | MVP |
 | `MemberBulkDeleteResult` | Bulk delete response | `deleted` (how many members were deleted) | MVP |
@@ -421,6 +432,7 @@ erDiagram
 | `RoleUpdate` | Change role | `role` | Beta |
 | `ProfileUpdate` | Change own name | `name` | Beta |
 | `PasswordChange` | Change own password | `current_password`, `new_password` | Beta |
+| `ProfileRead` / `ProfileUpdate` | My contact details | `phone`, `date_of_birth` (1900-01-01 to today), `emergency_contact_name` (≤ 100), `emergency_contact_phone` (≤ 20); on update all optional, blank text becomes null, and the service checks the contact is both-or-neither against the saved values | Beta |
 | `AdminUserRead` | Admin user list | `UserRead` + `is_banned`, `banned_at`, `ban_reason`, `plan?`, `expires_on?`, `is_frozen` | Beta |
 | `AccountPage` | Accounts waiting for a membership | `items: UserRead[]`, `total`, `offset`, `limit` | Beta |
 | `BanRequest` | Ban a user | `reason?` | Beta |
@@ -519,6 +531,8 @@ In the MVP no login is needed. In the Beta the member endpoints become admin-onl
 | `PATCH` | `/api/v1/users/me` | Member | `ProfileUpdate` | `200` `UserRead` | `422` | FR-40 |
 | `POST` | `/api/v1/users/me/password` | Any logged-in user, also while a new password is due | `PasswordChange` | `204` (tokens issued before the change stop working; clears `must_change_password`) | `400` (wrong current password or same password), `401`, `422` | FR-41, FR-66 |
 | `GET` | `/api/v1/users/lookup?email` or `?id` | Gym Manager, Admin | — | `200` `AccountLookup` (`id`, `name`, `email`) | `403`, `404`, `422` | FR-23 |
+| `GET` | `/api/v1/users/me/profile` | Any logged-in user | — | `200` `ProfileRead` (my own only) | `401` | FR-77 |
+| `PATCH` | `/api/v1/users/me/profile` | Any logged-in user | `ProfileUpdate` | `200` `ProfileRead` | `401`, `422` (date of birth out of range, too long, emergency contact with only a name or a phone) | FR-76, FR-77 |
 | `GET` | `/api/v1/users/me/membership` | Any logged-in user | — | `200` `MemberRead` | `401`, `404` (no membership linked) | FR-17 |
 | `GET` | `/api/v1/users/me/check-ins?offset&limit` | Any logged-in user | — | `200` `CheckInPage` (newest first) | `401`, `404` | FR-18 |
 
@@ -796,6 +810,7 @@ Row-level rules that depend on the data are checked inside the route:
 - Login and refresh also reject banned users with `403`.
 - Change password: verify `current_password` (`400` if wrong), hash `new_password`, revoke all the user's refresh tokens; the client then logs in again.
 - **Built so far (trainers):** `class_service` checks that a sent `trainer_id` is an account with the role `trainer` (`TrainerNotFoundError` → `422`) and clears the old `trainer_name`; lists outer-join the trainer's account and select `coalesce(app_user.name, gym_class.trainer_name)`, so a renamed trainer shows everywhere. `user_service.change_role()` calls `class_service.release_trainer()` when an account stops being a trainer, in the same commit.
+- **Built so far (profile details):** `profile_service.check_emergency_contact()` merges the sent fields with the saved ones before checking, so sending only a new contact phone works, and a refused change leaves the saved contact alone (`IncompleteEmergencyContactError` → `422`). `PATCH /users/me/profile` and `member_service.update_member()` both call it. `start_membership()` keeps a saved phone when the Add member form leaves it empty.
 - **Built so far (announcements):** `announcement_service` filters current ones with `or_(ends_on IS NULL, ends_on >= utc_today())` and outer-joins `app_user` for the poster's name, so an announcement whose poster's account is gone is still listed. An `ends_on` before today is refused by the schemas' validator (`422`); an edit that leaves `ends_on` out keeps an ended announcement's date, so its text can still be corrected. `member_service._delete_accounts()` sets `posted_by` to null before deleting an account.
 - **Built so far (password reset):** `get_logged_in_user` checks the token, the password change time and the ban; `get_current_user` (used by every route and by `require_roles`) also returns `403 Choose a new password first` while `must_change_password` is set. Only `GET /users/me` and `POST /users/me/password` take `LoggedInUser` instead, so a reset account can see who it is and choose a password. Tokens carry `iat` with the fraction of a second and are refused when `iat < password_changed_at`.
 

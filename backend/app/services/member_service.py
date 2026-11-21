@@ -6,6 +6,7 @@ from typing import Literal
 from sqlmodel import Session, col, delete, func, select, update
 
 from app.models import Announcement, CheckIn, ClassBooking, GymClass, MemberCreate, Payment, User, utc_today
+from app.services import profile_service
 from app.services.search import contains_any
 
 # expiring_soon is a part of active: memberships that end today or within the next EXPIRING_SOON_DAYS days.
@@ -62,7 +63,9 @@ def start_membership(session: Session, data: MemberCreate) -> User:
     user.joined_on = data.joined_on or utc_today()
     user.expires_on = data.expires_on
     user.is_frozen = False
-    user.phone = data.phone
+    # The person may have saved a phone on My account already; leaving it empty here keeps that one.
+    if data.phone:
+        user.phone = data.phone
     user.notes = data.notes
     session.add(user)
     session.commit()
@@ -130,10 +133,12 @@ def list_waiting(session: Session, offset: int, limit: int, q: str | None = None
 
 
 def update_member(session: Session, member_id: int, changes: dict) -> User:
-    """Apply only the given fields. A later expires_on renews; is_frozen true / false freezes / unfreezes."""
+    """Apply only the given fields. A later expires_on renews; is_frozen true / false freezes / unfreezes.
+    The contact and safety details follow the same rules as the member's own edits (profile_service)."""
     member = get_member(session, member_id)
     if "expires_on" in changes and changes["expires_on"] < member.joined_on:
         raise InvalidExpiryError("expires_on must be on or after joined_on")
+    profile_service.check_emergency_contact(member, changes)
     member.sqlmodel_update(changes)
     session.add(member)
     session.commit()

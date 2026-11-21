@@ -1,15 +1,17 @@
 // Member types matching the FastAPI schemas (TDD 5.3). A member is a user whose account has a membership.
+import type { Profile } from "./profile"
+
 export type Plan = "monthly" | "quarterly" | "yearly"
 export type MemberStatus = "active" | "expired" | "frozen"
 /** A member list filter: a status, or active memberships ending today or within the next 7 days. */
 export type MemberFilter = MemberStatus | "expiring_soon"
 
-export interface Member {
+/** The account's details and membership, plus its phone, date of birth and emergency contact (from Profile). */
+export interface Member extends Profile {
   /** The user's id: members and users are the same accounts. */
   id: number
   name: string
   email: string
-  phone: string | null
   plan: Plan
   joined_on: string
   expires_on: string
@@ -33,8 +35,8 @@ export interface MemberCreate {
   notes: string | null
 }
 
-/** PATCH body: only the fields sent change. */
-export type MemberUpdate = Partial<Pick<Member, "name" | "phone" | "plan" | "expires_on" | "is_frozen" | "notes">>
+/** PATCH body: only the fields sent change. Staff edit the contact and safety details here too. */
+export type MemberUpdate = Partial<Pick<Member, "name" | "plan" | "expires_on" | "is_frozen" | "notes"> & Profile>
 
 export interface MemberBulkDeleteResult {
   deleted: number

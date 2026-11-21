@@ -64,6 +64,10 @@ _ADDED_COLUMNS = [
     ("app_user", "is_frozen", "BOOLEAN NOT NULL DEFAULT FALSE"),
     ("app_user", "phone", "VARCHAR(20)"),
     ("app_user", "notes", "VARCHAR(500)"),
+    # Contact and safety details.
+    ("app_user", "date_of_birth", "DATE"),
+    ("app_user", "emergency_contact_name", "VARCHAR(100)"),
+    ("app_user", "emergency_contact_phone", "VARCHAR(20)"),
     # Voiding a mistaken payment.
     ("payment", "voided_at", "TIMESTAMP"),
     ("payment", "void_reason", "VARCHAR(200)"),
