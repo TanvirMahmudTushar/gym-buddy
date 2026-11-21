@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import AnnouncementsCard from "../../components/AnnouncementsCard"
 import BookingsSection from "../../components/BookingsSection"
 import MyPayments from "../../components/MyPayments"
 import PlansCard from "../../components/PlansCard"
@@ -72,14 +73,17 @@ export default function MembershipPage() {
 
   if (noMembership)
     return (
-      <section className="card narrow-card" aria-labelledby="membership-heading">
-        <h2 id="membership-heading">My membership</h2>
-        <p>You do not have a gym membership yet.</p>
-        <p className="hint">
-          Ask the front desk to start one for {user ? <strong>{user.email}</strong> : "your account"}, then come back to
-          this page.
-        </p>
-      </section>
+      <div className="column narrow">
+        <section className="card narrow-card" aria-labelledby="membership-heading">
+          <h2 id="membership-heading">My membership</h2>
+          <p>You do not have a gym membership yet.</p>
+          <p className="hint">
+            Ask the front desk to start one for {user ? <strong>{user.email}</strong> : "your account"}, then come back to
+            this page.
+          </p>
+        </section>
+        <AnnouncementsCard hideWhenEmpty />
+      </div>
     )
 
   if (error || !member)
@@ -117,6 +121,7 @@ export default function MembershipPage() {
         {status === "expired" && <p className="hint">Your membership has expired. Renew it at the front desk to book classes; the prices are below.</p>}
         {status === "frozen" && <p className="hint">Your membership is frozen. Ask the front desk to unfreeze it to book classes.</p>}
       </section>
+      <AnnouncementsCard hideWhenEmpty />
       <section className="card" aria-labelledby="visits-heading">
         <h2 id="visits-heading">My visits {total > 0 && <span className="hint">({total})</span>}</h2>
         {visits.length === 0 ? (

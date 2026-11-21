@@ -17,6 +17,7 @@ export type ProtectedPage =
   | "members"
   | "classes"
   | "payments"
+  | "announcements"
   | "membership"
   | "timetable"
   | "my-classes"
@@ -31,6 +32,7 @@ const ALLOWED: Record<ProtectedPage, Role[]> = {
   members: ["gym_manager", "admin"],
   classes: ["gym_manager", "admin"],
   payments: ["gym_manager", "admin"],
+  announcements: ["gym_manager", "admin"],
   membership: ["user"],
   timetable: ["user"],
   "my-classes": ["trainer"],

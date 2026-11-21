@@ -5,7 +5,7 @@ from typing import Literal
 
 from sqlmodel import Session, col, delete, func, select, update
 
-from app.models import CheckIn, ClassBooking, GymClass, MemberCreate, Payment, User, utc_today
+from app.models import Announcement, CheckIn, ClassBooking, GymClass, MemberCreate, Payment, User, utc_today
 from app.services.search import contains_any
 
 # expiring_soon is a part of active: memberships that end today or within the next EXPIRING_SOON_DAYS days.
@@ -154,11 +154,13 @@ def _delete_accounts(session: Session, ids: list[int]) -> int:
     session.exec(delete(ClassBooking).where(col(ClassBooking.member_id).in_(ids)))
     # Payments are kept (the revenue is real), only detached from the deleted member.
     session.exec(update(Payment).where(col(Payment.member_id).in_(ids)).values(member_id=None))
-    # Someone demoted from staff may have recorded check-ins or payments or created classes; those stay, unattributed.
+    # Someone demoted from staff may have recorded check-ins or payments, created classes or posted announcements;
+    # those stay, unattributed.
     session.exec(update(CheckIn).where(col(CheckIn.recorded_by).in_(ids)).values(recorded_by=None))
     session.exec(update(Payment).where(col(Payment.recorded_by).in_(ids)).values(recorded_by=None))
     session.exec(update(Payment).where(col(Payment.voided_by).in_(ids)).values(voided_by=None))
     session.exec(update(GymClass).where(col(GymClass.created_by).in_(ids)).values(created_by=None))
+    session.exec(update(Announcement).where(col(Announcement.posted_by).in_(ids)).values(posted_by=None))
     return session.exec(delete(User).where(col(User.id).in_(ids))).rowcount
 
 

@@ -7,7 +7,8 @@ from fastapi.responses import JSONResponse
 
 from app.database import create_db_and_tables
 from app.models import utc_now
-from app.routers import admin, auth, check_ins, classes, members, overview, payments, plans, trainers, users
+from app.routers import admin, announcements, auth, check_ins, classes, members, overview, payments, plans, trainers, users
+from app.services.announcement_service import AnnouncementNotFoundError
 from app.services.auth_service import (
     ACCOUNT_BANNED_MESSAGE,
     AccountBannedError,
@@ -64,6 +65,7 @@ app.include_router(plans.router)
 app.include_router(payments.router)
 app.include_router(overview.router)
 app.include_router(trainers.router)
+app.include_router(announcements.router)
 
 # Run at import (not in a lifespan hook) so it also works on Vercel's serverless functions.
 create_db_and_tables()
@@ -121,6 +123,7 @@ _plain_error(BookingNotFoundError, 404, "You have not booked this class")
 _plain_error(TrainerNotFoundError, 422, "trainer_id: pick an account with the Trainer role")
 _plain_error(NotYourClassError, 403, "You can only see the bookings of the classes you teach")
 _plain_error(PaymentNotFoundError, 404, "Payment not found")
+_plain_error(AnnouncementNotFoundError, 404, "Announcement not found")
 
 
 @app.exception_handler(EmailTakenError)

@@ -133,6 +133,7 @@ backend/
       payments.py      # /api/v1/payments (list: gym manager, admin; void and CSV export: admin)
       overview.py      # /api/v1/overview (gym manager, admin)
       trainers.py      # /api/v1/trainers (list: gym manager, admin) and /trainers/me/classes (trainer)
+      announcements.py # /api/v1/announcements (read the current ones: anyone logged in; post, edit, delete and ended ones: gym manager, admin)
       classes.py       # (Beta) /api/v1/classes/* (classes and bookings)
     services/
       __init__.py
@@ -145,6 +146,7 @@ backend/
       class_service.py   # classes and bookings: create, list, edit, delete, who booked, a trainer's own classes; raises ClassNotFoundError / CapacityBelowBookingsError / TrainerNotFoundError / NotYourClassError
       checkin_service.py # record a check-in (membership must be valid), history, today's list; raises MembershipNotValidError
       search.py          # contains_any(): the any-case text search shared by the member, waiting and user lists
+      announcement_service.py # post, list (current or all, newest first, with the poster's name), edit, delete; raises AnnouncementNotFoundError
   alembic/             # (Beta) migration scripts
   alembic.ini          # (Beta)
   requirements.txt
@@ -154,7 +156,7 @@ frontend/
     components/        # add form, member list, details panel
     context/           # AuthContext: who is logged in, login / signup / logout
     layouts/           # AppLayout: header, and the pages each role may open
-    pages/             # HomePage (members), LoginPage, SignupPage, AccountPage, DashboardPage (admin), OverviewPage (gym manager, admin), UsersPage (admin), ClassesPage (gym manager, admin), PaymentsPage (gym manager, admin), MembershipPage and TimetablePage (user), MyClassesPage (trainer), PlansPage (admin); (Later) AboutPage, MemberDetailsPage; (Beta, Could) MyMembership, Classes, AdminDashboard
+    pages/             # HomePage (members), LoginPage, SignupPage, AccountPage, DashboardPage (admin), OverviewPage (gym manager, admin), UsersPage (admin), ClassesPage (gym manager, admin), PaymentsPage (gym manager, admin), MembershipPage and TimetablePage (user), MyClassesPage (trainer), PlansPage (admin), AnnouncementsPage (gym manager, admin); (Later) AboutPage, MemberDetailsPage; (Beta, Could) MyMembership, Classes, AdminDashboard
     services/          # fetch calls to the API
     types/             # TypeScript types
     utils/             # display helpers; membersLink() builds the #/members?filter=&member= address
@@ -307,7 +309,23 @@ Voiding is a conditional `UPDATE ... WHERE voided_at IS NULL`, so voiding twice 
 | `checked_in_at` | timestamp (UTC) | Not null |
 | `recorded_by` | integer | FK → `app_user.id`: the gym manager or admin who recorded it |
 
-Indexes: `member(user_id)`, `class_booking(member_id)`, `check_in(member_id, checked_in_at)`, `gym_class(starts_at)`, `gym_class(trainer_id)`, `refresh_token(user_id)`.
+**`announcement`**
+
+> Built so far: all columns and the `posted_at` index. A new table, so `create_all()` makes it on start and nothing is added to an existing table.
+
+| Column | Type | Rules |
+|---|---|---|
+| `id` | integer | Primary key |
+| `title` | varchar(100) | Not null, 1–100 characters after trimming |
+| `message` | varchar(1000) | Not null, 1–1,000 characters after trimming; line breaks are kept |
+| `ends_on` | date | Nullable: the last UTC day it shows, inclusive (like `expires_on`). `null` = shows until deleted. Not before today when sent |
+| `posted_by` | integer | FK → `app_user.id`, nullable, on delete set null (the service sets it to null before deleting an account, since SQLite does not enforce it) |
+| `posted_at` | timestamp (UTC) | Not null, indexed (`ix_announcement_posted_at`): the lists are newest first |
+| `updated_at` | timestamp (UTC) | Nullable: set on every edit, `null` until then |
+
+"Current" is worked out from the date on every read (`ends_on IS NULL OR ends_on >= today`), like an expired membership, so nothing has to run when an announcement ends.
+
+Indexes: `member(user_id)`, `class_booking(member_id)`, `check_in(member_id, checked_in_at)`, `gym_class(starts_at)`, `gym_class(trainer_id)`, `announcement(posted_at)`, `refresh_token(user_id)`.
 
 ```mermaid
 erDiagram
@@ -315,6 +333,7 @@ erDiagram
     APP_USER ||--o{ REFRESH_TOKEN : has
     APP_USER ||--o{ GYM_CLASS : creates
     APP_USER |o--o{ GYM_CLASS : teaches
+    APP_USER |o--o{ ANNOUNCEMENT : posts
     MEMBER ||--o{ CLASS_BOOKING : books
     GYM_CLASS ||--o{ CLASS_BOOKING : has
     MEMBER ||--o{ CHECK_IN : has
@@ -368,6 +387,15 @@ erDiagram
         datetime checked_in_at
         int recorded_by FK
     }
+    ANNOUNCEMENT {
+        int id PK
+        string title
+        string message
+        date ends_on
+        int posted_by FK
+        datetime posted_at
+        datetime updated_at
+    }
 ```
 
 **Who can see a member record:**
@@ -414,6 +442,8 @@ erDiagram
 | `PlanUpdate` | Change a plan | `price` (1 to 10,000,000), `duration_days` (1 to 3,660), both required | Beta |
 | `CheckInRead` | Check-in responses | `id`, `member_id`, `member_name`, `checked_in_at`, `recorded_by_name` | Beta |
 | `CheckInPage` | Check-in lists | `items: CheckInRead[]`, `total`, `offset`, `limit` | Beta |
+| `AnnouncementCreate` / `AnnouncementUpdate` | Post / edit an announcement | `title` (1–100), `message` (1–1,000), `ends_on?` (a date not before today, or null for none); all optional on update, where `title` and `message` cannot be null and a left-out `ends_on` keeps the end date | Beta |
+| `AnnouncementRead` / `AnnouncementPage` | Announcement responses and lists | `id`, `title`, `message`, `ends_on?`, `posted_at`, `updated_at?` (null until edited), `posted_by_name?` (null once the poster's account is deleted); page: `items`, `total`, `offset`, `limit` | Beta |
 
 MVP sketch:
 
@@ -555,6 +585,16 @@ Ban rules: banning is idempotent (banning a banned user changes nothing), an adm
 | `GET` | `/api/v1/trainers/me/classes?when&offset&limit` | Trainer | — | `200` `ClassPage` (classes with `trainer_id` = me; `upcoming` soonest first, `past` latest first) | `401`, `403`, `422` | FR-70 |
 | `POST` | `/api/v1/classes/{class_id}/bookings` | Any logged-in user with a linked, valid membership | — | `201` `BookingRead` | `400` (membership not valid / class already started), `404`, `409` (full or already booked) | FR-28, FR-29 |
 | `DELETE` | `/api/v1/classes/{class_id}/bookings` | Any logged-in user with a membership | — | `204` (cancel my booking) | `400` (class started), `404` | FR-29 |
+
+**Announcements**
+
+| Method | Path | Who | Body | Success | Errors | FR |
+|---|---|---|---|---|---|---|
+| `GET` | `/api/v1/announcements?offset&limit` | Any logged-in user | — | `200` `AnnouncementPage` (current only: no `ends_on`, or `ends_on` today or later in UTC; newest first) | `401`, `422` | FR-73 |
+| `GET` | `/api/v1/announcements?include_ended=true&offset&limit` | Gym Manager, Admin | — | `200` `AnnouncementPage` (every announcement, newest first) | `401`, `403` (any other role) | FR-74 |
+| `POST` | `/api/v1/announcements` | Gym Manager, Admin | `AnnouncementCreate` | `201` `AnnouncementRead` (`posted_by` = the caller) | `401`, `403`, `422` (empty title or message, too long, `ends_on` before today) | FR-72 |
+| `PATCH` | `/api/v1/announcements/{announcement_id}` | Gym Manager, Admin | `AnnouncementUpdate` | `200` `AnnouncementRead` (only the fields sent change; sets `updated_at`) | `401`, `403`, `404`, `422` | FR-74 |
+| `DELETE` | `/api/v1/announcements/{announcement_id}` | Gym Manager, Admin | — | `204` | `401`, `403`, `404` | FR-74 |
 
 ### 6.3 Examples
 
@@ -741,6 +781,8 @@ def require_valid_membership(member: Member = Depends(get_own_member)) -> Member
 | `POST/DELETE /classes/{id}/bookings` | `require_valid_membership` (cancel uses `get_own_member`) |
 | `GET /classes/{id}/bookings` | `require_roles("gym_manager", "admin", "trainer")`; the service then refuses a trainer who does not teach the class (`NotYourClassError` → `403`) |
 | `GET /trainers` / `GET /trainers/me/classes` | `require_roles("gym_manager", "admin")` / `require_roles("trainer")` |
+| `GET /announcements` | `get_current_user`; the route answers `403` when `include_ended=true` comes from a role other than gym manager or admin |
+| `POST /announcements`, `PATCH` / `DELETE /announcements/{id}` | `require_roles("gym_manager", "admin")` |
 
 Row-level rules that depend on the data are checked inside the route:
 - Own membership: query with `Member.user_id == user.id`; a member can never pass an id to read another member's record.
@@ -754,6 +796,7 @@ Row-level rules that depend on the data are checked inside the route:
 - Login and refresh also reject banned users with `403`.
 - Change password: verify `current_password` (`400` if wrong), hash `new_password`, revoke all the user's refresh tokens; the client then logs in again.
 - **Built so far (trainers):** `class_service` checks that a sent `trainer_id` is an account with the role `trainer` (`TrainerNotFoundError` → `422`) and clears the old `trainer_name`; lists outer-join the trainer's account and select `coalesce(app_user.name, gym_class.trainer_name)`, so a renamed trainer shows everywhere. `user_service.change_role()` calls `class_service.release_trainer()` when an account stops being a trainer, in the same commit.
+- **Built so far (announcements):** `announcement_service` filters current ones with `or_(ends_on IS NULL, ends_on >= utc_today())` and outer-joins `app_user` for the poster's name, so an announcement whose poster's account is gone is still listed. An `ends_on` before today is refused by the schemas' validator (`422`); an edit that leaves `ends_on` out keeps an ended announcement's date, so its text can still be corrected. `member_service._delete_accounts()` sets `posted_by` to null before deleting an account.
 - **Built so far (password reset):** `get_logged_in_user` checks the token, the password change time and the ban; `get_current_user` (used by every route and by `require_roles`) also returns `403 Choose a new password first` while `must_change_password` is set. Only `GET /users/me` and `POST /users/me/password` take `LoggedInUser` instead, so a reset account can see who it is and choose a password. Tokens carry `iat` with the fraction of a second and are refused when `iat < password_changed_at`.
 
 ### 10.4 Admin dashboard stats

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react"
+import AnnouncementsCard from "../../components/AnnouncementsCard"
 import Stat from "../../components/Stat"
 import { getOverview } from "../../services/overviewService"
 import type { Overview } from "../../types/overview"
@@ -12,6 +13,8 @@ export default function OverviewPage() {
   const [overview, setOverview] = useState<Overview | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
+  // Refresh also reloads the announcements, which load on their own.
+  const [refreshKey, setRefreshKey] = useState(0)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -38,7 +41,13 @@ export default function OverviewPage() {
         <h2>
           Today <span className="hint">· {longDate}</span>
         </h2>
-        <button onClick={load} disabled={loading}>
+        <button
+          onClick={() => {
+            void load()
+            setRefreshKey((k) => k + 1)
+          }}
+          disabled={loading}
+        >
           {loading ? "Refreshing…" : "Refresh"}
         </button>
       </div>
@@ -95,6 +104,15 @@ export default function OverviewPage() {
           </section>
         </>
       )}
+      <AnnouncementsCard
+        refreshKey={refreshKey}
+        emptyText="Nothing is showing to members right now."
+        footer={
+          <p className="hint">
+            <a href="#/announcements">Open the announcements page</a> to post, edit or delete them.
+          </p>
+        }
+      />
     </div>
   )
 }

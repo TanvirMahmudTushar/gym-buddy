@@ -11,8 +11,8 @@ backend/          FastAPI app (routes under /api)
   app/models.py   tables (a member is a user with a membership) and request / response schemas
   app/security.py password hashing (Argon2) and login tokens (JWT)
   app/deps.py     who is calling, and the role check
-  app/routers/    members.py, auth.py, users.py, admin.py, check_ins.py, classes.py, plans.py, payments.py, overview.py, trainers.py: the endpoints (HTTP only)
-  app/services/   member_service.py, auth_service.py, user_service.py, checkin_service.py, class_service.py, payment_service.py, stats_service.py, revenue_service.py: rules and database queries
+  app/routers/    members.py, auth.py, users.py, admin.py, check_ins.py, classes.py, plans.py, payments.py, overview.py, trainers.py, announcements.py: the endpoints (HTTP only)
+  app/services/   member_service.py, auth_service.py, user_service.py, checkin_service.py, class_service.py, payment_service.py, stats_service.py, revenue_service.py, announcement_service.py: rules and database queries
 frontend/         Vite + React + TypeScript, one page (src/pages/HomePage/index.tsx)
   src/components/ add form, member list, details panel
   src/context/    AuthContext.tsx: who is logged in
@@ -38,12 +38,12 @@ Everyone who signs up is a **User**. Only an admin can change a role.
 
 | Role | Can do |
 |---|---|
-| User | Log in, see and rename their own account, see their own membership, visits and payments, book and cancel classes, change their password |
+| User | Log in, see and rename their own account, see their own membership, visits and payments and the gym's announcements, book and cancel classes, change their password |
 | Trainer | Log in, see and rename their own account, change their password, and see the classes they teach with who booked each one |
-| Gym Manager | Everything a User can, plus manage gym members (add, edit, renew, freeze, delete), record check-ins, take payments and see the list of all payments, and run the class timetable |
+| Gym Manager | Everything a User can, plus manage gym members (add, edit, renew, freeze, delete), record check-ins, take payments and see the list of all payments, run the class timetable, and post announcements |
 | Admin | Everything a Gym Manager can, plus list users and change their roles (including giving the Trainer role), set plan prices, void payments and export them as CSV |
 
-Pages: `#/login`, `#/signup`, `#/dashboard` (Admin), `#/overview` (Gym Manager, Admin), `#/members` (Gym Manager, Admin), `#/classes` (Gym Manager, Admin), `#/payments` (Gym Manager, Admin), `#/users` (Admin), `#/plans` (Admin), `#/membership` and `#/timetable` (User), `#/my-classes` (Trainer), `#/account` (everyone). After logging in, an Admin lands on the Dashboard, a Gym Manager on the Overview, a Trainer on My classes and a User on My membership.
+Pages: `#/login`, `#/signup`, `#/dashboard` (Admin), `#/overview` (Gym Manager, Admin), `#/members` (Gym Manager, Admin), `#/classes` (Gym Manager, Admin), `#/payments` (Gym Manager, Admin), `#/announcements` (Gym Manager, Admin), `#/users` (Admin), `#/plans` (Admin), `#/membership` and `#/timetable` (User), `#/my-classes` (Trainer), `#/account` (everyone). After logging in, an Admin lands on the Dashboard, a Gym Manager on the Overview, a Trainer on My classes and a User on My membership.
 
 **Gym Manager features (also available to Admins)**
 - **Check in a member:** open a member on the Members page and click **Check in**. Frozen and expired members cannot be checked in (the page says why; renew or unfreeze first). The same member can check in more than once a day.
@@ -60,10 +60,12 @@ Pages: `#/login`, `#/signup`, `#/dashboard` (Admin), `#/overview` (Gym Manager, 
 
 - **Payments:** in a member's details, **Payments** records what the member paid (amount in whole taka, and cash, card, bank transfer or mobile banking, with an optional note). Tick **Renew the membership with this payment**, pick the plan, and the amount fills in from the plan's price and the new expiry date is shown. An active member renews from their current expiry, so no paid days are lost; an expired member renews from today. The member's payments are listed below, newest first; a voided one is struck through with the reason. A payment stays on record when its member's account is deleted.
 - **Overview:** a Gym Manager's start page (Admins can open it too) with what needs attention today: members checked in today, memberships expiring in 7 days, people waiting for a membership, and payments taken today (amount and count, voided left out), plus the next 5 classes with places booked. Each number links to its list, which shows the same number: Checked in today on Members, the Expiring soon filter, the waiting list, and the Payments page filtered to today. Revenue history and account numbers stay on the admin Dashboard.
+- **Announcements:** the **Announcements** page posts holiday hours, new classes and other news: a title, a message (line breaks are kept) and an optional **Show until** date, the last day it shows (a UTC day, like a membership's expiry; it cannot be before today). Leave the date empty to keep it up until it is deleted. Members see the current announcements on My membership, and staff see them at the bottom of the Overview. **Showing now** lists what members see; **All, with ended** also lists the ended ones. **Edit** changes the text or the date (an ended one keeps its date until a new one is picked, so its text can still be corrected) and **Delete** removes it straight away. Each shows who posted it, when, and whether it was edited. A User or Trainer cannot post (`403`).
 - **All payments:** the **Payments** page lists every payment, newest first, with filters for dates (From and To, both included, in UTC), method and part of the member's name. Above the list is the total of the matching payments, for every page and not just the rows shown. The From and To dates are kept in the address (`#/payments?from=2026-11-20&to=2026-11-20`), so a link can open the list on a day. Voided payments are hidden unless **Show voided payments** is ticked, and never count towards the total. **Load more** shows the next 20.
 
 **User features**
 - **My membership:** plan, status, joined and expiry dates, and the person's own visits, newest first. A User can only ever see their own record. Before staff start a membership, the page says so and shows the email to give the front desk.
+- **Announcements:** on My membership, the gym's current announcements, newest first, with who posted them and the last day each one shows. The card is hidden when there are none, and an announcement disappears the day after its end date.
 - **My bookings:** on My membership, the person's upcoming classes with **Cancel**, past classes on request, and a link to book another.
 - **Plans and prices:** on My membership, what each plan costs and how many days it adds, with the person's own plan marked, and how renewing at the front desk works.
 - **My payments:** on My membership, the person's own payments, newest first. A voided payment shows as voided with the reason. Nobody can see another person's payments.
@@ -134,6 +136,10 @@ Interactive docs: `/api/docs` (for example http://localhost:8000/api/docs).
 | Log in | `POST /api/v1/auth/login` `{email, password}` | `200` `{access_token, token_type, user}` | `401`, `403` (banned), `422`, `429` (locked after 5 wrong passwords) |
 | My account | `GET` / `PATCH /api/v1/users/me` | `200` user | `401`, `422` |
 | Overview (Gym Manager, Admin) | `GET /api/v1/overview` | `200` `{check_ins_today, expiring_soon, waiting, payments_today: {count, amount}, next_classes}` | `401`, `403` |
+| Current announcements | `GET /api/v1/announcements?offset=0&limit=20` (any logged-in user; `include_ended=true` for Gym Manager, Admin) | `200` `{items, total, offset, limit}` of `{id, title, message, ends_on, posted_at, updated_at, posted_by_name}`, newest first; without `include_ended`, only those with no `ends_on` or one of today or later (UTC) | `401`, `403` (`include_ended` from a User or Trainer) |
+| Post an announcement (Gym Manager, Admin) | `POST /api/v1/announcements` `{title, message, ends_on?}` | `201` announcement | `403`, `422` (empty or too long, or `ends_on` before today) |
+| Edit an announcement (Gym Manager, Admin) | `PATCH /api/v1/announcements/{id}` (only the fields sent; `ends_on: null` removes the end date) | `200` announcement, `updated_at` set | `403`, `404`, `422` |
+| Delete an announcement (Gym Manager, Admin) | `DELETE /api/v1/announcements/{id}` | `204` | `403`, `404` |
 | Dashboard stats (admin) | `GET /api/v1/admin/stats` | `200` `{members, users, check_ins, classes}` counts; `members.expiring_soon` included | `401`, `403` |
 | Revenue (admin) | `GET /api/v1/admin/revenue` | `200` `{today, this_month, last_30_days, last_30_days_from, by_method, months}` in whole taka, voided left out | `401`, `403` |
 | Waiting for a membership | `GET /api/v1/members/waiting?offset=0&limit=20&q=` | `200` `{items, total, offset, limit}` of `{id, name, email, role, created_at}`: User accounts with no membership, newest first | `401`, `403` |
