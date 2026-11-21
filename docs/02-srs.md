@@ -193,13 +193,16 @@ Every Admin is also a logged-in user, so they can log out, edit their profile an
 |---|---|---|---|
 | FR-12 | The system shall let a guest sign up with `email`, `name` and `password`. Email is unique (case-insensitive); a duplicate returns `409`. New users always get role `user`; the sign-up form cannot choose a role. Signing up does not create or link a membership record. | Beta | US-09 |
 | FR-13 | The system shall log a user in with email and password, returning an access token in the body and setting a refresh token cookie. Wrong email or password returns `401` with the same message for both. | Beta | US-10 |
-| FR-14 | The system shall issue a new access token when called with a valid refresh token cookie, and replace (rotate) the refresh token. | Beta | US-10 |
-| FR-15 | The system shall log a user out by revoking the refresh token and clearing the cookie. | Beta | US-10 |
+| FR-14 | The system shall issue a new access token when called with a valid refresh token cookie, and replace (rotate) the refresh token. With no cookie at all it answers `204` (nobody is logged in on this browser); an expired, revoked or unknown token answers `401` and clears the cookie. | Beta | US-10 |
+| FR-15 | The system shall log a user out by revoking the refresh token's session and clearing the cookie. The session's access token is refused from the next request on, not only when it expires. | Beta | US-10 |
 | FR-16 | The system shall return the logged-in user's profile (`id`, `email`, `name`, `role`). The password hash is never returned. | Beta | US-10 |
 | FR-40 | A user shall be able to change their own `name`. Email and role cannot be changed through the profile. | Beta | US-23, US-24 |
-| FR-41 | A user shall be able to change their password by sending the current and the new password. A wrong current password returns `400`. On success all the user's sessions (refresh tokens) are revoked and they log in again. | Beta | US-24 |
+| FR-41 | A user shall be able to change their password by sending the current and the new password. A wrong current password returns `400`. On success every other session of the user is revoked; the session that made the change stays logged in. | Beta | US-24 |
+| FR-80 | A user shall be able to list their own active sessions (one per browser where they are logged in) with the time it started, the time it was last used, its IP address and browser, and which one is the current session. | Beta | US-10 |
+| FR-81 | A user shall be able to revoke one of their own sessions. Its refresh token and access token stop working at once. Another user's session, or one that is no longer active, returns `404`. | Beta | US-10 |
+| FR-82 | A refresh token used again more than 30 seconds after it was replaced shall revoke its whole session (`401`), because only a copy can still hold it. Within the 30 seconds (two tabs refreshing at once) the request gets an access token without a new cookie. | Beta | US-10 |
 
-> **Built so far:** sign up, log in, own profile and rename (FR-12, FR-13, FR-16, FR-40), with one access token valid for 8 hours and no refresh cookie. Password change (FR-41) is built too: it ends every login made before the change, because there are no refresh tokens to revoke. The login attempt limit (FR-34) is built: the 5th wrong password in a row already answers `429` with `Retry-After`, attempts while locked do not count, and an existing login is not ended. Refresh tokens (FR-14, FR-15) come later.
+> **Built so far:** all of 3.2 (FR-12 – FR-16, FR-40, FR-41, FR-80 – FR-82). Each login is a row in `auth_session`; the access token (15 minutes) names it with `sid`, and every request checks that the session is still active. The app keeps the access token in memory and refreshes it on a `401`. The login attempt limit (FR-34) is built: the 5th wrong password in a row answers `429` with `Retry-After`, attempts while locked do not count, and an existing login is not ended.
 
 ### 3.3 Own membership and check-ins — Beta
 
@@ -229,7 +232,7 @@ Every Admin is also a logged-in user, so they can log out, edit their profile an
 | FR-38 | An admin shall be able to unban a user; the user can then log in again. The user's linked membership and bookings are kept while banned. | Beta | US-22 |
 | FR-39 | The admin user list shall show each user's status (`active` / `banned`), ban date and ban reason. | Beta | US-21 |
 
-> **Built so far (admin):** FR-35 with the member, check-in and user numbers (class numbers are `total` and `upcoming`), and FR-36 to FR-39 without refresh tokens, since none exist yet to revoke. An admin lands on the dashboard after logging in.
+> **Built so far (admin):** FR-35 with the member, check-in and user numbers (class numbers are `total` and `upcoming`), and FR-36 to FR-39; a ban revokes every session in the same transaction. An admin lands on the dashboard after logging in.
 
 ### 3.6 Classes and bookings — Beta
 
@@ -310,9 +313,9 @@ Every Admin is also a logged-in user, so they can log out, edit their profile an
 
 | ID | Requirement | Release | Story |
 |---|---|---|---|
-| FR-64 | An admin shall be able to reset the password of a user or gym manager (not their own, not another admin's: `400`). The system makes a random temporary password of 12 characters without look-alike characters, returns it once (not cached), ends every earlier login, and clears any login lockout. A gym manager gets `403`. | Beta | US-24 |
+| FR-64 | An admin shall be able to reset the password of a user or gym manager (not their own, not another admin's: `400`). The system makes a random temporary password of 12 characters without look-alike characters, returns it once (not cached), revokes every session of the account, and clears any login lockout. A gym manager gets `403`. | Beta | US-24 |
 | FR-65 | After a reset, the account shall be able to call only `GET /users/me` and `POST /users/me/password`; every other request returns `403` ("Choose a new password first"), and the app shows only a Choose a new password screen. | Beta | US-24 |
-| FR-66 | Changing the password shall refuse a new password equal to the current one (`400`), end the must-choose-a-new-password state, and end every earlier login, including the one made with the temporary password. | Beta | US-24 |
+| FR-66 | Changing the password shall refuse a new password equal to the current one (`400`), end the must-choose-a-new-password state, and revoke every other session. The session made with the temporary password stays logged in and can use the app straight away. | Beta | US-24 |
 
 ### 3.7f Trainers — Beta
 
@@ -417,6 +420,7 @@ A new member always starts as `Active` if `expires_on` is today or later. "Expir
 |---|---|---|---|---|---|
 | Sign up, log in | Yes | — | — | — | — |
 | Log out, view own profile, change own name and password | No | Yes | Yes | Yes | Yes |
+| List own sessions, log out one of them | No | Yes | Yes | Yes | Yes |
 | View own membership and check-in history | No | Yes (`404` if no membership linked) | Only if linked | Only if linked | Only if linked |
 | Create, list, view, update, delete members | No | No (`403`) | No (`403`) | Yes | Yes |
 | Link a member record to a user account | No | No (`403`) | No (`403`) | Yes | Yes |
@@ -476,6 +480,7 @@ Every endpoint except sign up, log in, refresh, health and the docs returns `401
 | NFR-09 | Usability (API) | Every endpoint is listed in `/api/docs` with request and response schemas. | MVP |
 | NFR-10 | Deployability | The app runs on Vercel; a push to `main` updates production. | MVP |
 | NFR-11 | Security | Passwords are hashed with Argon2; plain passwords are never stored, logged or returned. | Beta |
+| NFR-22 | Security | Before hashing, each password is mixed with a server-side secret (pepper, HMAC-SHA256) of at least 32 bytes from the `PASSWORD_PEPPER` env var, so a copy of the database alone is not enough to test guesses. | Beta |
 | NFR-12 | Security | Access tokens are JWTs signed with a secret of at least 32 bytes from an env var, valid for 15 minutes. | Beta |
 | NFR-13 | Security | Refresh tokens are random, valid for 7 days, stored only as a hash, and replaced on every refresh. | Beta |
 | NFR-14 | Security | The refresh token cookie is `HttpOnly`, `Secure`, `SameSite=Strict` and limited to path `/api/v1/auth`. | Beta |
@@ -487,7 +492,7 @@ Every endpoint except sign up, log in, refresh, health and the docs returns `401
 | NFR-20 | Privacy | Member phone numbers, dates of birth, emergency contacts and notes are returned only to gym staff (gym managers and admins) and to the member themself. | Beta |
 | NFR-21 | Consistency | Booking a class checks capacity and inserts the booking in one database transaction, so a class is never over capacity and a member never books the same class twice. | Beta |
 
-> **Built so far (security):** NFR-11, NFR-15, NFR-16 (headers set for every response in `vercel.json`), NFR-17, NFR-20 and NFR-21. Access tokens last 8 hours and there are no refresh tokens yet (NFR-12 to NFR-14). Schema changes are applied on start by `create_db_and_tables()` rather than Alembic (NFR-19). Production is deployed with `vercel --prod`; the project is not connected to GitHub, so a push to `main` does not deploy by itself (NFR-10).
+> **Built so far (security):** NFR-11 to NFR-17 (headers set for every response in `vercel.json`), NFR-20, NFR-21 and NFR-22. Schema changes are applied on start by `create_db_and_tables()` rather than Alembic (NFR-19). Production is deployed with `vercel --prod`; the project is not connected to GitHub, so a push to `main` does not deploy by itself (NFR-10).
 
 ## 5. Acceptance criteria
 
@@ -639,7 +644,7 @@ Every endpoint except sign up, log in, refresh, health and the docs returns `401
 
 **AC-29 Change password (FR-41)**
 - When a user sends the wrong `current_password`, the response is `400`.
-- When they send the right one and a valid `new_password`, the response is `204`, their refresh fails, and they can log in only with the new password.
+- When they send the right one and a valid `new_password`, the response is `204`, the refresh and access tokens of their other sessions fail, the session that made the change keeps working, and they can log in only with the new password.
 
 **AC-30 List all payments (FR-48)**
 - Given payments of 1,500 (cash, 10 days ago), 4,000 (card, today) and 700 (mobile banking, today)
@@ -693,7 +698,7 @@ Every endpoint except sign up, log in, refresh, health and the docs returns `401
 - When an admin sends `POST /api/v1/admin/users/{A}/reset-password`, the response is `200` with a 12-character `temporary_password` and `Cache-Control: no-store`; for the admin's own account or another admin's it is `400`, for a gym manager `403`.
 - A's earlier login gets `401`, the old password `401`, and the temporary password logs in with `must_change_password = true`.
 - With that login, `GET /api/v1/users/me` is `200` but `GET /api/v1/classes` is `403`; setting the temporary password again is `400`; a new password is `204`.
-- Then the temporary login and password stop working, and the new password logs in with `must_change_password = false`.
+- Then the temporary password stops working, the same session can call `GET /api/v1/classes`, and the new password logs in with `must_change_password = false`.
 
 **AC-39 Trainers (FR-67 – FR-71)**
 - Given trainers Zara and Bilal, member A booked on Spin (tomorrow, trainer Zara), and Old Yoga with the text trainer name "Lina"
@@ -717,6 +722,14 @@ Every endpoint except sign up, log in, refresh, health and the docs returns `401
 - When the gym manager sends `PATCH /api/v1/members/{A}` with a new `emergency_contact_phone`, A's `GET /api/v1/users/me/profile` shows it.
 - B's `GET /api/v1/members/{A}` is `403`, B's `GET /api/v1/users/me/profile` shows only B's own details, and A's `GET /api/v1/users/me` has none of them.
 
+**AC-42 Sessions and refresh (FR-14, FR-15, FR-80 – FR-82, NFR-12 – NFR-14)**
+- Given user A logs in on browser 1 and on browser 2
+- Then each login returns an access token whose `exp` is 15 minutes after `iat`, with `sub`, `role` and `sid`, and sets a `refresh_token` cookie that is `HttpOnly`, `Secure`, `SameSite=Strict`, path `/api/v1/auth`, 7 days.
+- When browser 1 sends `POST /api/v1/auth/refresh`, the response is `200` with a new access token and a new cookie; a tampered or expired access token gets `401`.
+- When the replaced cookie is sent again after 30 seconds, the response is `401`, and browser 1's current cookie and access token get `401` too.
+- `GET /api/v1/users/me/sessions` on browser 2 lists its session with `current = true`. When browser 2 revokes browser 1's session, browser 1's next request gets `401`; revoking it again, or revoking user B's session, is `404`.
+- When browser 2 sends `POST /api/v1/auth/logout`, the response is `204`, the cookie is cleared, browser 2's access token gets `401`, and refresh without a cookie returns `204`.
+
 ## 6. Traceability
 
 | Story | Requirements | Endpoint (see [TDD, section 6](03-tdd.md#6-rest-api-design)) | Release |
@@ -729,7 +742,7 @@ Every endpoint except sign up, log in, refresh, health and the docs returns `401
 | US-07 | FR-08, FR-09, FR-11 | All, `/api/docs` | MVP |
 | US-08 | FR-10 | `GET /api/health` | MVP |
 | US-09 | FR-12 | `POST /api/v1/auth/signup` | Beta |
-| US-10 | FR-13 – FR-16 | `/api/v1/auth/login`, `/refresh`, `/logout`, `GET /api/v1/users/me` | Beta |
+| US-10 | FR-13 – FR-16, FR-80 – FR-82 | `/api/v1/auth/login`, `/refresh`, `/logout`, `GET /api/v1/users/me`, `GET /api/v1/users/me/sessions`, `DELETE /api/v1/users/me/sessions/{id}` | Beta |
 | US-11 | FR-17, FR-18, FR-33 | `GET /api/v1/users/me/membership`, `GET /api/v1/users/me/check-ins` | Beta |
 | US-12 | FR-20 – FR-22, FR-24 | `GET /api/v1/admin/users`, `PATCH /api/v1/admin/users/{id}/role` | Beta |
 | US-13 | FR-19, FR-23, FR-24 | `/api/v1/members` (admin-only in Beta) | Beta |

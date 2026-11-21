@@ -5,7 +5,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, col, select, update
 
 from app.models import LoginRequest, SignupRequest, User, as_utc, utc_now
-from app.security import hash_password, verify_password
+from app.security import hash_password, password_needs_rehash, verify_password
+from app.services import session_service
 
 
 class EmailTakenError(Exception):
@@ -102,9 +103,14 @@ def authenticate(session: Session, data: LoginRequest) -> User:
             _record_failed_login(session, user)
         raise InvalidCredentialsError
     # The right password ends the run of failures.
-    if user.failed_login_count or user.locked_until is not None:
-        user.failed_login_count = 0
-        user.locked_until = None
+    changed = bool(user.failed_login_count or user.locked_until is not None)
+    user.failed_login_count = 0
+    user.locked_until = None
+    # A hash from before the pepper is replaced now, while the plain password is at hand.
+    if password_needs_rehash(user.password_hash):
+        user.password_hash = hash_password(data.password)
+        changed = True
+    if changed:
         session.add(user)
         session.commit()
         session.refresh(user)
@@ -114,9 +120,11 @@ def authenticate(session: Session, data: LoginRequest) -> User:
     return user
 
 
-def change_password(session: Session, user: User, current_password: str, new_password: str) -> None:
-    """Every token issued before this moment stops working (see deps.get_logged_in_user). Also ends the
-    must-change-password state an admin reset leaves."""
+def change_password(
+    session: Session, user: User, current_password: str, new_password: str, current_session_id: int
+) -> None:
+    """Every other session of the user is revoked in the same transaction (FR-41); the one making the change stays
+    logged in. Also ends the must-change-password state an admin reset leaves."""
     if not verify_password(current_password, user.password_hash):
         raise WrongPasswordError
     if verify_password(new_password, user.password_hash):
@@ -125,4 +133,5 @@ def change_password(session: Session, user: User, current_password: str, new_pas
     user.password_changed_at = utc_now()
     user.must_change_password = False
     session.add(user)
+    session_service.revoke_all(session, user.id, keep=current_session_id)
     session.commit()

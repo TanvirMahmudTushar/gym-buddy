@@ -9,10 +9,10 @@ backend/          FastAPI app (routes under /api)
   main.py         creates the app, error handler, health check
   app/database.py engine and session (Supabase or local SQLite)
   app/models.py   tables (a member is a user with a membership) and request / response schemas
-  app/security.py password hashing (Argon2) and login tokens (JWT)
-  app/deps.py     who is calling, and the role check
+  app/security.py password hashing (Argon2 with a pepper), access tokens (JWT) and refresh tokens
+  app/deps.py     who is calling (token and session check), and the role check
   app/routers/    members.py, auth.py, users.py, admin.py, check_ins.py, classes.py, plans.py, payments.py, overview.py, trainers.py, announcements.py: the endpoints (HTTP only)
-  app/services/   member_service.py, auth_service.py, user_service.py, checkin_service.py, class_service.py, payment_service.py, stats_service.py, revenue_service.py, announcement_service.py: rules and database queries
+  app/services/   member_service.py, auth_service.py, session_service.py (logins and refresh tokens), user_service.py, checkin_service.py, class_service.py, payment_service.py, stats_service.py, revenue_service.py, announcement_service.py: rules and database queries
 frontend/         Vite + React + TypeScript, one page (src/pages/HomePage/index.tsx)
   src/components/ add form, member list, details panel
   src/context/    AuthContext.tsx: who is logged in
@@ -72,7 +72,8 @@ Pages: `#/login`, `#/signup`, `#/dashboard` (Admin), `#/overview` (Gym Manager, 
 - **My payments:** on My membership, the person's own payments, newest first. A voided payment shows as voided with the reason. Nobody can see another person's payments.
 - **Classes:** upcoming classes with places left. **Book** takes a place, **Cancel booking** frees it (until the class starts; after that the booking is history and cannot be cancelled by anyone). Booking needs a valid membership (not frozen or expired) and a class that has not started; a full class or one you already booked is refused with a clear message. Two people booking the last place at the same moment cannot both get it.
 - **My contact details:** on My account, every logged-in person keeps their own phone, date of birth and emergency contact up to date. The date of birth must be between 1 Jan 1900 and today, and the emergency contact needs both a name and a phone, or neither. Only the person and the gym staff can see them; staff see them in the member details.
-- **My account:** change your name, and change your password. After a password change every earlier login stops working and you log in again with the new password.
+- **My account:** change your name, and change your password. A password change logs out every other browser where you were logged in; the one you used stays logged in.
+- **Where I am logged in:** on My account, every browser with an active login (for example "Chrome on Windows"), its IP address, when it logged in and when it was last active, with **This browser** marked. **Log out** next to one ends that login on the server at once: its next request is refused and it shows Log in. Logging out **This browser** is a normal logout.
 
 **Trainer features**
 - **My classes:** the classes the trainer teaches, upcoming ones soonest first, with places booked; **Past** lists the classes that have started, latest first. **Who booked** lists the people booked on a class, in booking order (the next class opens with it showing). A trainer can read the bookings of their own classes only: any other class's bookings answer `403`. Trainers land here after logging in.
@@ -85,14 +86,20 @@ Pages: `#/login`, `#/signup`, `#/dashboard` (Admin), `#/overview` (Gym Manager, 
 - **Void a payment:** on the **Payments** page, **Void** marks a mistaken payment, with a reason that must be given. The payment stays on record (struck through, with who voided it, when and why) but is left out of every total. Voiding an already voided payment changes nothing. Voiding does not change the member's expiry date; edit it on the Members page if a renewal was wrong.
 - **Export CSV:** on the **Payments** page, **Export CSV** downloads every payment that matches the current filters (not just the rows loaded), newest first, with the columns `id`, `paid_at_utc`, `member`, `member_id`, `amount_taka`, `method`, `plan`, `renewed_until`, `note`, `recorded_by`, `voided_at_utc`, `void_reason` and `voided_by`. It opens in Excel or Google Sheets with Bengali names intact, and any text that a spreadsheet would run as a formula (starting with `=`, `+`, `-` or `@`) is saved with a leading `'` so it shows as plain text.
 - **Users and their memberships:** the **Users** page shows each account's membership (plan, status and expiry, linking to the member) or "None yet" with a link to start one, and has a search by name or email.
-- **Reset a password:** on the **Users** page, **Reset password** (for a User or Gym Manager, not yourself or another admin) makes a random 12-character temporary password and shows it once, with **Copy**, to hand over in person. The person's old password and every login stop working and any login lockout is cleared. When they log in with the temporary password, the app shows only **Choose a new password** (the API refuses everything else with `403 Choose a new password first`); the new one must differ from the temporary one, and they then log in again with it.
-- **Ban / unban:** on the **Users** page, an admin can ban a User or Gym Manager with an optional reason. A banned person gets `403 Account banned` when logging in and on every request, even with a token that has not expired, and the app logs them out. Unbanning restores access with their role and data unchanged. An admin cannot ban themself or another admin; change the other admin's role first.
+- **Reset a password:** on the **Users** page, **Reset password** (for a User or Gym Manager, not yourself or another admin) makes a random 12-character temporary password and shows it once, with **Copy**, to hand over in person. The person's old password stops working, every session they had is logged out, and any login lockout is cleared. When they log in with the temporary password, the app shows only **Choose a new password** (the API refuses everything else with `403 Choose a new password first`); the new one must differ from the temporary one, and the app then opens normally.
+- **Ban / unban:** on the **Users** page, an admin can ban a User or Gym Manager with an optional reason. A banned person gets `403 Account banned` when logging in and on every request, even with a token that has not expired, and the app logs them out. A ban also ends all their sessions, so their refresh cookie cannot get a new token, and unbanning does not bring those sessions back. Unbanning restores access with their role and data unchanged. An admin cannot ban themself or another admin; change the other admin's role first.
 
 **First admin.** Nobody can make themselves an admin. Sign up in the app, then in Supabase → **Table Editor** → `app_user`, set that row's `role` to `admin` (or run `update app_user set role = 'admin' where email = 'you@example.com';` in the SQL editor). Log in again. From then on, change roles on the **Users** page.
 
 **Login lockout.** After 5 wrong passwords in a row for an account, logging in to it is blocked for 15 minutes, even with the right password: the app shows "Too many failed logins. Try again in 15 minutes." (`429`, with a `Retry-After` header in seconds). Attempts while it is blocked do not count, and a successful login resets the count. Someone already logged in stays logged in. An email with no account always gets the same "Wrong email or password".
 
-**`JWT_SECRET`.** Login tokens are signed with the `JWT_SECRET` environment variable (at least 32 bytes). Locally it is optional: without it the backend makes a temporary secret and you log in again after each restart. On Vercel it is required; generate one with `python -c "import secrets; print(secrets.token_urlsafe(48))"` and add it under **Settings** → **Environment Variables**.
+**Logins and sessions.** Logging in starts a session for that browser and gives two tokens:
+- an **access token** (a JWT holding the user id, role and session id) that lasts **15 minutes**. The app keeps it in memory only, never in `localStorage` or `sessionStorage`, and sends it as `Authorization: Bearer …`;
+- a **refresh token** in a cookie that page scripts cannot read (`HttpOnly`, `Secure`, `SameSite=Strict`, sent only to `/api/v1/auth`) that lasts **7 days**. The database keeps only its SHA-256 hash.
+
+When the access token expires, the API answers `401`. The app then calls `POST /api/v1/auth/refresh` once, gets a new access token and a new refresh cookie (the old one is replaced: **rotation**), and repeats the request, so the person notices nothing. After a reload the app gets its access token the same way, showing "Loading…" meanwhile, never a flash of the Log in page. If an old refresh token is used again more than 30 seconds after it was replaced, someone copied it, and the whole session is ended. **Log out** ends the session on the server: its access token is refused at once (every request checks that its session is still active), not only after 15 minutes. A session also ends after 7 days without use, when the password is changed (other browsers only) or reset, and when the account is banned.
+
+**`JWT_SECRET` and `PASSWORD_PEPPER`.** Access tokens are signed with `JWT_SECRET`, and passwords are hashed with Argon2 after mixing in `PASSWORD_PEPPER` (HMAC-SHA256), a secret kept only in the server's environment: someone with a copy of the database but not the pepper cannot test password guesses. Both must be at least 32 bytes. On Vercel both are required; generate each with `python -c "import secrets; print(secrets.token_urlsafe(48))"` and add them under **Settings** → **Environment Variables**. Never change the pepper once set: every password hashed with it would stop working. Locally both are optional: without `JWT_SECRET` the backend makes a temporary secret (you log in again after each restart), and without `PASSWORD_PEPPER` it uses a fixed development pepper. Passwords hashed before the pepper existed still work: the next successful login replaces the hash with a peppered one.
 
 ## REST API
 
@@ -134,10 +141,14 @@ Interactive docs: `/api/docs` (for example http://localhost:8000/api/docs).
 | Change my contact details | `PATCH /api/v1/users/me/profile` (only the fields sent; `null` or blank text clears one) | `200` the same shape | `401`, `422` (date of birth before 1900 or in the future, too long, or an emergency contact with only a name or only a phone) |
 | My membership | `GET /api/v1/users/me/membership` | `200` member | `401`, `404` (no membership yet) |
 | My visits | `GET /api/v1/users/me/check-ins?offset=0&limit=20` | `200` `{items, total, offset, limit}`, newest first | `401`, `404` |
-| Change my password | `POST /api/v1/users/me/password` `{current_password, new_password}` | `204` (also ends the must-choose-a-new-password state) | `400` (wrong current password, or the new one is the same), `401`, `422` |
+| Change my password | `POST /api/v1/users/me/password` `{current_password, new_password}` | `204`; every other session is ended, this one stays (also ends the must-choose-a-new-password state) | `400` (wrong current password, or the new one is the same), `401`, `422` |
+| My sessions | `GET /api/v1/users/me/sessions` | `200` list of `{id, created_at, last_used_at, expires_at, ip, user_agent, current}`, most recently used first; only active ones | `401` |
+| Log out a session | `DELETE /api/v1/users/me/sessions/{id}` | `204`; that browser's refresh cookie and access token stop working at once | `401`, `404` (not mine, or no longer active) |
 | Health | `GET /api/health` | `200` `{"status": "ok"}` | |
 | Sign up | `POST /api/v1/auth/signup` `{email, name, password}` | `201` user (role `user`) | `409`, `422` |
-| Log in | `POST /api/v1/auth/login` `{email, password}` | `200` `{access_token, token_type, user}` | `401`, `403` (banned), `422`, `429` (locked after 5 wrong passwords) |
+| Log in | `POST /api/v1/auth/login` `{email, password}` | `200` `{access_token, token_type, expires_in, user}` and a `refresh_token` cookie | `401`, `403` (banned), `422`, `429` (locked after 5 wrong passwords) |
+| Refresh | `POST /api/v1/auth/refresh` (the browser sends the cookie) | `200` same as Log in, with a new cookie (rotation); `204` when there is no cookie (not logged in) | `401` (expired, revoked or reused; the cookie is cleared) |
+| Log out | `POST /api/v1/auth/logout` | `204`; the session is revoked and the cookie cleared (always `204`) | |
 | My account | `GET` / `PATCH /api/v1/users/me` | `200` user | `401`, `422` |
 | Overview (Gym Manager, Admin) | `GET /api/v1/overview` | `200` `{check_ins_today, expiring_soon, waiting, payments_today: {count, amount}, next_classes}` | `401`, `403` |
 | Current announcements | `GET /api/v1/announcements?offset=0&limit=20` (any logged-in user; `include_ended=true` for Gym Manager, Admin) | `200` `{items, total, offset, limit}` of `{id, title, message, ends_on, posted_at, updated_at, posted_by_name}`, newest first; without `include_ended`, only those with no `ends_on` or one of today or later (UTC) | `401`, `403` (`include_ended` from a User or Trainer) |
@@ -211,7 +222,7 @@ vercel dev -L
 2. **Connect** → **Transaction pooler** → copy the URI (port `6543`).
 3. In Vercel → Project → **Settings** → **Environment Variables**, add it as `DATABASE_URL`, then redeploy.
 
-The backend accepts `postgres://` or `postgresql://` URLs and creates the `app_user`, `check_in`, `gym_class`, `class_booking`, `plan_price` and `payment` tables on start (and fills `plan_price` with monthly 1,500 / 30 days, quarterly 4,000 / 90 days and yearly 14,000 / 365 days), and adds any columns an older table is missing (the ban and membership columns on `app_user`, `trainer_id` and its index on `gym_class`), keeping existing data.
+The backend accepts `postgres://` or `postgresql://` URLs and creates the `app_user`, `auth_session`, `check_in`, `gym_class`, `class_booking`, `plan_price`, `payment` and `announcement` tables on start (and fills `plan_price` with monthly 1,500 / 30 days, quarterly 4,000 / 90 days and yearly 14,000 / 365 days), and adds any columns an older table is missing (the ban and membership columns on `app_user`, `trainer_id` and its index on `gym_class`), keeping existing data.
 
 **Upgrading a database from before members became users:** on its first start the backend drops the old `member` table together with `check_in`, `class_booking` and `payment` (all of their rows are deleted) and creates the last three again, pointing at `app_user`. Accounts, classes and plan prices are kept. Staff then start memberships again for the people who need one. To use Supabase locally as well, set `DATABASE_URL` in your terminal before `fastapi dev main.py`.
 
@@ -222,7 +233,7 @@ Free-tier Supabase projects pause after a week with no activity; open the dashbo
 1. Push the repo to GitHub.
 2. Go to https://vercel.com/new, import the repo and click **Deploy**. Keep **Root Directory** as `./`.
 3. Set `DATABASE_URL` as above. Without it, data is kept only in `/tmp` and is lost between requests.
-4. Set `JWT_SECRET` (see **Accounts and roles**). Without it, login and the members API return `500`.
+4. Set `JWT_SECRET` and `PASSWORD_PEPPER` (see **Accounts and roles**), then redeploy. Without them, sign up, login and every logged-in request return `500`.
 
 The Vercel project is not connected to GitHub, so merging into `main` does not deploy by itself. Deploy from an up-to-date `main` with `vercel --prod`, or connect the repository under Project → **Settings** → **Git** so every push to `main` deploys.
 

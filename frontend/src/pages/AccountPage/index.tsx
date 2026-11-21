@@ -1,6 +1,7 @@
 import { type FormEvent, useState } from "react"
 import ChangePasswordForm from "../../components/ChangePasswordForm"
 import MyDetailsCard from "../../components/MyDetailsCard"
+import SessionsCard from "../../components/SessionsCard"
 import { useAuth } from "../../context/AuthContext"
 import { renameMe } from "../../services/authService"
 import { ROLES, roleLabel } from "../../utils/auth"
@@ -13,6 +14,8 @@ export default function AccountPage() {
   const [error, setError] = useState("")
   const [saved, setSaved] = useState(false)
   const [busy, setBusy] = useState(false)
+  // Bumped after a password change, which logs the other browsers out, so the session list shows that.
+  const [sessionsKey, setSessionsKey] = useState(0)
 
   if (!user) return null
 
@@ -86,7 +89,8 @@ export default function AccountPage() {
         </form>
       </section>
       <MyDetailsCard />
-      <ChangePasswordForm />
+      <ChangePasswordForm onChanged={() => setSessionsKey((k) => k + 1)} />
+      <SessionsCard reloadKey={sessionsKey} />
     </div>
   )
 }

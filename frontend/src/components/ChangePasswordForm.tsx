@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useRef, useState } from "react"
+import { type FormEvent, useState } from "react"
 import { useAuth } from "../context/AuthContext"
 import { changePassword } from "../services/authService"
 import { errorText } from "../utils/member"
@@ -11,23 +11,23 @@ interface Props {
   intro?: string
   /** The label of the first field, such as "Temporary password" after an admin reset. */
   currentLabel?: string
+  /** Called after the password changed, for example to reload the session list. */
+  onChanged?: () => void
 }
 
-// Every login made before the change stops working, so the person is logged out and signs in with the new password.
+// The server logs out every other browser; this one stays logged in.
 export default function ChangePasswordForm({
   heading = "Change my password",
   intro,
   currentLabel = "Current password",
+  onChanged,
 }: Props) {
-  const { logout } = useAuth()
+  const { user, setUser } = useAuth()
   const [form, setForm] = useState(EMPTY)
   const [errors, setErrors] = useState<Partial<Record<keyof typeof EMPTY, string>>>({})
   const [error, setError] = useState("")
   const [done, setDone] = useState(false)
   const [busy, setBusy] = useState(false)
-  const timer = useRef<number | undefined>(undefined)
-
-  useEffect(() => () => window.clearTimeout(timer.current), [])
 
   const set = (key: keyof typeof EMPTY) => (e: { target: { value: string } }) =>
     setForm((prev) => ({ ...prev, [key]: e.target.value }))
@@ -43,13 +43,20 @@ export default function ChangePasswordForm({
     if (Object.keys(next).length) return
 
     setBusy(true)
+    setDone(false)
     try {
       await changePassword(form.current, form.next)
-      setDone(true)
       setForm(EMPTY)
-      timer.current = window.setTimeout(logout, 2500)
+      // After an admin reset, choosing a password unlocks the rest of the app straight away.
+      if (user?.must_change_password) {
+        setUser({ ...user, must_change_password: false })
+        return
+      }
+      setDone(true)
+      onChanged?.()
     } catch (err) {
       setError(errorText(err))
+    } finally {
       setBusy(false)
     }
   }
@@ -81,12 +88,12 @@ export default function ChangePasswordForm({
         )}
         {done && (
           <p className="hint" role="status">
-            Password changed. You will be logged out now; log in with the new password.
+            Password changed. You are still logged in here; every other browser has been logged out.
           </p>
         )}
         <div className="actions">
           <button className="primary" type="submit" disabled={busy}>
-            {busy && !done ? "Changing…" : "Change password"}
+            {busy ? "Changing…" : "Change password"}
           </button>
         </div>
       </form>

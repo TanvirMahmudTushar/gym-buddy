@@ -13,10 +13,25 @@ export interface User {
   must_change_password: boolean
 }
 
+/** Log in and refresh. The refresh token is not here: it stays in an HttpOnly cookie the page cannot read. */
 export interface LoginResult {
   access_token: string
   token_type: "bearer"
+  /** Seconds until the access token expires (15 minutes). */
+  expires_in: number
   user: User
+}
+
+/** A browser where I am logged in. */
+export interface SessionInfo {
+  id: number
+  created_at: string
+  last_used_at: string
+  expires_at: string
+  ip: string | null
+  user_agent: string | null
+  /** True for this browser. */
+  current: boolean
 }
 
 export interface SignupBody {

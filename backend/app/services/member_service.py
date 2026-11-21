@@ -5,7 +5,17 @@ from typing import Literal
 
 from sqlmodel import Session, col, delete, func, select, update
 
-from app.models import Announcement, CheckIn, ClassBooking, GymClass, MemberCreate, Payment, User, utc_today
+from app.models import (
+    Announcement,
+    AuthSession,
+    CheckIn,
+    ClassBooking,
+    GymClass,
+    MemberCreate,
+    Payment,
+    User,
+    utc_today,
+)
 from app.services import profile_service
 from app.services.search import contains_any
 
@@ -154,7 +164,8 @@ def _check_deletable(member: User) -> None:
 
 def _delete_accounts(session: Session, ids: list[int]) -> int:
     """Delete these accounts and what belongs to them. The caller commits."""
-    # Check-ins and bookings go first: the database cascades too, but SQLite does not enforce that by default.
+    # Sessions, check-ins and bookings go first: the database cascades too, but SQLite does not enforce that by default.
+    session.exec(delete(AuthSession).where(col(AuthSession.user_id).in_(ids)))
     session.exec(delete(CheckIn).where(col(CheckIn.member_id).in_(ids)))
     session.exec(delete(ClassBooking).where(col(ClassBooking.member_id).in_(ids)))
     # Payments are kept (the revenue is real), only detached from the deleted member.
