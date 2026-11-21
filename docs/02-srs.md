@@ -43,6 +43,7 @@ This document lists the requirements for Gym Buddy: the MVP (gym member CRUD RES
 | Class | (Beta) A scheduled workout session with a name, start time, duration, capacity and an optional trainer |
 | Trainer | (Beta) An account with the role `trainer` who teaches classes; a class's `trainer_id` points at one. Classes from before trainers were accounts keep a free-text `trainer_name` |
 | Booking | (Beta) A member's reserved spot in a class |
+| Announcement | (Beta) News from the gym (a title, a message and an optional end date) that gym managers and admins post and every logged-in user reads until its end date |
 | Check-in | (Beta) A record that a member arrived at the gym, entered by staff |
 | RBAC | Role-Based Access Control: what a caller can do depends on their role |
 | JWT | JSON Web Token: a signed token that proves who the caller is |
@@ -322,6 +323,19 @@ Every Admin is also a logged-in user, so they can log out, edit their profile an
 | FR-70 | A trainer shall be able to list the classes they teach with `booked_count`: `when=upcoming` (soonest first, the default) or `when=past` (latest first), paginated, and shall land on My classes after logging in. Other roles get `403`. | Beta | US-17 |
 | FR-71 | A trainer shall be able to list the bookings of the classes they teach only; for any other class the response is `403`. | Beta | US-17 |
 
+### 3.7g Announcements — Beta
+
+Story US-27: as a gym manager, I want to post holiday hours, new classes and other news in the app, so members see them without a phone call or a notice on the wall.
+
+| ID | Requirement | Release | Story |
+|---|---|---|---|
+| FR-72 | A gym manager or admin shall be able to post an announcement: `title` (1–100 characters after trimming), `message` (1–1,000 characters after trimming) and an optional `ends_on` (a date, not before today in UTC: `422`). The system records who posted it and when. A user or trainer gets `403`. | Beta | US-27 |
+| FR-73 | Any logged-in user shall be able to list the current announcements (no `ends_on`, or `ends_on` today or later in UTC), newest first, paginated, each with `posted_at`, `updated_at` (null until edited) and the poster's current name. An announcement stops showing the day after its `ends_on`, with nothing to run. | Beta | US-27 |
+| FR-74 | A gym manager or admin shall be able to list every announcement including ended ones (`include_ended=true`; other roles `403`), edit one (only the fields sent change; `ends_on: null` removes the end date; a new `ends_on` before today is `422`) and delete one (`404` for an unknown id). An edit keeps the poster and `posted_at` and sets `updated_at`. | Beta | US-27 |
+| FR-75 | Members shall see the current announcements on My membership (the card is hidden when there are none), and gym managers and admins on the Overview, which links to the Announcements page. Deleting the account that posted an announcement keeps the announcement, without a poster name. | Beta | US-27 |
+
+> **Built so far (announcements):** FR-72 to FR-75. Email and push notifications are out of scope. Trainers can read the current announcements through the API but have no page showing them yet.
+
 > **Built so far (trainers):** FR-67 to FR-71. The class form picks the trainer from a list, offering an old class's text name until it is replaced; the admin dashboard also counts trainers.
 
 > **Built so far (password reset):** FR-64 to FR-66. Tokens now record their issue time to the fraction of a second, so a change or reset ends a login made earlier in the same second.
@@ -360,6 +374,9 @@ Every Admin is also a logged-in user, so they can log out, edit their profile an
 | `starts_at` | Date and time (ISO 8601, stored in UTC) | Beta |
 | `duration_minutes` | Integer 15–240 | Beta |
 | `capacity` | Integer 1–200 | Beta |
+| `title` (announcement) | 1–100 characters after trimming | Beta |
+| `message` (announcement) | 1–1,000 characters after trimming; line breaks are kept | Beta |
+| `ends_on` (announcement) | Optional date in `YYYY-MM-DD` format, not before today (UTC); `null` on edit removes it | Beta |
 
 ### 3.10 Membership states
 
@@ -404,6 +421,8 @@ A new member always starts as `Active` if `expires_on` is today or later. "Expir
 | View own payments | No | Yes | Yes | Yes | Yes |
 | Record payments, list a member's payments and all payments | No | No (`403`) | No (`403`) | Yes | Yes |
 | Void a payment, export payments as CSV | No | No (`403`) | No (`403`) | No (`403`) | Yes |
+| Read the current announcements | No | Yes | Yes | Yes | Yes |
+| Post, edit, delete announcements; list ended ones | No | No (`403`) | No (`403`) | Yes | Yes |
 
 Every endpoint except sign up, log in, refresh, health and the docs returns `401` when no valid token is sent.
 
@@ -665,6 +684,13 @@ Every endpoint except sign up, log in, refresh, health and the docs returns `401
 - When Zara sends `GET /api/v1/trainers/me/classes`, only Zara's classes are listed, soonest first; `GET /api/v1/classes/{Spin}/bookings` lists A; for Old Yoga it is `403`. A gym manager gets `403` for `/trainers/me/classes`.
 - After an admin changes Zara's role to User, Spin shows `trainer_id = null` and `trainer_name = "Zara"`, and Zara gets `403` for `/trainers/me/classes`.
 
+**AC-40 Announcements (FR-72 – FR-75)**
+- Given today is 22 November (UTC)
+- When a gym manager sends `POST /api/v1/announcements` `{"title": "Eid hours", "message": "Open 10:00 to 16:00", "ends_on": "2026-11-24"}`, the response is `201` with `posted_by_name` = the manager and `updated_at = null`; with `ends_on` 21 November it is `422`, and from a user or trainer `403`.
+- Member A's `GET /api/v1/announcements` lists Eid hours, newest first, until 24 November; on 25 November it is no longer listed, and A's `include_ended=true` is `403`. A gym manager's `include_ended=true` still lists it.
+- `PATCH` with only a new `title` succeeds on the ended announcement and sets `updated_at`; `ends_on: null` makes it current again; `DELETE` is `204`, then `404`.
+- After the poster's account is deleted, the announcement is still listed with `posted_by_name = null`.
+
 ## 6. Traceability
 
 | Story | Requirements | Endpoint (see [TDD, section 6](03-tdd.md#6-rest-api-design)) | Release |
@@ -692,6 +718,7 @@ Every endpoint except sign up, log in, refresh, health and the docs returns `401
 | US-22 | FR-38 | `POST /api/v1/admin/users/{id}/unban` | Beta |
 | US-23, US-24 | FR-16, FR-40, FR-41 | `GET` / `PATCH /api/v1/users/me`, `POST /api/v1/users/me/password` | Beta |
 | US-12, US-14, US-15, US-17 | FR-67 – FR-71 | `GET /api/v1/trainers`, `GET /api/v1/trainers/me/classes`, `POST` / `PATCH /api/v1/classes`, `GET /api/v1/classes/{id}/bookings`, `PATCH /api/v1/admin/users/{id}/role` | Beta |
+| US-27 | FR-72 – FR-75 | `GET` / `POST /api/v1/announcements`, `PATCH` / `DELETE /api/v1/announcements/{id}` | Beta |
 | US-24 | FR-64 – FR-66 | `POST /api/v1/admin/users/{id}/reset-password`, `POST /api/v1/users/me/password` | Beta |
 | US-20 | FR-62, FR-63 | `GET /api/v1/overview` | Beta |
 | US-11, US-16, US-17 | FR-58 – FR-61 | `GET /api/v1/members/{id}/bookings`, `DELETE /api/v1/members/{id}/bookings/{class_id}`, `GET /api/v1/users/me/bookings` | Beta |

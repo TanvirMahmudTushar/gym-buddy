@@ -683,6 +683,12 @@ button.linklike {
   margin: 0;
 }
 
+/* Announcements: keep the line breaks staff typed, and wrap long words. */
+.announcement-message {
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
 .wide-error {
   grid-column: 1 / -1;
 }

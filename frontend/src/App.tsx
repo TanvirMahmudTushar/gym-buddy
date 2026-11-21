@@ -2,6 +2,7 @@ import { useEffect, useState } from "react"
 import { useAuth } from "./context/AuthContext"
 import AppLayout from "./layouts/AppLayout"
 import AccountPage from "./pages/AccountPage"
+import AnnouncementsPage from "./pages/AnnouncementsPage"
 import ChoosePasswordPage from "./pages/ChoosePasswordPage"
 import ClassesPage from "./pages/ClassesPage"
 import DashboardPage from "./pages/DashboardPage"
@@ -17,7 +18,7 @@ import TimetablePage from "./pages/TimetablePage"
 import UsersPage from "./pages/UsersPage"
 import { type Page, type ProtectedPage, canOpen, homePage } from "./utils/auth"
 
-const PAGES: Page[] = ["login", "signup", "dashboard", "overview", "members", "classes", "payments", "membership", "timetable", "my-classes", "plans", "account", "users"]
+const PAGES: Page[] = ["login", "signup", "dashboard", "overview", "members", "classes", "payments", "announcements", "membership", "timetable", "my-classes", "plans", "account", "users"]
 const isProtected = (page: Page | null): page is ProtectedPage => page !== null && page !== "login" && page !== "signup"
 
 /** The page part of the URL hash: "members" for #/members?filter=expiring_soon. */
@@ -74,6 +75,7 @@ export default function App() {
       {page === "members" && <HomePage />}
       {page === "classes" && <ClassesPage />}
       {page === "payments" && <PaymentsPage />}
+      {page === "announcements" && <AnnouncementsPage />}
       {page === "membership" && <MembershipPage />}
       {page === "timetable" && <TimetablePage />}
       {page === "my-classes" && <MyClassesPage />}

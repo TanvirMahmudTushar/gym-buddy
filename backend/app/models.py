@@ -569,3 +569,83 @@ class Overview(SQLModel):
     payments_today: PaymentsToday
     # The next classes that have not started yet, soonest first.
     next_classes: list[ClassRead]
+
+
+# --- Announcements (news from the gym) ---
+
+AnnouncementTitle = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
+AnnouncementMessage = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=1000)]
+
+
+class Announcement(SQLModel, table=True):
+    """Holiday hours, a new class or other news, posted by a gym manager or admin for everyone to read."""
+
+    __tablename__ = "announcement"
+
+    id: int | None = Field(default=None, primary_key=True)
+    title: str = Field(max_length=100)
+    message: str = Field(max_length=1000)
+    # The last UTC day it shows on, inclusive (like a membership's expires_on). None: it shows until it is deleted.
+    ends_on: date | None = None
+    # Who posted it; null once that account is deleted, and the announcement stays.
+    posted_by: int | None = Field(default=None, foreign_key="app_user.id", ondelete="SET NULL")
+    posted_at: datetime = Field(default_factory=utc_now, index=True)
+    # Set on every edit; None for one that was never edited.
+    updated_at: datetime | None = None
+
+
+def _not_in_the_past(ends_on: date | None) -> date | None:
+    # An end date before today would hide the announcement straight away, so it is refused.
+    if ends_on is not None and ends_on < utc_today():
+        raise ValueError("ends_on cannot be before today (UTC)")
+    return ends_on
+
+
+class AnnouncementCreate(SQLModel):
+    title: AnnouncementTitle
+    message: AnnouncementMessage
+    ends_on: date | None = None
+
+    @field_validator("ends_on")
+    @classmethod
+    def ends_on_not_past(cls, value: date | None) -> date | None:
+        return _not_in_the_past(value)
+
+
+class AnnouncementUpdate(SQLModel):
+    title: AnnouncementTitle | None = None
+    message: AnnouncementMessage | None = None
+    # Sent: the new end date, or null to show it until it is deleted. Left out: the end date stays as it is.
+    ends_on: date | None = None
+
+    @field_validator("ends_on")
+    @classmethod
+    def ends_on_not_past(cls, value: date | None) -> date | None:
+        return _not_in_the_past(value)
+
+    @model_validator(mode="after")
+    def check_required_not_null(self) -> "AnnouncementUpdate":
+        # These columns are NOT NULL, so they may be left out but not sent as null.
+        for name in ("title", "message"):
+            if name in self.model_fields_set and getattr(self, name) is None:
+                raise ValueError(f"{name} cannot be null")
+        return self
+
+
+class AnnouncementRead(SQLModel):
+    id: int
+    title: str
+    message: str
+    ends_on: date | None
+    posted_at: UtcDateTime
+    # None until it is edited.
+    updated_at: UtcDateTime | None
+    # The poster's current account name; null once that account is deleted.
+    posted_by_name: str | None
+
+
+class AnnouncementPage(SQLModel):
+    items: list[AnnouncementRead]
+    total: int
+    offset: int
+    limit: int
