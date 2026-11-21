@@ -3,7 +3,7 @@
 from datetime import date, datetime, timezone
 from typing import Annotated, Literal
 
-from pydantic import EmailStr, PlainSerializer, StringConstraints, field_validator, model_validator
+from pydantic import BeforeValidator, EmailStr, PlainSerializer, StringConstraints, field_validator, model_validator
 from sqlmodel import Field, SQLModel
 
 Plan = Literal["monthly", "quarterly", "yearly"]
@@ -29,6 +29,23 @@ UtcDateTime = Annotated[datetime, PlainSerializer(lambda v: as_utc(v).isoformat(
 def utc_today() -> date:
     """'Today' for expiry checks is the server's UTC date (SRS C-7)."""
     return utc_now().date()
+
+
+def _blank_to_none(value: object) -> object:
+    """An empty or all-space text field means "not given", so it is stored as null."""
+    return (value.strip() or None) if isinstance(value, str) else value
+
+
+# Optional contact text: trimmed, and blank becomes null.
+ContactName = Annotated[Annotated[str, StringConstraints(max_length=100)] | None, BeforeValidator(_blank_to_none)]
+ContactPhone = Annotated[Annotated[str, StringConstraints(max_length=20)] | None, BeforeValidator(_blank_to_none)]
+EARLIEST_BIRTH_DATE = date(1900, 1, 1)
+
+
+def _check_birth_date(value: date | None) -> date | None:
+    if value is not None and not EARLIEST_BIRTH_DATE <= value <= utc_today():
+        raise ValueError(f"date_of_birth must be between {EARLIEST_BIRTH_DATE.isoformat()} and today")
+    return value
 
 
 class User(SQLModel, table=True):
@@ -60,6 +77,11 @@ class User(SQLModel, table=True):
     # A frozen membership cannot check in or book, whatever its expiry date.
     is_frozen: bool = False
     phone: str | None = Field(default=None, max_length=20)
+    # Contact and safety details: only the person themself and gym staff can read them (NFR-20).
+    # An emergency contact has both a name and a phone, or neither (app/services/profile_service.py).
+    date_of_birth: date | None = None
+    emergency_contact_name: str | None = Field(default=None, max_length=100)
+    emergency_contact_phone: str | None = Field(default=None, max_length=20)
     notes: str | None = Field(default=None, max_length=500)
 
 
@@ -92,9 +114,34 @@ class MemberCreate(SQLModel):
         return self
 
 
-class MemberUpdate(SQLModel):
+class ProfileRead(SQLModel):
+    """A person's contact and safety details. Only they and gym staff can read them (NFR-20)."""
+
+    phone: str | None
+    date_of_birth: date | None
+    emergency_contact_name: str | None
+    emergency_contact_phone: str | None
+
+
+class ProfileUpdate(SQLModel):
+    """Only the fields sent change; null or blank text clears one. The emergency contact's name and phone are set
+    or cleared together (checked against the saved values in app/services/profile_service.py)."""
+
+    phone: ContactPhone = None
+    date_of_birth: date | None = None
+    emergency_contact_name: ContactName = None
+    emergency_contact_phone: ContactPhone = None
+
+    @field_validator("date_of_birth")
+    @classmethod
+    def birth_date_in_range(cls, value: date | None) -> date | None:
+        return _check_birth_date(value)
+
+
+class MemberUpdate(ProfileUpdate):
+    """Staff edit a member: the membership plus the same contact and safety details the member edits themself."""
+
     name: FullName | None = None
-    phone: str | None = Field(default=None, max_length=20)
     plan: Plan | None = None
     expires_on: date | None = None
     is_frozen: bool | None = None
@@ -116,6 +163,9 @@ class MemberRead(SQLModel):
     name: str
     email: str
     phone: str | None
+    date_of_birth: date | None
+    emergency_contact_name: str | None
+    emergency_contact_phone: str | None
     plan: Plan
     joined_on: date
     expires_on: date

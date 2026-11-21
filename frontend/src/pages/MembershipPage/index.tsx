@@ -120,6 +120,9 @@ export default function MembershipPage() {
         {status === "active" && <p className="hint">{expiryNote(member.expires_on)}.</p>}
         {status === "expired" && <p className="hint">Your membership has expired. Renew it at the front desk to book classes; the prices are below.</p>}
         {status === "frozen" && <p className="hint">Your membership is frozen. Ask the front desk to unfreeze it to book classes.</p>}
+        <p className="hint">
+          <a href="#/account">Keep your phone, date of birth and emergency contact up to date</a> on My account.
+        </p>
       </section>
       <AnnouncementsCard hideWhenEmpty />
       <section className="card" aria-labelledby="visits-heading">

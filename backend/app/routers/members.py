@@ -84,7 +84,8 @@ def get_member(member_id: int, session: SessionDep) -> User:
 
 @router.patch("/{member_id}", response_model=MemberRead)
 def update_member(member_id: int, body: MemberUpdate, session: SessionDep) -> User:
-    """Only the fields sent change. A later expires_on renews; is_frozen true / false freezes / unfreezes."""
+    """Only the fields sent change. A later expires_on renews; is_frozen true / false freezes / unfreezes.
+    phone, date_of_birth and the emergency contact follow the same rules as PATCH /users/me/profile."""
     return member_service.update_member(session, member_id, body.model_dump(exclude_unset=True))
 
 

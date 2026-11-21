@@ -34,11 +34,11 @@ vercel.json       Vercel setup: /api/* goes to backend, everything else to front
 
 Everyone who signs up is a **User**. Only an admin can change a role.
 
-**Members are users.** There is no separate member table: a member is a user whose account has a membership (a plan, joined and expiry dates, a frozen flag, phone and notes). The person signs up first, then staff start their membership.
+**Members are users.** There is no separate member table: a member is a user whose account has a membership (a plan, joined and expiry dates, a frozen flag, phone and notes). The person signs up first, then staff start their membership. Every account can also hold a date of birth and an emergency contact, which only the person and the staff can read.
 
 | Role | Can do |
 |---|---|
-| User | Log in, see and rename their own account, see their own membership, visits and payments and the gym's announcements, book and cancel classes, change their password |
+| User | Log in, see and rename their own account, keep their phone, date of birth and emergency contact up to date, see their own membership, visits and payments and the gym's announcements, book and cancel classes, change their password |
 | Trainer | Log in, see and rename their own account, change their password, and see the classes they teach with who booked each one |
 | Gym Manager | Everything a User can, plus manage gym members (add, edit, renew, freeze, delete), record check-ins, take payments and see the list of all payments, run the class timetable, and post announcements |
 | Admin | Everything a Gym Manager can, plus list users and change their roles (including giving the Trainer role), set plan prices, void payments and export them as CSV |
@@ -51,9 +51,10 @@ Pages: `#/login`, `#/signup`, `#/dashboard` (Admin), `#/overview` (Gym Manager, 
 - **A member's bookings:** in the member details, **Bookings** lists the classes they booked, soonest first, with **Cancel** so the front desk can cancel for them; **Show past bookings** lists the classes that have already started.
 - **Renewals due:** the **Expiring soon** chip on the Members page lists the active (not frozen) memberships that end today or within the next 7 days, soonest first, so staff know who to remind. Every member whose expiry is that close shows "today", "tomorrow" or "in 5 days" next to the date. The filter is kept in the address (`#/members?filter=expiring_soon`), so the Dashboard can link to it.
 - **Checked in today:** a card at the top of the Members page lists everyone who has arrived since midnight UTC. Click a name to open that member.
+- **Contact and safety details:** the member details show the member's phone, date of birth (with their age) and emergency contact (a name and a phone). **Edit** changes them with the same checks the member gets on My account, so the front desk can fill them in for someone, and either side sees the other's changes. A User or Trainer can never read another person's details: every member endpoint answers them `403`.
 - **Find a member:** the search box on the Members page finds members by part of their name, email or phone, in any case, together with the status chips.
 - **Waiting for a membership:** a card on the Members page lists the people who signed up in the app but have no membership yet, newest first, with its own search. **Start membership** fills their email into **Add member** and moves to the plan, so nobody types an email by hand.
-- **Add a member:** the person signs up first. On the Members page, **Add member** takes the email they signed up with, plus plan, expiry date and optional phone and notes; their name comes from their account. An email with no account is refused ("Ask the person to sign up first"), and so is an account that already has a membership.
+- **Add a member:** the person signs up first. On the Members page, **Add member** takes the email they signed up with, plus plan, expiry date and optional phone and notes; their name comes from their account. Leaving the phone empty keeps one the person already saved on My account. An email with no account is refused ("Ask the person to sign up first"), and so is an account that already has a membership.
 - **Open a member from anywhere:** every member's name in the Payments list, a class's bookings and Checked in today opens that member on the Members page. The address keeps the open member and the filter (`#/members?filter=expiring_soon&member=5`), so a reload or a shared link shows the same.
 - **Delete a member:** deletes the person's whole account. They can no longer log in, and their check-ins and class bookings are removed; their payments stay on record. Only a User's account can be deleted here: a Gym Manager or Admin who has a membership must have their role changed first.
 - **Classes:** the **Classes** page lists upcoming classes (or all of them), in start-time order. Add a class with a name, start time, length (15 to 240 minutes) and places (1 to 200), plus an optional description and an optional trainer, picked from the accounts with the Trainer role. The class shows the trainer's current name, so a trainer who changes their name on My account shows the new one everywhere. A class from before trainers were accounts keeps its old text name: editing it offers that name ("Lina (name only)") until a trainer or **No trainer** is chosen. Edit or delete a class, and open **Bookings** to see who has booked it. Capacity cannot be lowered below the bookings already made, and deleting a class deletes its bookings. A member's bookings are made by the member (see **User features**).
@@ -70,6 +71,7 @@ Pages: `#/login`, `#/signup`, `#/dashboard` (Admin), `#/overview` (Gym Manager, 
 - **Plans and prices:** on My membership, what each plan costs and how many days it adds, with the person's own plan marked, and how renewing at the front desk works.
 - **My payments:** on My membership, the person's own payments, newest first. A voided payment shows as voided with the reason. Nobody can see another person's payments.
 - **Classes:** upcoming classes with places left. **Book** takes a place, **Cancel booking** frees it (until the class starts; after that the booking is history and cannot be cancelled by anyone). Booking needs a valid membership (not frozen or expired) and a class that has not started; a full class or one you already booked is refused with a clear message. Two people booking the last place at the same moment cannot both get it.
+- **My contact details:** on My account, every logged-in person keeps their own phone, date of birth and emergency contact up to date. The date of birth must be between 1 Jan 1900 and today, and the emergency contact needs both a name and a phone, or neither. Only the person and the gym staff can see them; staff see them in the member details.
 - **My account:** change your name, and change your password. After a password change every earlier login stops working and you log in again with the new password.
 
 **Trainer features**
@@ -128,6 +130,8 @@ Interactive docs: `/api/docs` (for example http://localhost:8000/api/docs).
 | Cancel my booking | `DELETE /api/v1/classes/{id}/bookings` | `204` | `400` (class has started), `404` |
 | A member's bookings | `GET /api/v1/members/{id}/bookings?when=upcoming&offset=0&limit=20` | `200` same shape as My bookings | `403`, `404`, `422` |
 | Cancel for a member | `DELETE /api/v1/members/{id}/bookings/{class_id}` | `204` | `400` (class has started), `403`, `404` |
+| My contact details | `GET /api/v1/users/me/profile` | `200` `{phone, date_of_birth, emergency_contact_name, emergency_contact_phone}`, my own only | `401` |
+| Change my contact details | `PATCH /api/v1/users/me/profile` (only the fields sent; `null` or blank text clears one) | `200` the same shape | `401`, `422` (date of birth before 1900 or in the future, too long, or an emergency contact with only a name or only a phone) |
 | My membership | `GET /api/v1/users/me/membership` | `200` member | `401`, `404` (no membership yet) |
 | My visits | `GET /api/v1/users/me/check-ins?offset=0&limit=20` | `200` `{items, total, offset, limit}`, newest first | `401`, `404` |
 | Change my password | `POST /api/v1/users/me/password` `{current_password, new_password}` | `204` (also ends the must-choose-a-new-password state) | `400` (wrong current password, or the new one is the same), `401`, `422` |
@@ -150,10 +154,10 @@ Interactive docs: `/api/docs` (for example http://localhost:8000/api/docs).
 | Reset a password (admin) | `POST /api/v1/admin/users/{id}/reset-password` | `200` `{user, temporary_password}` (`Cache-Control: no-store`); the user's `must_change_password` is `true` until they choose a new one | `400` (yourself or another admin), `403`, `404` |
 
 - Every `/api/v1/members` endpoint needs `Authorization: Bearer <access_token>` from a Gym Manager or Admin: `401` without a token, `403` for a User.
-- A member's `id` is their user id. A member is `{id, name, email, phone, plan, joined_on, expires_on, is_frozen, notes}`.
+- A member's `id` is their user id. A member is `{id, name, email, phone, date_of_birth, emergency_contact_name, emergency_contact_phone, plan, joined_on, expires_on, is_frozen, notes}`.
 - `status` filter: `active` (valid), `expired` (expiry date passed), `frozen` (`is_frozen = true`) or `expiring_soon` (not frozen, expiring from today to 7 days from today, both included).
 - `total` counts every member matching the filter, not just the page returned.
-- `PATCH` changes only the fields sent (`name`, `phone`, `plan`, `expires_on`, `is_frozen`, `notes`): a later `expires_on` renews, `is_frozen: true` freezes.
+- `PATCH` changes only the fields sent (`name`, `phone`, `date_of_birth`, `emergency_contact_name`, `emergency_contact_phone`, `plan`, `expires_on`, `is_frozen`, `notes`): a later `expires_on` renews, `is_frozen: true` freezes. The contact fields follow the same rules as `PATCH /api/v1/users/me/profile`.
 
 Example body for `POST`:
 

@@ -1,6 +1,8 @@
 import { type FormEvent, useState } from "react"
 import type { Member, MemberUpdate, Plan } from "../types/member"
 import { PLANS } from "../utils/member"
+import { type ProfileErrors, type ProfileForm, checkProfile, toProfileBody, toProfileForm } from "../utils/profile"
+import ProfileFields from "./ProfileFields"
 
 interface Props {
   member: Member
@@ -12,30 +14,32 @@ interface Props {
 export default function EditMemberForm({ member, saving, onSave, onCancel }: Props) {
   const [form, setForm] = useState({
     name: member.name,
-    phone: member.phone ?? "",
     plan: member.plan,
     notes: member.notes ?? "",
   })
+  // Phone, date of birth and emergency contact: the same fields and checks as the member's own My account.
+  const [profile, setProfile] = useState<ProfileForm>(() => toProfileForm(member))
   const [nameError, setNameError] = useState("")
+  const [profileErrors, setProfileErrors] = useState<ProfileErrors>({})
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault()
-    if (!form.name.trim()) {
-      setNameError("Enter the member's name.")
-      return
-    }
-    setNameError("")
+    const nextNameError = form.name.trim() ? "" : "Enter the member's name."
+    const nextProfileErrors = checkProfile(profile)
+    setNameError(nextNameError)
+    setProfileErrors(nextProfileErrors)
+    if (nextNameError || Object.keys(nextProfileErrors).length) return
     onSave({
       name: form.name.trim(),
-      phone: form.phone.trim() || null,
       plan: form.plan,
       notes: form.notes.trim() || null,
+      ...toProfileBody(profile),
     })
   }
 
   return (
     <form className="fields" onSubmit={handleSubmit} noValidate>
-      <div className="field wide">
+      <div className="field">
         <label htmlFor="edit-name">Full name</label>
         <input
           id="edit-name"
@@ -47,16 +51,6 @@ export default function EditMemberForm({ member, saving, onSave, onCancel }: Pro
         {nameError && <span className="field-error">{nameError}</span>}
       </div>
       <div className="field">
-        <label htmlFor="edit-phone">Phone</label>
-        <input
-          id="edit-phone"
-          value={form.phone}
-          onChange={(e) => setForm({ ...form, phone: e.target.value })}
-          maxLength={20}
-          autoComplete="off"
-        />
-      </div>
-      <div className="field">
         <label htmlFor="edit-plan">Plan</label>
         <select id="edit-plan" value={form.plan} onChange={(e) => setForm({ ...form, plan: e.target.value as Plan })}>
           {PLANS.map((p) => (
@@ -66,6 +60,12 @@ export default function EditMemberForm({ member, saving, onSave, onCancel }: Pro
           ))}
         </select>
       </div>
+      <ProfileFields
+        idPrefix="edit"
+        form={profile}
+        errors={profileErrors}
+        onChange={(key, value) => setProfile((prev) => ({ ...prev, [key]: value }))}
+      />
       <div className="field wide">
         <label htmlFor="edit-notes">Notes</label>
         <textarea
