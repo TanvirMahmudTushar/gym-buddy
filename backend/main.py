@@ -16,6 +16,7 @@ from app.routers import (
     classes,
     groups,
     members,
+    moderation,
     overview,
     payments,
     plans,
@@ -96,6 +97,7 @@ app.include_router(announcements.router)
 app.include_router(activity.router)
 app.include_router(workouts.router)
 app.include_router(groups.router)
+app.include_router(moderation.router)
 
 # Run at import (not in a lifespan hook) so it also works on Vercel's serverless functions.
 create_db_and_tables()

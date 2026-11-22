@@ -145,6 +145,7 @@ backend/
       activity.py      # /api/v1/admin/activity (list, CSV export, security view: admin)
       workouts.py      # /api/v1/workouts (my workouts, assigned to me, add, read, edit, assign, delete: anyone logged in, by group permission)
       groups.py        # /api/v1/groups (my groups, start, read, rename, delete, a group's workouts and members)
+      moderation.py    # /api/v1/admin/workouts and /api/v1/admin/groups (list, CSV export, delete one or many: admin)
       classes.py       # (Beta) /api/v1/classes/* (classes and bookings)
     services/
       __init__.py
@@ -163,6 +164,7 @@ backend/
       activity_service.py # the activity log: record() (called by the other services), list, CSV export, failed-login summary (section 10.5)
       csv_export.py      # the CSV writer the payments and activity exports share: byte order mark, formula-safe cells, UTC times
       group_service.py   # training groups: access() and require() on rbac.group_permissions(), list with counts, members, delete_for_accounts(); raises GroupNotFoundError / GroupPermissionError / GroupOwnerError
+      moderation_service.py # admin lists, CSVs and deletes of anyone's workouts and groups (one activity row per delete)
       workout_service.py # personal and group workouts: lists, add, edit, assign, delete; raises WorkoutNotFoundError / NotGroupWorkoutError / AssigneeNotInGroupError
   alembic/             # (Beta) migration scripts
   alembic.ini          # (Beta)
@@ -173,7 +175,7 @@ frontend/
     components/        # add form, member list, details panel
     context/           # AuthContext: who is logged in, login / signup / logout; restores the login with a refresh on load
     layouts/           # AppLayout: header, and the pages each role may open
-    pages/             # HomePage (members), LoginPage, SignupPage, AccountPage, DashboardPage (admin), OverviewPage (gym manager, admin), UsersPage (admin; one user's details at `#/users?user=ID`), ClassesPage (gym manager, admin), PaymentsPage (gym manager, admin), MembershipPage and TimetablePage (user), MyClassesPage (trainer), PlansPage (admin), AnnouncementsPage (gym manager, admin), ActivityPage and SecurityPage (admin), WorkoutsPage and GroupsPage (everyone; GroupsPage shows one group with `#/groups?group=ID`); (Later) AboutPage, MemberDetailsPage; (Beta, Could) MyMembership, Classes, AdminDashboard
+    pages/             # HomePage (members), LoginPage, SignupPage, AccountPage, DashboardPage (admin), OverviewPage (gym manager, admin), UsersPage (admin; one user's details at `#/users?user=ID`), ClassesPage (gym manager, admin), PaymentsPage (gym manager, admin), MembershipPage and TimetablePage (user), MyClassesPage (trainer), PlansPage (admin), AnnouncementsPage (gym manager, admin), ActivityPage, SecurityPage and ModerationPage (admin), WorkoutsPage and GroupsPage (everyone; GroupsPage shows one group with `#/groups?group=ID`); (Later) AboutPage, MemberDetailsPage; (Beta, Could) MyMembership, Classes, AdminDashboard
     services/          # fetch calls to the API; api.ts keeps the access token in memory and refreshes it once on a 401
     types/             # TypeScript types
     utils/             # display helpers; membersLink() builds the #/members?filter=&member= address
@@ -570,6 +572,10 @@ erDiagram
 | `BulkUserAction` | Bulk ban / unban | `ids` (1 to 100 account ids; duplicates count once), `reason?` (≤ 500) | Beta |
 | `BulkBanResult` / `BulkUnbanResult` | Bulk ban / unban response | `banned` (or `unbanned`): the ids changed; `skipped: [{id, name?, reason}]` | Beta |
 | `SessionsRevoked` | End a user's sessions | `revoked` (how many active sessions ended) | Beta |
+| `ModerationWorkoutFilter` / `ModerationGroupFilter` | Moderation filters for the lists and CSVs | workouts: `owner_id?`, `group_id?`, `kind?` (`personal` / `group`), `date_from?`, `date_to?` (the workout's date), `q?`; groups: `owner_id?`, `date_from?`, `date_to?` (UTC day made), `q?`; `date_from` after `date_to` is `422` | Beta |
+| `ModerationWorkoutRead` / `ModerationWorkoutPage` | Admin workout list | `WorkoutRead` + `owner_email?`; page: `items`, `total`, `offset`, `limit` | Beta |
+| `ModerationGroupRead` / `ModerationGroupPage` | Admin group list | `id`, `name`, `owner_id`, `owner_name`, `owner_email`, `created_at`, `member_count` (owner included), `workout_count` | Beta |
+| `ContentBulkDelete` / `ContentDeleted` | Delete many | `ids` (1 to 100) / `deleted` (how many; unknown ids skipped) | Beta |
 | `AdminUserDetail` | A user's details | `AdminUserRead` + `joined_on?`, `locked_until?`, `sessions: AdminSessionRead[]` (`id`, `created_at`, `last_used_at`, `expires_at`, `ip?`, `user_agent?`), `workouts {personal, in_groups, assigned}`, `groups [{id, name, is_owner, member_count}]`, `recent_activity: ActivityRead[]` (10); never the password hash | Beta |
 | `PasswordResetResult` | Admin password reset | `user: AdminUserRead`, `temporary_password` (shown once) | Beta |
 | `AdminStats` | Dashboard | `members {total, active, expired, frozen, new_last_7_days, expiring_soon}`, `classes {total, upcoming}`, `check_ins {today, last_7_days}`, `users {total, users, trainers, gym_managers, admins, banned, new_last_7_days}`, `workouts {total, last_7_days}`, `groups {total}` | Beta |
@@ -706,6 +712,12 @@ In the MVP no login is needed. In the Beta the member endpoints become admin-onl
 | `POST` | `/api/v1/admin/users/bulk-ban` | Admin (`users:ban`) | `BulkUserAction` | `200` `BulkBanResult` (one transaction; one `ban` row per banned user) | `403`, `422` | FR-101 |
 | `POST` | `/api/v1/admin/users/bulk-unban` | Admin (`users:ban`) | `BulkUserAction` | `200` `BulkUnbanResult` | `403`, `422` | FR-101 |
 | `GET` | `/api/v1/admin/users/{user_id}` | Admin (`users:read`) | — | `200` `AdminUserDetail` | `403`, `404`, `422` | FR-99 |
+| `GET` | `/api/v1/admin/workouts?owner_id&group_id&kind&date_from&date_to&q&offset&limit` | Admin (`content:moderate`) | — | `200` `ModerationWorkoutPage` (latest workout date first) | `401`, `403`, `422` | FR-104 |
+| `GET` | `/api/v1/admin/workouts/export.csv` (same filters) | Admin (`content:moderate`) | — | `200` `text/csv` `workouts-YYYY-MM-DD.csv`, `Cache-Control: no-store`; adds an `export` row | `401`, `403`, `422` | FR-108 |
+| `POST` / `DELETE` | `/api/v1/admin/workouts/bulk-delete` / `/api/v1/admin/workouts/{workout_id}` | Admin (`content:moderate`) | `ContentBulkDelete` / — | `200` `ContentDeleted` / `204`; one `workout_delete` row each | `403`, `404` (single), `422` | FR-106, FR-107 |
+| `GET` | `/api/v1/admin/groups?owner_id&date_from&date_to&q&offset&limit` | Admin (`content:moderate`) | — | `200` `ModerationGroupPage` (newest first) | `401`, `403`, `422` | FR-105 |
+| `GET` | `/api/v1/admin/groups/export.csv` (same filters) | Admin (`content:moderate`) | — | `200` `text/csv` `groups-YYYY-MM-DD.csv`; adds an `export` row | `401`, `403`, `422` | FR-108 |
+| `POST` / `DELETE` | `/api/v1/admin/groups/bulk-delete` / `/api/v1/admin/groups/{group_id}` | Admin (`content:moderate`) | `ContentBulkDelete` / — | `200` `ContentDeleted` / `204`; the groups' workouts and memberships go too (`group_service.delete_groups()`); one `group_delete` row each | `403`, `404` (single), `422` | FR-106, FR-107 |
 | `POST` | `/api/v1/admin/users/{user_id}/revoke-sessions` | Admin (`users:revoke_sessions`) | — | `200` `SessionsRevoked` (a `session_revoke` row when at least one ended) | `400` (yourself), `403`, `404` | FR-100 |
 | `PATCH` | `/api/v1/admin/users/{user_id}/role` | Admin | `RoleUpdate` | `200` `AdminUserRead` (from `trainer` to another role: the trainer's classes keep the name as text) | `400` (own role), `403`, `404` | FR-22, FR-67 |
 | `GET` | `/api/v1/admin/stats` | Admin | — | `200` `AdminStats` | `403` | FR-35 |
@@ -952,13 +964,13 @@ class Permission(str, Enum):
     MEMBERS_READ = "members:read"
     CLASSES_TEACH = "classes:teach"
     USERS_BAN = "users:ban"
-    ...                                   # 19 in all (SRS 3.11)
+    ...                                   # 20 in all (SRS 3.11)
 
 ROLE_PERMISSIONS = {
     "user": frozenset(),                  # only their own account and data
     "trainer": frozenset({Permission.CLASSES_TEACH}),
     "gym_manager": _GYM_MANAGER,          # 7 permissions
-    "admin": _GYM_MANAGER | {...},        # those + 11 admin permissions
+    "admin": _GYM_MANAGER | {...},        # those + 12 admin permissions
 }
 
 def require_permission(*permissions: Permission):
@@ -1002,6 +1014,7 @@ def ban_user(user_id: int, session: SessionDep, admin: Banner, body: BanRequest 
 | `GET /admin/stats`, `GET /admin/revenue` | `dashboard:read` |
 | `GET /admin/users`, `GET /admin/users/{id}` / `PATCH .../role` / `POST .../ban`, `.../unban`, `POST /admin/users/bulk-ban`, `/bulk-unban` / `POST .../reset-password` | `users:read` / `users:change_role` / `users:ban` / `users:reset_password` |
 | `POST /admin/users/{id}/revoke-sessions` / `GET /admin/users/export.csv` | `users:revoke_sessions` / `users:export` |
+| `GET` / `POST` / `DELETE` `/admin/workouts*`, `/admin/groups*` (moderation) | `content:moderate` |
 | `PUT /admin/plans/{plan}` | `plans:edit` |
 | `GET /admin/activity`, `GET /admin/activity/export.csv`, `GET /admin/activity/security` | `activity:read` |
 | `/workouts/*`, `/groups/*` | `CurrentUser`, then the group permissions below (`rbac.group_permissions()`) inside the service |
@@ -1104,7 +1117,8 @@ stats = AdminStats(
 | `role_change` | `user_service.change_role()`, only when the role differs | the admin / the account | `user → trainer` |
 | `ban`, `unban` | `user_service.ban_user()`, `unban_user()`, only when the state changes | the admin / the account | the reason and how many sessions ended |
 | `account_delete` | `member_service.delete_member()`, `bulk_delete_members()` (one row each) | the gym manager or admin / the email only | the person's name and how it was deleted |
-| `export` | `payment_service.export_csv()`, `activity_service.export_csv()`, after the rows are read | the admin / — | the file, the row count and the filters |
+| `export` | `payment_service.export_csv()`, `activity_service.export_csv()`, `user_service.export_csv()`, `moderation_service.export_*_csv()`, after the rows are read | the admin / — | the file, the row count and the filters |
+| `workout_delete`, `group_delete` | `moderation_service.delete_workouts()` / `delete_groups()`, one row per item, in the delete's transaction | the admin / the owner (by email if the account is gone) | the title, date and personal or group; or the group's name and how many workouts went with it |
 
 - **Client address:** routes take `ClientDep` (`app/request_info.py`), a `Client(ip, user_agent)` built from the request, and pass it to the service. On Vercel (`VERCEL` is set) the IP is the first address in `X-Forwarded-For`, which the platform overwrites; elsewhere it is the connection's address, because the header could be made up. Both are cut to the column lengths.
 - **No secrets (NFR-23):** `record()` takes no request body. Every `details` text is built in the service from names, roles, reasons, ids and counts; no service passes a password, the temporary password, a token or a hash. The end-to-end check scans every row for the passwords and tokens it used.

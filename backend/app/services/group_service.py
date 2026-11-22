@@ -158,10 +158,16 @@ def delete_group(session: Session, user: User, group_id: int) -> None:
     enforce that by default, so the rows are deleted here."""
     group, permissions = access(session, user, group_id)
     require(permissions, GroupPermission.MANAGE)
-    session.exec(delete(Workout).where(col(Workout.group_id) == group_id))
-    session.exec(delete(GroupMember).where(col(GroupMember.group_id) == group_id))
-    session.delete(group)
+    delete_groups(session, [group.id])
     session.commit()
+
+
+def delete_groups(session: Session, ids: list[int]) -> None:
+    """Delete these groups with their workouts and memberships (the owner's delete, a moderator's delete and an
+    account deletion all come here). The caller commits."""
+    session.exec(delete(Workout).where(col(Workout.group_id).in_(ids)))
+    session.exec(delete(GroupMember).where(col(GroupMember.group_id).in_(ids)))
+    session.exec(delete(TrainingGroup).where(col(TrainingGroup.id).in_(ids)))
 
 
 def _member_read(member: GroupMember, account: User, show_email: bool) -> dict:
@@ -271,9 +277,7 @@ def delete_for_accounts(session: Session, ids: list[int]) -> None:
     The caller commits."""
     owned = list(session.exec(select(TrainingGroup.id).where(col(TrainingGroup.owner_id).in_(ids))).all())
     if owned:
-        session.exec(delete(Workout).where(col(Workout.group_id).in_(owned)))
-        session.exec(delete(GroupMember).where(col(GroupMember.group_id).in_(owned)))
-        session.exec(delete(TrainingGroup).where(col(TrainingGroup.id).in_(owned)))
+        delete_groups(session, owned)
     session.exec(delete(GroupMember).where(col(GroupMember.user_id).in_(ids)))
     session.exec(delete(Workout).where(col(Workout.owner_id).in_(ids), col(Workout.group_id).is_(None)))
     session.exec(update(Workout).where(col(Workout.owner_id).in_(ids)).values(owner_id=None))
