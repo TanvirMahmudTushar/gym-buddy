@@ -7,6 +7,8 @@
 # Routes about the caller's own data (my profile, my bookings, my sessions) need only a login: they read the
 # caller's id from the token, never an id from the request, so nobody can reach another person's records there.
 #
+# Training groups add a second, per-group layer (GroupPermission, at the end): what one person may do in one group.
+#
 # Import note: this module imports app.deps (who is logged in). Nothing that app.deps imports may import this
 # module back, or Python would hit a circular import.
 from collections.abc import Callable
@@ -15,7 +17,7 @@ from enum import Enum
 from fastapi import HTTPException
 
 from app.deps import CurrentUser
-from app.models import User
+from app.models import GroupMember, User
 
 
 class Permission(str, Enum):
@@ -107,3 +109,32 @@ def require_permission(*permissions: Permission) -> Callable[[User], User]:
 def me(user: User) -> dict:
     """The caller's own account plus the permissions of their role (MeRead), for the app's menus and page guards."""
     return {**user.model_dump(), "permissions": sorted(p.value for p in permissions_for(user.role))}
+
+
+# --- Per-group permissions (training groups) ---
+
+
+class GroupPermission(str, Enum):
+    """What one person may do in one training group. Unlike the role permissions above, these depend on the group:
+    the owner holds all of them, each member holds READ plus the ones the owner ticked, anyone else none."""
+
+    READ = "read"  # see the group, its members and its workouts
+    CREATE = "create"  # add a workout to the group (group_member.can_create)
+    UPDATE = "update"  # edit or delete the group's workouts (group_member.can_update)
+    ASSIGN = "assign"  # assign a group workout to someone in the group (group_member.can_assign)
+    MANAGE = "manage"  # rename or delete the group; add, remove and set the permissions of members (owner only)
+
+
+def group_permissions(user: User, owner_id: int, member: GroupMember | None) -> frozenset[GroupPermission]:
+    """The caller's permissions in a group, given its owner and the caller's group_member row (None if not one).
+    An empty set means an outsider: groups are private, so the caller answers 404, as if the group did not exist."""
+    if is_owner(user, owner_id):
+        return frozenset(GroupPermission)
+    if member is None:
+        return frozenset()
+    flags = {
+        GroupPermission.CREATE: member.can_create,
+        GroupPermission.UPDATE: member.can_update,
+        GroupPermission.ASSIGN: member.can_assign,
+    }
+    return frozenset({GroupPermission.READ, *(p for p, allowed in flags.items() if allowed)})
