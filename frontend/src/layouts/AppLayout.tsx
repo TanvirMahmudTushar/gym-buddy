@@ -39,7 +39,7 @@ export default function AppLayout({ page, children, locked = false }: Props) {
           <>
             {!locked && (
               <nav aria-label="Main">
-                {LINKS.filter((l) => canOpen(user.role, l.page)).map((l) => (
+                {LINKS.filter((l) => canOpen(user, l.page)).map((l) => (
                   <a key={l.page} href={`#/${l.page}`} aria-current={page === l.page ? "page" : undefined}>
                     {l.label}
                   </a>

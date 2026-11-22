@@ -126,7 +126,8 @@ backend/
     database.py        # engine, get_session()
     models.py          # tables + Create / Update / Read schemas
     security.py        # password hashing (Argon2 + pepper), access tokens (JWT create/verify), refresh token generation and hashing
-    deps.py            # get_auth (token + session check), get_current_user, require_roles
+    deps.py            # get_auth (token + session check), get_current_user
+    rbac.py            # permission constants, role → permission map, require_permission(), has_permission(), is_owner()
     request_info.py    # client_ip() (X-Forwarded-For on Vercel) and user_agent() for the session list
     routers/
       __init__.py
@@ -450,6 +451,7 @@ erDiagram
 | `TokenResponse` | Login / refresh | `access_token`, `token_type: "bearer"`, `expires_in` (900), `user` (`UserRead`); the refresh token is only in the cookie | Beta |
 | `SessionRead` | My sessions | `id`, `created_at`, `last_used_at`, `expires_at`, `ip`, `user_agent`, `current` (the session of this request); never the token hashes | Beta |
 | `UserRead` | User responses | `id`, `email`, `name`, `role`, `created_at` (never `password_hash`) | Beta |
+| `MeRead` | My own account (`/users/me`, login, refresh) | `UserRead` fields + `permissions` (the caller's role's permissions from `app/rbac.py`) | Beta |
 | `RoleUpdate` | Change role | `role` | Beta |
 | `ProfileUpdate` | Change own name | `name` | Beta |
 | `PasswordChange` | Change own password | `current_password`, `new_password` | Beta |
@@ -548,8 +550,8 @@ In the MVP no login is needed. In the Beta the member endpoints become admin-onl
 | `POST` | `/api/v1/auth/login` | Guest | `LoginRequest` | `200` `TokenResponse` + cookie | `401`, `429` | FR-13, FR-34 |
 | `POST` | `/api/v1/auth/refresh` | Refresh cookie | — | `200` `TokenResponse` + new cookie (none when another request rotated the same token within 30 s); `204` with no cookie | `401` + cookie cleared (expired, revoked, unknown or reused) | FR-14, FR-82 |
 | `POST` | `/api/v1/auth/logout` | Refresh cookie | — | `204`, session revoked, cookie cleared (always `204`) | — | FR-15 |
-| `GET` | `/api/v1/users/me` | Member | — | `200` `UserRead` | `401` | FR-16 |
-| `PATCH` | `/api/v1/users/me` | Member | `ProfileUpdate` | `200` `UserRead` | `422` | FR-40 |
+| `GET` | `/api/v1/users/me` | Member | — | `200` `MeRead` | `401` | FR-16, FR-83 |
+| `PATCH` | `/api/v1/users/me` | Member | `ProfileUpdate` | `200` `MeRead` | `422` | FR-40 |
 | `POST` | `/api/v1/users/me/password` | Any logged-in user, also while a new password is due | `PasswordChange` | `204` (every other session is revoked, this one stays; clears `must_change_password`) | `400` (wrong current password or same password), `401`, `422` | FR-41, FR-66 |
 | `GET` | `/api/v1/users/me/sessions` | Any logged-in user | — | `200` `SessionRead[]`, active only, most recently used first | `401` | FR-80 |
 | `DELETE` | `/api/v1/users/me/sessions/{id}` | Any logged-in user | — | `204` (that session's refresh and access tokens stop working) | `401`, `404` (not mine or not active) | FR-81 |
@@ -785,47 +787,65 @@ flowchart LR
 
 ### 10.3 Permission dependencies
 
-Permissions are FastAPI dependencies, so each route declares what it needs:
+All the rules live in `app/rbac.py` (final spec 2.2: one reusable RBAC module):
 
 ```python
-bearer = HTTPBearer()
+class Permission(str, Enum):
+    MEMBERS_READ = "members:read"
+    CLASSES_TEACH = "classes:teach"
+    USERS_BAN = "users:ban"
+    ...                                   # 16 in all (SRS 3.11)
 
-def get_current_user(creds=Depends(bearer), session: Session = Depends(get_session)) -> AppUser:
-    payload = decode_access_token(creds.credentials)   # 401 if invalid or expired
-    user = session.get(AppUser, int(payload["sub"]))
-    if user is None:
-        raise HTTPException(401, "Invalid token")
-    if user.is_banned:
-        raise HTTPException(403, "Account banned")   # checked on every request, not only at login
-    return user
+ROLE_PERMISSIONS = {
+    "user": frozenset(),                  # only their own account and data
+    "trainer": frozenset({Permission.CLASSES_TEACH}),
+    "gym_manager": _GYM_MANAGER,          # 7 permissions
+    "admin": _GYM_MANAGER | {...},        # those + 8 admin permissions
+}
 
-def require_admin(user: AppUser = Depends(get_current_user)) -> AppUser:
-    if user.role != "admin":
-        raise HTTPException(403, "Admin only")
-    return user
+def require_permission(*permissions: Permission):
+    """Dependency: the caller needs at least one of these, else 403."""
+    def check(user: CurrentUser) -> User:   # CurrentUser: token, session, ban and must-change-password checks (401/403)
+        if not any(has_permission(user, p) for p in permissions):
+            raise HTTPException(403, "You do not have permission to do this")
+        return user
+    return check
+```
 
-def get_own_member(user: AppUser = Depends(get_current_user), session: Session = Depends(get_session)) -> Member:
-    member = session.exec(select(Member).where(Member.user_id == user.id)).first()
-    if member is None:
-        raise HTTPException(404, "No membership linked to this account")
-    return member
+A request goes: `get_auth` (token signature and expiry, user, ban, session; section 10.1) → `get_current_user` (`403` while a new password is due) → `require_permission(...)` (`403` without the permission) → the route → the service. The role is loaded from the database, never taken from the token, so a role change applies on the next request. The same list goes to the app in `MeRead.permissions` (`rbac.me()`), which decides the menu and the page guards from it.
 
-def require_valid_membership(member: Member = Depends(get_own_member)) -> Member:
-    if not member.is_active or member.expires_on < date.today():
-        raise HTTPException(400, "Membership is not valid")
-    return member
+Routes declare the check in one of two ways, both resolved before the body is validated (so a caller without the permission gets `403`, not `422`):
+
+```python
+READ_MEMBERS = Depends(require_permission(Permission.MEMBERS_READ))
+
+@router.get("/{member_id}", response_model=MemberRead, dependencies=[READ_MEMBERS])   # when the route does not need the user
+def get_member(member_id: int, session: SessionDep) -> User: ...
+
+Banner = Annotated[User, Depends(require_permission(Permission.USERS_BAN))]
+
+@router.post("/users/{user_id}/ban", response_model=AdminUserRead)                   # when it needs to know who acts
+def ban_user(user_id: int, session: SessionDep, admin: Banner, body: BanRequest | None = None) -> User: ...
 ```
 
 | Route group | Dependency |
 |---|---|
-| `/api/v1/users/me/*`, `GET /api/v1/classes`, `GET /api/v1/classes/{id}` | `get_current_user` |
-| `/api/v1/users/me/membership`, `/api/v1/users/me/check-ins` | `get_own_member` |
-| `/api/v1/members/*`, `/api/v1/admin/*`, `/api/v1/users/lookup`, `POST/PATCH/DELETE /classes`, `GET /classes/{id}/bookings` | `require_roles("gym_manager", "admin")` (admin-only for `/admin/*`) |
-| `POST/DELETE /classes/{id}/bookings` | `require_valid_membership` (cancel uses `get_own_member`) |
-| `GET /classes/{id}/bookings` | `require_roles("gym_manager", "admin", "trainer")`; the service then refuses a trainer who does not teach the class (`NotYourClassError` → `403`) |
-| `GET /trainers` / `GET /trainers/me/classes` | `require_roles("gym_manager", "admin")` / `require_roles("trainer")` |
-| `GET /announcements` | `get_current_user`; the route answers `403` when `include_ended=true` comes from a role other than gym manager or admin |
-| `POST /announcements`, `PATCH` / `DELETE /announcements/{id}` | `require_roles("gym_manager", "admin")` |
+| `/api/v1/users/me/*`, `GET /classes`, `GET /classes/{id}`, `POST` / `DELETE /classes/{id}/bookings`, `GET /plans`, `GET /announcements` | `CurrentUser` only: the caller's own data |
+| `GET /members`, `GET /members/waiting`, `GET /members/{id}`, `GET /members/{id}/check-ins`, `GET /members/{id}/bookings` | `members:read` |
+| `POST /members`, `PATCH` / `DELETE /members/{id}`, `POST /members/bulk-delete`, `DELETE /members/{id}/bookings/{class_id}` | `members:manage` |
+| `POST /members/{id}/check-ins`, `GET /check-ins/today` | `check_ins:record` |
+| `POST` / `GET /members/{id}/payments`, `GET /payments` | `payments:manage` |
+| `POST /payments/{id}/void` / `GET /payments/export.csv` | `payments:void` / `payments:export` |
+| `POST /classes`, `PATCH` / `DELETE /classes/{id}`, `GET /trainers` | `classes:manage` |
+| `GET /classes/{id}/bookings` | `classes:manage` or `classes:teach`; the service then refuses a caller without `classes:manage` who does not teach the class (`rbac.is_owner()`, `NotYourClassError` → `403`) |
+| `GET /trainers/me/classes` | `classes:teach` |
+| `GET /overview` | `overview:read` |
+| `POST /announcements`, `PATCH` / `DELETE /announcements/{id}`; `GET /announcements?include_ended=true` | `announcements:manage` (the last one checked in the route with `rbac.has_permission()`) |
+| `GET /admin/stats`, `GET /admin/revenue` | `dashboard:read` |
+| `GET /admin/users` / `PATCH .../role` / `POST .../ban`, `.../unban` / `POST .../reset-password` | `users:read` / `users:change_role` / `users:ban` / `users:reset_password` |
+| `PUT /admin/plans/{plan}` | `plans:edit` |
+
+Helpers: `has_permission(user, p)`; `roles_with(p)` for queries (the trainer list is every account whose role holds `classes:teach`); `is_owner(user, owner_id)` for records that belong to someone, where the caller answers `404` for a private record and `403` for a public one (a class). `rbac.py` imports `app.deps`, so nothing `app.deps` imports may import `rbac.py`.
 
 Row-level rules that depend on the data are checked inside the route:
 - Own membership: query with `Member.user_id == user.id`; a member can never pass an id to read another member's record.

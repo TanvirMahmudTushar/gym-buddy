@@ -1,0 +1,107 @@
+# Role-based access control (RBAC) in one place (final spec 2.2, NFR-17, TDD 10.3).
+#
+# Each account has one role, stored in app_user.role. What a role may do is the set of permissions below.
+# An endpoint asks for a permission (never for a role name) with require_permission(), which runs on the server for
+# every request. The app gets the same list from GET /users/me only to decide which pages and buttons to show.
+#
+# Routes about the caller's own data (my profile, my bookings, my sessions) need only a login: they read the
+# caller's id from the token, never an id from the request, so nobody can reach another person's records there.
+#
+# Import note: this module imports app.deps (who is logged in). Nothing that app.deps imports may import this
+# module back, or Python would hit a circular import.
+from collections.abc import Callable
+from enum import Enum
+
+from fastapi import HTTPException
+
+from app.deps import CurrentUser
+from app.models import User
+
+
+class Permission(str, Enum):
+    MEMBERS_READ = "members:read"  # member list and details, waiting list, a member's visits and bookings
+    MEMBERS_MANAGE = "members:manage"  # start, edit and delete memberships; cancel a booking for a member
+    CHECK_INS_RECORD = "check_ins:record"  # check a member in; today's check-ins
+    PAYMENTS_MANAGE = "payments:manage"  # take a payment; a member's payments and the list of all payments
+    PAYMENTS_VOID = "payments:void"
+    PAYMENTS_EXPORT = "payments:export"
+    CLASSES_MANAGE = "classes:manage"  # add, edit and delete classes; list trainers; see any class's bookings
+    CLASSES_TEACH = "classes:teach"  # my classes as a trainer, and who booked them
+    OVERVIEW_READ = "overview:read"  # the Gym Manager's start page
+    ANNOUNCEMENTS_MANAGE = "announcements:manage"  # post, edit and delete announcements; see ended ones
+    DASHBOARD_READ = "dashboard:read"  # admin stats and revenue
+    USERS_READ = "users:read"  # the list of all accounts
+    USERS_CHANGE_ROLE = "users:change_role"
+    USERS_BAN = "users:ban"  # ban and unban
+    USERS_RESET_PASSWORD = "users:reset_password"
+    PLANS_EDIT = "plans:edit"  # plan prices and lengths
+
+
+_GYM_MANAGER = frozenset(
+    {
+        Permission.MEMBERS_READ,
+        Permission.MEMBERS_MANAGE,
+        Permission.CHECK_INS_RECORD,
+        Permission.PAYMENTS_MANAGE,
+        Permission.CLASSES_MANAGE,
+        Permission.OVERVIEW_READ,
+        Permission.ANNOUNCEMENTS_MANAGE,
+    }
+)
+
+# The whole permission matrix (SRS 3.11). A User has no extra permissions: only their own account and data.
+ROLE_PERMISSIONS: dict[str, frozenset[Permission]] = {
+    "user": frozenset(),
+    "trainer": frozenset({Permission.CLASSES_TEACH}),
+    "gym_manager": _GYM_MANAGER,
+    "admin": _GYM_MANAGER
+    | {
+        Permission.PAYMENTS_VOID,
+        Permission.PAYMENTS_EXPORT,
+        Permission.DASHBOARD_READ,
+        Permission.USERS_READ,
+        Permission.USERS_CHANGE_ROLE,
+        Permission.USERS_BAN,
+        Permission.USERS_RESET_PASSWORD,
+        Permission.PLANS_EDIT,
+    },
+}
+
+
+def permissions_for(role: str) -> frozenset[Permission]:
+    """A role the map does not know (the database should never hold one) gets no permissions."""
+    return ROLE_PERMISSIONS.get(role, frozenset())
+
+
+def has_permission(user: User, permission: Permission) -> bool:
+    # The role is read from the database on every request (deps.get_auth), never from the token,
+    # so a role change takes effect on the next request.
+    return permission in permissions_for(user.role)
+
+
+def roles_with(permission: Permission) -> list[str]:
+    """The roles that hold a permission, for database queries (such as every account that can teach)."""
+    return [role for role, permissions in ROLE_PERMISSIONS.items() if permission in permissions]
+
+
+def is_owner(user: User, owner_id: int | None) -> bool:
+    """True when the record belongs to the user. The caller picks the answer for anyone else: 404 for a private
+    record (so its id does not even show that it exists), 403 where the record itself is public (a class)."""
+    return owner_id is not None and owner_id == user.id
+
+
+def require_permission(*permissions: Permission) -> Callable[[User], User]:
+    """A dependency: the caller must hold at least one of these permissions, or gets 403. It builds on
+    get_current_user, so a missing or bad token gets 401 first and a banned account 403."""
+
+    def check(user: CurrentUser) -> User:
+        if not any(has_permission(user, permission) for permission in permissions):
+            raise HTTPException(status_code=403, detail="You do not have permission to do this")
+        return user
+
+    return check
+
+
+def me(user: User) -> dict:
+    """The caller's own account plus the permissions of their role (MeRead), for the app's menus and page guards."""
+    return {**user.model_dump(), "permissions": sorted(p.value for p in permissions_for(user.role))}

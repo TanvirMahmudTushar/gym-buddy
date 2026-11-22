@@ -3,6 +3,26 @@ import type { Plan } from "./member"
 
 export type Role = "user" | "trainer" | "gym_manager" | "admin"
 
+/** The permission names from backend/app/rbac.py. Which role holds which is decided only by the server. */
+export type Permission =
+  | "members:read"
+  | "members:manage"
+  | "check_ins:record"
+  | "payments:manage"
+  | "payments:void"
+  | "payments:export"
+  | "classes:manage"
+  | "classes:teach"
+  | "overview:read"
+  | "announcements:manage"
+  | "dashboard:read"
+  | "users:read"
+  | "users:change_role"
+  | "users:ban"
+  | "users:reset_password"
+  | "plans:edit"
+
+/** An account as other screens see it (lists, the admin's user table). */
 export interface User {
   id: number
   email: string
@@ -13,13 +33,18 @@ export interface User {
   must_change_password: boolean
 }
 
+/** The logged-in user (GET /users/me, login, refresh): their account plus what their role may do. */
+export interface Me extends User {
+  permissions: Permission[]
+}
+
 /** Log in and refresh. The refresh token is not here: it stays in an HttpOnly cookie the page cannot read. */
 export interface LoginResult {
   access_token: string
   token_type: "bearer"
   /** Seconds until the access token expires (15 minutes). */
   expires_in: number
-  user: User
+  user: Me
 }
 
 /** A browser where I am logged in. */

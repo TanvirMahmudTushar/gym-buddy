@@ -2,15 +2,15 @@
 from fastapi import APIRouter, Depends
 
 from app.database import SessionDep
-from app.deps import require_roles
 from app.models import Overview
+from app.rbac import Permission, require_permission
 from app.services import stats_service
 
-# Gym managers and admins only (401 without a login, 403 for a user).
+# Needs overview:read: gym managers and admins (401 without a login, 403 for everyone else).
 router = APIRouter(
     prefix="/api/v1/overview",
     tags=["overview"],
-    dependencies=[Depends(require_roles("gym_manager", "admin"))],
+    dependencies=[Depends(require_permission(Permission.OVERVIEW_READ))],
 )
 
 

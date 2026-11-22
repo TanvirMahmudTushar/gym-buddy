@@ -4,6 +4,7 @@ import { exportPaymentsCsv, listPayments, voidPayment } from "../../services/pay
 import type { Payment, PaymentFilters, PaymentMethod } from "../../types/payment"
 import { errorText, formatDate, formatDateTime, hashParams, membersLink, planLabel, todayUtc } from "../../utils/member"
 import { METHODS, formatMoney, methodLabel, saveFile } from "../../utils/payment"
+import { can } from "../../utils/auth"
 
 const NO_FILTERS: PaymentFilters = { date_from: "", date_to: "", method: "", member: "", include_voided: false }
 
@@ -19,7 +20,9 @@ function filtersFromHash(): PaymentFilters {
 // Admins can also void a mistaken payment and export the list as CSV.
 export default function PaymentsPage() {
   const { user } = useAuth()
-  const isAdmin = user?.role === "admin"
+  // The Void column and Export CSV follow the same permissions the API checks.
+  const canVoid = can(user, "payments:void")
+  const canExport = can(user, "payments:export")
   // What is typed in the filter form, and the filters the list was last loaded with.
   const [draft, setDraft] = useState<PaymentFilters>(filtersFromHash)
   const [filters, setFilters] = useState<PaymentFilters>(filtersFromHash)
@@ -145,7 +148,7 @@ export default function PaymentsPage() {
     }
   }
 
-  const columns = isAdmin ? 8 : 7
+  const columns = canVoid ? 8 : 7
 
   let body
   if (loading && payments.length === 0) body = <p className="empty">Loading payments…</p>
@@ -163,7 +166,7 @@ export default function PaymentsPage() {
               <th>Details</th>
               <th>Recorded by</th>
               <th>Status</th>
-              {isAdmin && <th>Action</th>}
+              {canVoid && <th>Action</th>}
             </tr>
           </thead>
           <tbody>
@@ -204,7 +207,7 @@ export default function PaymentsPage() {
                         <span className="pill active">Paid</span>
                       )}
                     </td>
-                    {isAdmin && (
+                    {canVoid && (
                       <td>
                         {p.voided_at ? (
                           <span className="hint">—</span>
@@ -264,7 +267,7 @@ export default function PaymentsPage() {
     <section className="card" aria-labelledby="payments-heading">
       <div className="toolbar">
         <h2 id="payments-heading">Payments</h2>
-        {isAdmin && (
+        {canExport && (
           <button onClick={exportCsv} disabled={exporting || loading}>
             {exporting ? "Exporting…" : "Export CSV"}
           </button>

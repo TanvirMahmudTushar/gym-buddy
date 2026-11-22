@@ -1,5 +1,5 @@
 // fetch helpers for sign up, log in, log out, sessions and the logged-in user's own account.
-import type { LoginResult, SessionInfo, SignupBody, User } from "../types/auth"
+import type { LoginResult, Me, SessionInfo, SignupBody, User } from "../types/auth"
 import { request } from "./api"
 
 export const signup = (body: SignupBody) =>
@@ -15,10 +15,10 @@ export const listMySessions = () => request<SessionInfo[]>("/api/v1/users/me/ses
 
 export const revokeMySession = (id: number) => request<void>(`/api/v1/users/me/sessions/${id}`, { method: "DELETE" })
 
-export const getMe = () => request<User>("/api/v1/users/me")
+export const getMe = () => request<Me>("/api/v1/users/me")
 
 export const renameMe = (name: string) =>
-  request<User>("/api/v1/users/me", { method: "PATCH", body: JSON.stringify({ name }) })
+  request<Me>("/api/v1/users/me", { method: "PATCH", body: JSON.stringify({ name }) })
 
 export const changePassword = (currentPassword: string, newPassword: string) =>
   request<void>("/api/v1/users/me/password", {

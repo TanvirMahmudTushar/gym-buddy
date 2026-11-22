@@ -4,6 +4,7 @@ from typing import Any
 from fastapi import APIRouter, Request, Response
 from fastapi.responses import JSONResponse
 
+from app import rbac
 from app.database import SessionDep
 from app.models import AuthSession, LoginRequest, SignupRequest, TokenResponse, User, UserRead
 from app.request_info import client_ip, user_agent
@@ -40,7 +41,7 @@ def _tokens(user: User, auth_session: AuthSession) -> dict:
         "access_token": create_access_token(user.id, user.role, auth_session.id),
         "token_type": "bearer",
         "expires_in": int(ACCESS_TOKEN_LIFETIME.total_seconds()),
-        "user": user,
+        "user": rbac.me(user),
     }
 
 

@@ -44,8 +44,8 @@ export default function App() {
   // Only pages this person may open: logged-out visitors get login / sign up, everyone else their allowed pages.
   let page: Page
   if (!user) page = requested === "signup" ? "signup" : "login"
-  else if (isProtected(requested)) page = canOpen(user.role, requested) ? requested : homePage(user.role)
-  else page = homePage(user.role)
+  else if (isProtected(requested)) page = canOpen(user, requested) ? requested : homePage(user)
+  else page = homePage(user)
 
   // Keep the address bar in step with the page shown (for example after a redirect to login).
   useEffect(() => {
