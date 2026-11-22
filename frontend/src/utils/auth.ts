@@ -39,6 +39,7 @@ export type ProtectedPage =
   | "security"
   | "workouts"
   | "groups"
+  | "moderation"
 
 /** What each page needs: the permission of the API calls it makes. */
 const PAGE_ACCESS: Record<ProtectedPage, (user: Me) => boolean> = {
@@ -53,6 +54,7 @@ const PAGE_ACCESS: Record<ProtectedPage, (user: Me) => boolean> = {
   users: (u) => can(u, "users:read"),
   activity: (u) => can(u, "activity:read"),
   security: (u) => can(u, "activity:read"),
+  moderation: (u) => can(u, "content:moderate"),
   account: () => true,
   // Workouts and groups are about the caller's own data and groups: any login. Inside a group, the buttons follow
   // the caller's group permissions (my_permissions), which the API checks again on every request.

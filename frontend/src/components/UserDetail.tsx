@@ -257,7 +257,15 @@ export default function UserDetail({ userId }: Props) {
             <dd>{d.workouts.assigned}</dd>
           </div>
         </dl>
-        <p className="hint">Only counts: what a workout says stays private to its owner and their groups.</p>
+        <p className="hint">
+          Counts only here.
+          {can(me, "content:moderate") && (
+            <>
+              {" "}
+              <a href={`#/moderation?owner=${d.id}`}>See and moderate their workouts and groups</a>
+            </>
+          )}
+        </p>
         {d.groups.length === 0 ? (
           <p className="empty">Not in any group.</p>
         ) : (

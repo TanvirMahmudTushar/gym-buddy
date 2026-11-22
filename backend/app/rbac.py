@@ -40,6 +40,7 @@ class Permission(str, Enum):
     USERS_EXPORT = "users:export"  # the users CSV
     PLANS_EDIT = "plans:edit"  # plan prices and lengths
     ACTIVITY_READ = "activity:read"  # the activity log, its CSV export and the security view
+    CONTENT_MODERATE = "content:moderate"  # list, delete and export anyone's workouts and groups
 
 
 _GYM_MANAGER = frozenset(
@@ -72,6 +73,7 @@ ROLE_PERMISSIONS: dict[str, frozenset[Permission]] = {
         Permission.USERS_EXPORT,
         Permission.PLANS_EDIT,
         Permission.ACTIVITY_READ,
+        Permission.CONTENT_MODERATE,
     },
 }
 

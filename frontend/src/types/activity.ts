@@ -16,6 +16,8 @@ export type ActivityEvent =
   | "session_revoke"
   | "account_delete"
   | "export"
+  | "workout_delete"
+  | "group_delete"
 
 /** One security event: who did it, to which account, from where and when. */
 export interface ActivityEntry {

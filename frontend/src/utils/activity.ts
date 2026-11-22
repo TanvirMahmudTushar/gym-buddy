@@ -17,13 +17,24 @@ export const EVENTS: { value: ActivityEvent; label: string }[] = [
   { value: "unban", label: "Unban" },
   { value: "account_delete", label: "Account deleted" },
   { value: "export", label: "Export" },
+  { value: "workout_delete", label: "Workout removed" },
+  { value: "group_delete", label: "Group removed" },
 ]
 
 export const eventLabel = (event: ActivityEvent) => EVENTS.find((e) => e.value === event)?.label ?? event
 
 // Events that can mean an attack, and admin actions on someone else's account, get their own colour.
 const WARNING: ActivityEvent[] = ["login_failed", "account_locked", "password_change_failed"]
-const ADMIN_ACTION: ActivityEvent[] = ["role_change", "ban", "unban", "password_reset", "account_delete", "export"]
+const ADMIN_ACTION: ActivityEvent[] = [
+  "role_change",
+  "ban",
+  "unban",
+  "password_reset",
+  "account_delete",
+  "export",
+  "workout_delete",
+  "group_delete",
+]
 
 /** The pill class for an event: red for possible attacks, blue for admin actions, grey otherwise. */
 export function eventPill(event: ActivityEvent): string {

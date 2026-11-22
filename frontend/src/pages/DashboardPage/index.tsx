@@ -101,7 +101,9 @@ export default function DashboardPage() {
               <Stat label="Added in the last 7 days" value={stats.workouts.last_7_days} />
               <Stat label="Training groups" value={stats.groups.total} />
             </dl>
-            <p className="hint">Counts only: workouts stay private to their owners and groups.</p>
+            <p className="hint">
+              <a href="#/moderation">Review and remove workouts and groups</a>
+            </p>
           </section>
         </>
       )}

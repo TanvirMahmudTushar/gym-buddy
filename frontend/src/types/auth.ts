@@ -25,6 +25,7 @@ export type Permission =
   | "users:export"
   | "plans:edit"
   | "activity:read"
+  | "content:moderate"
 
 /** An account as other screens see it (lists, the admin's user table). */
 export interface User {

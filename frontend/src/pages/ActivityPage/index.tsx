@@ -192,8 +192,8 @@ export default function ActivityPage() {
         </div>
       </div>
       <p className="hint">
-        Logins, failed logins, password and role changes, bans, ended sessions, deleted accounts and exports, with who
-        did them, from which address and browser, and when. Passwords and tokens are never recorded.
+        Logins, failed logins, password and role changes, bans, ended sessions, deleted accounts, removed workouts and
+        groups, and exports, with who did them, from which address and browser, and when. Passwords and tokens are never recorded.
       </p>
       <form className="filters" onSubmit={apply} noValidate aria-label="Filter activity">
         <div className="field">

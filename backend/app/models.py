@@ -836,8 +836,11 @@ class ActivityEvent(str, Enum):
     # One session ended: by its owner, or by the server when a replaced refresh token came back.
     SESSION_REVOKE = "session_revoke"
     ACCOUNT_DELETE = "account_delete"
-    # A CSV download (payments or activity).
+    # A CSV download (payments, activity, users, workouts or groups).
     EXPORT = "export"
+    # An admin removed someone's workout or training group (content moderation).
+    WORKOUT_DELETE = "workout_delete"
+    GROUP_DELETE = "group_delete"
 
 
 class ActivityLog(SQLModel, table=True):
@@ -1174,3 +1177,80 @@ class AdminUserDetail(AdminUserRead):
     groups: list[UserGroupRead]
     # The newest rows where the user acted or was acted on (the Activity page has the rest).
     recent_activity: list[ActivityRead]
+
+
+# --- Content moderation (admin) ---
+
+WorkoutKind = Literal["personal", "group"]
+ModerationSearch = Annotated[str, StringConstraints(strip_whitespace=True, max_length=100)] | None
+
+
+class _DateRange(SQLModel):
+    date_from: date | None = None
+    date_to: date | None = None
+
+    @model_validator(mode="after")
+    def check_range(self) -> "_DateRange":
+        if self.date_from and self.date_to and self.date_from > self.date_to:
+            raise ValueError("date_from must be on or before date_to")
+        return self
+
+
+class ModerationWorkoutFilter(_DateRange):
+    """Filters for the admin workout list and its CSV. The dates are the workout's date, both included."""
+
+    owner_id: AccountId | None = None
+    group_id: AccountId | None = None
+    # personal: in no group; group: in a group.
+    kind: WorkoutKind | None = None
+    # Part of the title, the notes, or the owner's name or email, any case.
+    q: ModerationSearch = None
+
+
+class ModerationGroupFilter(_DateRange):
+    """Filters for the admin group list and its CSV. The dates are the UTC days the group was made, both included."""
+
+    owner_id: AccountId | None = None
+    # Part of the group's name, or the owner's name or email, any case.
+    q: ModerationSearch = None
+
+
+class ModerationWorkoutRead(WorkoutRead):
+    # The owner's email, so the admin knows whose it is; null once that account is deleted.
+    owner_email: str | None
+
+
+class ModerationWorkoutPage(SQLModel):
+    items: list[ModerationWorkoutRead]
+    total: int
+    offset: int
+    limit: int
+
+
+class ModerationGroupRead(SQLModel):
+    id: int
+    name: str
+    owner_id: int
+    owner_name: str
+    owner_email: str
+    created_at: UtcDateTime
+    # The owner included.
+    member_count: int
+    workout_count: int
+
+
+class ModerationGroupPage(SQLModel):
+    items: list[ModerationGroupRead]
+    total: int
+    offset: int
+    limit: int
+
+
+class ContentBulkDelete(SQLModel):
+    ids: list[AccountId] = Field(min_length=1, max_length=100)
+
+
+class ContentDeleted(SQLModel):
+    """How many were deleted; ids that match nothing are skipped. A group's workouts are not counted here."""
+
+    deleted: int

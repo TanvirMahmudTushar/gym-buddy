@@ -387,7 +387,7 @@ Story US-30: as a member, I want to log my own workouts and share workouts in a 
 
 | ID | Requirement | Release | Story |
 |---|---|---|---|
-| FR-90 | A logged-in user of any role shall be able to add, list, view, edit and delete their own personal workouts: `title` (1–100 characters after trimming), `workout_date` (from 2000-01-01 to a year from today, UTC) and optional `notes` (up to 1,000). Only the owner can read or change a personal workout; anyone else, whatever their role, gets `404`. | Beta | US-30 |
+| FR-90 | A logged-in user of any role shall be able to add, list, view, edit and delete their own personal workouts: `title` (1–100 characters after trimming), `workout_date` (from 2000-01-01 to a year from today, UTC) and optional `notes` (up to 1,000). Only the owner can read or change a personal workout through the workout endpoints; anyone else, whatever their role, gets `404` there. Only content moderation (FR-104) lets an admin see and delete it. | Beta | US-30 |
 | FR-91 | A logged-in user shall be able to start a training group (`name`, 1–100 characters) and becomes its owner, and list the groups they own or belong to, each with their own permissions in it (`my_permissions`). | Beta | US-30 |
 | FR-92 | The owner shall be able to add an existing account to the group by its email, with `can_create`, `can_update` and `can_assign` (`422` if no account has the email, `409` if it is already in the group), change those permissions, and remove a member. A member may leave the group. The owner cannot leave or lose a permission (`400`). Only the owner sees the members' emails. | Beta | US-30 |
 | FR-93 | Everyone in a group shall be able to read the group, its people and its workouts. `can_create` allows adding a workout to the group, `can_update` editing or deleting one, and `can_assign` assigning one to someone in the group or unassigning it (`422` for someone outside the group). The owner holds all three. A member without the permission gets `403`. | Beta | US-30 |
@@ -396,7 +396,21 @@ Story US-30: as a member, I want to log my own workouts and share workouts in a 
 | FR-96 | A user shall be able to list the group workouts assigned to them. Leaving or being removed from a group unassigns that group's workouts from them. | Beta | US-30 |
 | FR-97 | Deleting an account shall delete the groups it owns (with their workouts and memberships), its memberships in other groups and its personal workouts; the group workouts it added stay without an owner, and the ones assigned to it become unassigned. | Beta | US-30 |
 
-> **Built so far (workouts and groups):** FR-90 to FR-97, with the Workouts and Groups pages for every role. Admins have no special access to other people's workouts or groups yet (moderation is a separate issue). Group chat and invitations by email are out of scope.
+> **Built so far (workouts and groups):** FR-90 to FR-97, with the Workouts and Groups pages for every role. Admins have no special access through these endpoints; they review and delete content on the Moderation page (3.7k). Group chat and invitations by email are out of scope.
+
+### 3.7k Content moderation — Beta
+
+Story US-31: as an admin, I want to find and remove anyone's workouts and training groups, so I can take down abusive or unsuitable content even when nobody else can see it.
+
+| ID | Requirement | Release | Story |
+|---|---|---|---|
+| FR-104 | An admin shall be able to list every workout, personal or in a group, latest workout date first, paginated, with its owner (name and email), group and assignee, filtered by `owner_id`, `group_id`, `kind` (`personal` / `group`), date range (`date_from`, `date_to`: the workout's date, both inclusive) and `q` (part of the title, the notes, or the owner's name or email, any case). This is the only way past FR-90's privacy. | Beta | US-31 |
+| FR-105 | An admin shall be able to list every training group, newest first, paginated, with its owner, number of people and number of workouts, filtered by `owner_id`, date range (the UTC day it was made) and `q` (group name, or the owner's name or email). | Beta | US-31 |
+| FR-106 | An admin shall be able to delete one workout or group, or up to 100 at once in one transaction (unknown ids are skipped). Deleting a group also deletes its workouts and memberships. There is no undo (no soft delete), and admins cannot edit anyone else's content. | Beta | US-31 |
+| FR-107 | Every moderation delete shall be written to the activity log (`workout_delete` / `group_delete`), naming the admin, the owner as the account affected, and the workout's title and date or the group's name and how many workouts went with it. | Beta | US-31, US-29 |
+| FR-108 | An admin shall be able to download the workouts, and the groups, matching the FR-104 / FR-105 filters as CSV (same rows and order as the list, the FR-51 format); each download is logged. Users, trainers and gym managers get `403` on every moderation endpoint (`content:moderate`). | Beta | US-31 |
+
+> **Built so far (moderation):** FR-104 to FR-108, with the Moderation page (Workouts and Groups tabs, select-many delete with a confirm step, owner filter linked from a user's details). The groups CSV goes beyond the issue, which asked only for the workouts CSV.
 
 ### 3.8 Account security — Beta
 
@@ -489,7 +503,8 @@ A new member always starts as `Active` if `expires_on` is today or later. "Expir
 | Read the activity log and the security view, export the log as CSV | No | No (`403`) | No (`403`) | No (`403`) | Yes |
 | Add, view, edit, delete own personal workouts; see workouts assigned to me | No | Yes | Yes | Yes | Yes |
 | Start a training group, list my groups; in a group, what the group permissions below allow | No | Yes | Yes | Yes | Yes |
-| Read another person's personal workout, or a group one is not in | No | No (`404`) | No (`404`) | No (`404`) | No (`404`) |
+| Read another person's personal workout, or a group one is not in (workout and group endpoints) | No | No (`404`) | No (`404`) | No (`404`) | No (`404`) |
+| Moderate content: list, export and delete anyone's workouts and groups | No | No (`403`) | No (`403`) | No (`403`) | Yes (no editing) |
 
 Every endpoint except sign up, log in, refresh, health and the docs returns `401` when no valid token is sent.
 
@@ -516,6 +531,7 @@ Every endpoint except sign up, log in, refresh, health and the docs returns `401
 | `users:export` | Download the users CSV | No | No | No | Yes |
 | `plans:edit` | Plan prices and lengths | No | No | No | Yes |
 | `activity:read` | The activity log, its CSV export and the security view | No | No | No | Yes |
+| `content:moderate` | List, export and delete anyone's workouts and groups | No | No | No | Yes |
 
 **Group permissions.** Inside a training group, what someone may do depends on the group, not on their role. `rbac.group_permissions()` gives the owner all five, a member `read` plus the flags the owner ticked, and anyone else none (`404`).
 
@@ -814,7 +830,7 @@ Actions on one's own account and data (profile, password, sessions, own membersh
 - When browser 2 sends `POST /api/v1/auth/logout`, the response is `204`, the cookie is cleared, browser 2's access token gets `401`, and refresh without a cookie returns `204`.
 
 **AC-43 Permissions (FR-24, FR-83, NFR-17)**
-- When each role logs in, `user.permissions` is `[]` for a User, `["classes:teach"]` for a Trainer, the 7 staff permissions for a Gym Manager, and those plus the 11 admin permissions for an Admin; `GET /api/v1/users/me` returns the same list.
+- When each role logs in, `user.permissions` is `[]` for a User, `["classes:teach"]` for a Trainer, the 7 staff permissions for a Gym Manager, and those plus the 12 admin permissions for an Admin; `GET /api/v1/users/me` returns the same list.
 - A Gym Manager's `GET /api/v1/admin/stats` is `403` and `GET /api/v1/members` is `200`; a User's `GET /api/v1/members` is `403`.
 - Trainer A's `GET /api/v1/classes/{id}/bookings` is `200` for a class A teaches and `403` for trainer B's class.
 - When an admin changes trainer A's role to `user`, A's next `GET /api/v1/trainers/me/classes` is `403` with the same access token, and A's `permissions` become `[]`.
@@ -836,6 +852,14 @@ Actions on one's own account and data (profile, password, sessions, own membersh
 - When O ticks `can_update` for A, A's next `PATCH` on the workout is `200`.
 - X's `GET /api/v1/workouts/{id}` for O's personal workout is `404`.
 - When A leaves G, A's `GET /api/v1/groups/{G}` is `404` and the G workouts assigned to A become unassigned.
+
+**AC-47 Content moderation (FR-104 – FR-108)**
+- Given user A with a personal workout and group G (two workouts, member B), user C with a personal workout, and an admin
+- `GET /api/v1/admin/workouts` lists all four workouts with their titles and notes, including A's personal one, while A's workout still answers `404` to C through `/api/v1/workouts/{id}`.
+- `?owner_id=A&kind=group` returns G's two workouts; `GET /api/v1/admin/workouts/export.csv` with the same filters returns the same rows in the same order and adds an `export` row.
+- `DELETE /api/v1/admin/groups/{G}` is `204`; G's workouts and memberships are gone, B's `GET /api/v1/groups/{G}` is `404`, and a `group_delete` row names the admin and A.
+- `POST /api/v1/admin/workouts/bulk-delete` with C's workout, a duplicate and an unknown id returns `{"deleted": 1}` and adds one `workout_delete` row.
+- A user, a trainer and a gym manager get `403` on all eight moderation endpoints; no login gets `401`.
 
 **AC-46 Admin user management (FR-98 – FR-103)**
 - Given an admin, a second admin B, users C and D, and a trainer
@@ -880,6 +904,7 @@ Actions on one's own account and data (profile, password, sessions, own membersh
 | US-20 | FR-62, FR-63 | `GET /api/v1/overview` | Beta |
 | US-11, US-16, US-17 | FR-58 – FR-61 | `GET /api/v1/members/{id}/bookings`, `DELETE /api/v1/members/{id}/bookings/{class_id}`, `GET /api/v1/users/me/bookings` | Beta |
 | US-12, US-13 | FR-54 – FR-57 | `GET /api/v1/members?q=`, `GET /api/v1/members/waiting`, `GET /api/v1/admin/users?q=` | Beta |
+| US-31 | FR-104 – FR-108 | `GET /api/v1/admin/workouts`, `/api/v1/admin/workouts/export.csv`, `/api/v1/admin/workouts/bulk-delete`, `DELETE /api/v1/admin/workouts/{id}`, `GET /api/v1/admin/groups`, `/api/v1/admin/groups/export.csv`, `/api/v1/admin/groups/bulk-delete`, `DELETE /api/v1/admin/groups/{id}` | Beta |
 | US-30 | FR-90 – FR-97 | `/api/v1/workouts`, `/api/v1/workouts/assigned`, `/api/v1/workouts/{id}`, `PUT /api/v1/workouts/{id}/assignee`, `/api/v1/groups`, `/api/v1/groups/{id}`, `/api/v1/groups/{id}/workouts`, `/api/v1/groups/{id}/members`, `/api/v1/groups/{id}/members/{user_id}` | Beta |
 | US-29 | FR-84 – FR-89, NFR-23 | `GET /api/v1/admin/activity`, `GET /api/v1/admin/activity/export.csv`, `GET /api/v1/admin/activity/security` | Beta |
 | US-25, US-26 | FR-43 – FR-51, FR-53 | `GET /api/v1/members?status=expiring_soon`, `/api/v1/plans`, `/api/v1/members/{id}/payments`, `/api/v1/payments`, `/api/v1/payments/{id}/void`, `/api/v1/payments/export.csv`, `/api/v1/users/me/payments`, `PUT /api/v1/admin/plans/{plan}` | Beta |
