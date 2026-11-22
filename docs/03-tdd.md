@@ -3,12 +3,12 @@
 | Field | Value |
 |---|---|
 | Product | Gym Buddy |
-| Version | MVP + Beta |
+| Version | MVP + Beta (final release) |
 | Releases | MVP — Mid-term, Beta — Final |
-| Status | Draft |
-| Related docs | [Product Requirements Document (PRD)](01-prd.md), [Software Requirements Specification (SRS)](02-srs.md) |
+| Status | Final: describes the system as built |
+| Related docs | [Product Requirements Document (PRD)](01-prd.md), [Software Requirements Specification (SRS)](02-srs.md), [Final report](FINAL_REPORT.md) |
 
-Sections and tables are marked **MVP** or **Beta**. Build the MVP parts for the mid-term; the Beta parts extend them for the final.
+Sections and tables are marked **MVP** or **Beta**. The MVP parts were built for the mid-term; the Beta parts extend them for the final. Where the final build replaced an MVP design (the `member` table, Alembic), the MVP text is kept as history and marked so.
 
 **Documents in this set**
 
@@ -21,7 +21,7 @@ Sections and tables are marked **MVP** or **Beta**. Build the MVP parts for the 
 ## 1. Overview
 
 - **MVP:** a FastAPI REST API for gym member CRUD (name, phone, membership plan, start and expiry dates), stored in a SQL database through SQLModel, deployed together with the Vite + React frontend as one Vercel project.
-- **Beta:** the same app gains user accounts and login (JWT), global roles (`member`/`admin`), workout classes with member bookings and capacity limits, attendance check-ins, an admin dashboard, and security hardening. Schema changes are managed with Alembic.
+- **Beta:** the same app gains user accounts and login (short-lived JWT plus a rotating refresh cookie, with server-side sessions), four global roles (`user`, `trainer`, `gym_manager`, `admin`) checked through one permission module, members as accounts with a membership, workout classes with bookings and capacity limits, check-ins, payments and revenue, announcements, workouts and training groups with per-member permissions, an activity log, content moderation and security hardening. Missing tables and columns are added by the app on start (section 12).
 
 ## 2. Tech stack
 
@@ -33,10 +33,11 @@ Sections and tables are marked **MVP** or **Beta**. Build the MVP parts for the 
 | DB driver | `psycopg[binary]` (psycopg 3) | Standard Postgres driver for SQLAlchemy/SQLModel | MVP |
 | Database (local) | SQLite | No setup needed | MVP |
 | Frontend | Vite + React + TypeScript | Already in the repo template | MVP |
-| Hosting | Vercel | Frontend and backend in one project (`vercel.json`), auto deploy from GitHub | MVP |
-| Migrations | Alembic | Versioned schema changes as the model grows from 1 to 6 tables | Beta |
+| Hosting | Vercel | Frontend and backend in one project (`vercel.json`), deployed with `vercel --prod` | MVP |
+| Schema changes | `create_db_and_tables()` on start | Creates missing tables and adds missing columns and indexes, keeping data. Alembic was planned but not adopted: every change was additive (section 12) | Beta |
 | JWT | PyJWT | Sign and verify access tokens | Beta |
-| Password hashing | `pwdlib[argon2]` | Argon2 hashing, recommended in the FastAPI docs | Beta |
+| Password hashing | `argon2-cffi` | Argon2 hashing, over HMAC-SHA256 with a pepper (section 10.2) | Beta |
+| Tests | pytest + httpx (`TestClient`) | Backend suite on a throwaway SQLite database (section 14); development only | Beta |
 
 ## 3. Architecture
 
@@ -63,15 +64,18 @@ sequenceDiagram
     participant S as Schemas (Pydantic)
     participant V as Service (member_service.py)
     participant D as Database (SQLModel Session)
-    C->>R: POST /api/v1/members {full_name, plan, expires_on}
+    C->>R: POST /api/v1/members {email, plan, expires_on} (Bearer token)
+    R->>R: require_permission(members:manage), else 403
     R->>S: validate MemberCreate
     S-->>R: valid / 422
-    R->>V: create_member(session, data)
-    V->>D: session.add(member), commit
-    D-->>V: member with id
+    R->>V: start_membership(session, data)
+    V->>D: find the account by email (none: 422), refuse a second membership (409), set plan and dates, commit
+    D-->>V: the account, now a member
     V-->>R: member
     R-->>C: 201 MemberRead
 ```
+
+The MVP version of this flow took `full_name` and inserted a `member` row; since members became accounts (PR #40) it starts a membership on an existing account, as shown.
 
 ### 3.2 Login and refresh flow — Beta
 
@@ -104,7 +108,7 @@ sequenceDiagram
     participant R as Router (classes.py)
     participant D as Database
     C->>R: POST /api/v1/classes/{id}/bookings (Bearer token)
-    R->>D: load class, count bookings, check membership not expired
+    R->>D: lock the class row (FOR UPDATE), check it has not started and the membership is valid, count bookings
     alt class full
         R-->>C: 409 Class is full
     else already booked
@@ -119,9 +123,8 @@ sequenceDiagram
 
 ```
 backend/
-  main.py              # creates the app, includes routers, health check
+  main.py              # creates the app, includes routers, maps service errors to status codes, health check
   app/
-    __init__.py
     __init__.py        # loads backend/.env (developer machines only) before any module reads a variable
     config.py          # settings: load_local_env() (backend/.env, never on Vercel, never overriding) and frontend_origins() (FRONTEND_ORIGIN for CORS)
     cors.py            # AllowlistCORSMiddleware: CORS only for FRONTEND_ORIGIN; other origins get no CORS headers
@@ -148,7 +151,6 @@ backend/
       workouts.py      # /api/v1/workouts (my workouts, assigned to me, add, read, edit, assign, delete: anyone logged in, by group permission)
       groups.py        # /api/v1/groups (my groups, start, read, rename, delete, a group's workouts and members)
       moderation.py    # /api/v1/admin/workouts and /api/v1/admin/groups (list, CSV export, delete one or many: admin)
-      classes.py       # (Beta) /api/v1/classes/* (classes and bookings)
     services/
       __init__.py
       member_service.py  # member rules and queries; raises MemberNotFoundError / InvalidExpiryError
@@ -172,24 +174,25 @@ backend/
   .env.example         # the four variables with placeholders only (copy to backend/.env)
   requirements-dev.txt # -r requirements.txt + pytest, httpx (not installed by Vercel)
   pytest.ini
-  alembic/             # (Beta) migration scripts
-  alembic.ini          # (Beta)
   requirements.txt
 frontend/
   src/
-    App.tsx            # shows HomePage
-    components/        # add form, member list, details panel
+    App.tsx            # hash router: picks the page for #/members, #/classes, ...; guards each page by permission
+    components/        # the forms, lists and panels the pages are built from
     context/           # AuthContext: who is logged in, login / signup / logout; restores the login with a refresh on load
     layouts/           # AppLayout: header, and the pages each role may open
-    pages/             # HomePage (members), LoginPage, SignupPage, AccountPage, DashboardPage (admin), OverviewPage (gym manager, admin), UsersPage (admin; one user's details at `#/users?user=ID`), ClassesPage (gym manager, admin), PaymentsPage (gym manager, admin), MembershipPage and TimetablePage (user), MyClassesPage (trainer), PlansPage (admin), AnnouncementsPage (gym manager, admin), ActivityPage, SecurityPage and ModerationPage (admin), WorkoutsPage and GroupsPage (everyone; GroupsPage shows one group with `#/groups?group=ID`); (Later) AboutPage, MemberDetailsPage; (Beta, Could) MyMembership, Classes, AdminDashboard
+    pages/             # HomePage (members), LoginPage, SignupPage, AccountPage, DashboardPage (admin), OverviewPage (gym manager, admin), UsersPage (admin; one user's details at `#/users?user=ID`), ClassesPage (gym manager, admin), PaymentsPage (gym manager, admin), MembershipPage and TimetablePage (user), MyClassesPage (trainer), PlansPage (admin), AnnouncementsPage (gym manager, admin), ActivityPage, SecurityPage and ModerationPage (admin), WorkoutsPage and GroupsPage (everyone; GroupsPage shows one group with `#/groups?group=ID`), ChoosePasswordPage (after an admin reset); AboutPage and MemberDetailsPage are empty placeholders
     services/          # fetch calls to the API; api.ts keeps the access token in memory and refreshes it once on a 401
     types/             # TypeScript types
     utils/             # display helpers; membersLink() builds the #/members?filter=&member= address
-    hooks/             # useDebouncedValue: search boxes ask the API once typing pauses
+    hooks/             # usePagedList (Load more); useDebouncedValue: search boxes ask the API once typing pauses
+scripts/
+  seed_demo.py         # demo accounts and sample data through the public API (standard library only; not deployed)
 docs/
   01-prd.md
   02-srs.md
   03-tdd.md
+  FINAL_REPORT.md
 ```
 
 Keep routers thin: validate input, check permissions through dependencies, then call a function in `services/`. The service holds the business rules and the database queries and raises plain Python errors (`MemberNotFoundError`, `InvalidExpiryError`); `main.py` turns them into the 404 and 422 responses.
@@ -197,6 +200,8 @@ Keep routers thin: validate input, check permissions through dependencies, then 
 ## 5. Data model
 
 ### 5.1 `member` table — MVP
+
+> **Replaced in the final release.** Members became accounts (PR #40): the membership columns (`plan`, `joined_on`, `expires_on`, `is_frozen`, `phone`, `notes`) moved onto `app_user` (section 5.2), `full_name` became the account's `name`, and `is_active` became `is_frozen`. On its first start, the new code dropped the old `member` table and the tables that pointed at it, and created them again pointing at `app_user` (section 12). The MVP table is kept below as history.
 
 | Column | Type | Rules |
 |---|---|---|
@@ -252,7 +257,13 @@ erDiagram
 | `date_of_birth` | date | Nullable; 1900-01-01 to today when sent. Added to an existing table on start |
 | `emergency_contact_name` | varchar(100) | Nullable; set or cleared together with `emergency_contact_phone`. Added to an existing table on start |
 | `emergency_contact_phone` | varchar(20) | Nullable; set or cleared together with `emergency_contact_name`. Added to an existing table on start |
-| `created_at`, `updated_at` | timestamp (UTC) | Not null |
+| `password_changed_at` | timestamp (UTC) | Nullable: the last password change or reset |
+| `plan` | varchar(10) | Nullable: `monthly`, `quarterly` or `yearly`. Null until staff start a membership; an account with a plan is a member |
+| `joined_on` | date | Nullable; set with `plan` |
+| `expires_on` | date | Nullable; set with `plan`, never before `joined_on` |
+| `is_frozen` | boolean | Default `false`; a frozen membership cannot check in or book, whatever its expiry date |
+| `notes` | varchar(500) | Nullable: staff notes on the membership |
+| `created_at` | timestamp (UTC) | Not null |
 
 `phone`, `date_of_birth` and the emergency contact are read only through `MemberRead` (member endpoints: gym managers and admins; `/users/me/membership`: the member) and `ProfileRead` (`/users/me/profile`: the person), never through `UserRead`, so they stay out of the login response and every account list (NFR-20).
 
@@ -274,11 +285,9 @@ erDiagram
 
 A session is active while `revoked_at IS NULL AND expires_at > now`. Rows are kept after they end; `member_service._delete_accounts()` deletes them with the account.
 
-**`member` (new column in Beta)**
+**Membership on the account (replaces the planned `member.user_id` link)**
 
-| Column | Type | Rules |
-|---|---|---|
-| `user_id` | integer | FK → `app_user.id`, nullable, unique (index `ix_member_user_id`; built so far without `on delete set null`, since accounts are never deleted). Added to an existing table by `create_db_and_tables()`. Links a membership record to a login account. `null` = walk-in member without an account |
+The first Beta design linked a `member` row to an account with a nullable `member.user_id`. It was built in PR #32 and replaced in PR #40: keeping two records per person meant names that could disagree and an extra linking step. A member's id is now their account id, and `check_in`, `class_booking` and `payment` point at `app_user.id`.
 
 **`gym_class`**
 
@@ -302,7 +311,7 @@ A session is active while `revoked_at IS NULL AND expires_at > now`. Rows are ke
 | Column | Type | Rules |
 |---|---|---|
 | `class_id` | integer | PK part, FK → `gym_class.id`, on delete cascade |
-| `member_id` | integer | PK part, FK → `member.id`, on delete cascade |
+| `member_id` | integer | PK part, FK → `app_user.id` (the member who booked), on delete cascade, indexed |
 | `booked_at` | timestamp (UTC) | Not null |
 
 **`plan_price`**
@@ -343,7 +352,7 @@ Voiding is a conditional `UPDATE ... WHERE voided_at IS NULL`, so voiding twice 
 | Column | Type | Rules |
 |---|---|---|
 | `id` | integer | Primary key |
-| `member_id` | integer | FK → `member.id`, on delete cascade |
+| `member_id` | integer | FK → `app_user.id` (the member who arrived), on delete cascade, indexed |
 | `checked_in_at` | timestamp (UTC) | Not null |
 | `recorded_by` | integer | FK → `app_user.id`: the gym manager or admin who recorded it |
 
@@ -421,12 +430,13 @@ The composite primary key stops the same account being added twice, even by two 
 
 `group_service.delete_for_accounts()` runs inside `member_service._delete_accounts()`: it deletes the account's own groups (their workouts and members first), its `group_member` rows and its personal workouts, and sets `owner_id` and `assigned_to` to null on the group workouts that remain. Deleting a group, and leaving one, delete or update the dependent rows in the service too, since SQLite does not enforce the cascades by default.
 
-Indexes: `member(user_id)`, `class_booking(member_id)`, `check_in(member_id, checked_in_at)`, `gym_class(starts_at)`, `gym_class(trainer_id)`, `announcement(posted_at)`, `auth_session(user_id)`, `auth_session(token_hash)` (unique), `auth_session(previous_token_hash)`, `activity_log(created_at)`, `activity_log(event)`, `activity_log(actor_id)`, `activity_log(target_id)`, `training_group(owner_id)`, `group_member(user_id)`, `workout(owner_id)`, `workout(group_id)`, `workout(assigned_to)`.
+Indexes: `app_user(email)` (unique), `class_booking(member_id)`, `check_in(member_id, checked_in_at)`, `gym_class(starts_at)`, `gym_class(trainer_id)`, `announcement(posted_at)`, `auth_session(user_id)`, `auth_session(token_hash)` (unique), `auth_session(previous_token_hash)`, `activity_log(created_at)`, `activity_log(event)`, `activity_log(actor_id)`, `activity_log(target_id)`, `training_group(owner_id)`, `group_member(user_id)`, `workout(owner_id)`, `workout(group_id)`, `workout(assigned_to)`.
 
 ```mermaid
 erDiagram
-    APP_USER ||--o| MEMBER : "linked to"
     APP_USER ||--o{ AUTH_SESSION : has
+    APP_USER |o--o{ PAYMENT : pays
+    PLAN_PRICE ||--o{ PAYMENT : "renews by"
     APP_USER ||--o{ GYM_CLASS : creates
     APP_USER |o--o{ GYM_CLASS : teaches
     APP_USER |o--o{ ANNOUNCEMENT : posts
@@ -437,9 +447,9 @@ erDiagram
     TRAINING_GROUP |o--o{ WORKOUT : shares
     APP_USER |o--o{ WORKOUT : adds
     APP_USER |o--o{ WORKOUT : "is assigned"
-    MEMBER ||--o{ CLASS_BOOKING : books
+    APP_USER ||--o{ CLASS_BOOKING : books
     GYM_CLASS ||--o{ CLASS_BOOKING : has
-    MEMBER ||--o{ CHECK_IN : has
+    APP_USER ||--o{ CHECK_IN : has
     APP_USER {
         int id PK
         string email UK
@@ -451,10 +461,33 @@ erDiagram
         bool is_banned
         datetime banned_at
         string ban_reason
+        bool must_change_password
+        string plan
+        date joined_on
+        date expires_on
+        bool is_frozen
         string phone
         date date_of_birth
         string emergency_contact_name
         string emergency_contact_phone
+        string notes
+    }
+    PLAN_PRICE {
+        string plan PK
+        int price
+        int duration_days
+    }
+    PAYMENT {
+        int id PK
+        int member_id FK
+        string member_name
+        int amount
+        string method
+        string plan
+        date renewed_until
+        int recorded_by FK
+        datetime voided_at
+        int voided_by FK
     }
     AUTH_SESSION {
         int id PK
@@ -467,16 +500,6 @@ erDiagram
         string ip
         string user_agent
         datetime revoked_at
-    }
-    MEMBER {
-        int id PK
-        int user_id FK
-        string full_name
-        string phone
-        string plan
-        date joined_on
-        date expires_on
-        bool is_active
     }
     GYM_CLASS {
         int id PK
@@ -545,19 +568,20 @@ erDiagram
     }
 ```
 
-**Who can see a member record:**
-- A member (`role = member`): only the record where `member.user_id` is their own id.
-- An admin: every member record.
+**Who can see a membership:**
+- The person themself: only their own, through `/users/me/membership` (the id comes from the token, never from the request).
+- Gym managers and admins (`members:read`): every member, through `/members`.
+- Trainers and other users: none (`403` on `/members`).
 
-**A membership is "valid"** when `is_active` is true and `expires_on >= today`. Booking a class and checking in both require a valid membership.
+**A membership is "valid"** when `plan` is set, `is_frozen` is false and `expires_on >= today` (UTC). Booking a class and checking in both require a valid membership.
 
 ### 5.3 Schemas
 
 | Schema | Used for | Fields | Release |
 |---|---|---|---|
-| `MemberCreate` | `POST` member body | `full_name`, `phone?`, `plan`, `joined_on?`, `expires_on`, `notes?` | MVP |
-| `MemberUpdate` | `PATCH` member body | all optional: `full_name`, `phone`, `plan`, `expires_on`, `is_active`, `notes`; (Beta) extends `ProfileUpdate`, so staff also send `date_of_birth` and the emergency contact | MVP |
-| `MemberRead` | Member responses | all member columns (+ `user_id` in Beta; `date_of_birth`, `emergency_contact_name`, `emergency_contact_phone` with the profile details) | MVP |
+| `MemberCreate` | `POST` member body | MVP: `full_name`, `phone?`, `plan`, `joined_on?`, `expires_on`, `notes?`. Final: `email` (an existing account) instead of `full_name` | MVP |
+| `MemberUpdate` | `PATCH` member body | all optional: `name` (MVP `full_name`), `phone`, `plan`, `expires_on`, `is_frozen` (MVP `is_active`), `notes`; (Beta) extends `ProfileUpdate`, so staff also send `date_of_birth` and the emergency contact | MVP |
+| `MemberRead` | Member responses | `id` (the account id), `name`, `email`, `phone`, `date_of_birth`, `emergency_contact_name`, `emergency_contact_phone`, `plan`, `joined_on`, `expires_on`, `is_frozen`, `notes` | MVP |
 | `MemberPage` | Member list response | `items` (`MemberRead[]`), `total` (all members matching the filter), `offset`, `limit` | MVP |
 | `MemberBulkDelete` | Bulk delete body | `ids` (1 to 100 member IDs) | MVP |
 | `MemberBulkDeleteResult` | Bulk delete response | `deleted` (how many members were deleted) | MVP |
@@ -652,13 +676,15 @@ class MemberRead(MemberBase):
 
 `full_name` is trimmed before validation so `"   "` is rejected. `expires_on` before `joined_on` returns `422`.
 
+> The code above is the MVP design. In the final release the `Member` table is gone: the membership fields are columns of `User` (`app_user`, section 5.2), `MemberCreate` takes the account's `email`, and `MemberRead` is built from the account (`backend/app/models.py`).
+
 ## 6. REST API design
 
 Base path: `/api/v1`. All bodies are JSON.
 
 ### 6.1 Endpoints — MVP
 
-In the MVP no login is needed. In the Beta the member endpoints become admin-only (members use `/users/me/membership` instead).
+In the MVP no login is needed. In the Beta the member endpoints need `members:read` or `members:manage` (gym managers and admins), and members use `/users/me/membership` instead.
 
 | Method | Path | Body | Success | Errors | FR |
 |---|---|---|---|---|---|
@@ -670,7 +696,7 @@ In the MVP no login is needed. In the Beta the member endpoints become admin-onl
 | `POST` | `/api/v1/members/bulk-delete` | `MemberBulkDelete` | `200` `MemberBulkDeleteResult` | `422` | FR-06a |
 | `GET` | `/api/health` | — | `200` `{"status":"ok"}` | — | FR-10 |
 
-`status` is an optional filter: `active` (valid membership), `expired` (`expires_on < today`) or `frozen` (`is_active = false`).
+`status` is an optional filter: `active` (valid membership), `expired` (`expires_on < today`), `frozen` (`is_frozen = true`; MVP `is_active = false`) or, in the Beta, `expiring_soon`.
 
 ### 6.2 Endpoints — Beta
 
@@ -813,31 +839,36 @@ Path ids above 2,147,483,647 (the 32-bit id columns) are refused with `422` befo
 
 ### 6.3 Examples
 
-Create:
+Start a membership (final release; the person has signed up as `rafi@example.com`):
 
 ```http
 POST /api/v1/members
+Authorization: Bearer eyJhbGciOi...
 Content-Type: application/json
 
-{ "full_name": "Rafi Ahmed", "phone": "01700000000", "plan": "monthly", "expires_on": "2026-11-10" }
+{ "email": "rafi@example.com", "phone": "01700000000", "plan": "monthly", "expires_on": "2026-12-22" }
 ```
 
 ```http
 201 Created
 
 {
-  "id": 1,
-  "full_name": "Rafi Ahmed",
+  "id": 5,
+  "name": "Rafi Ahmed",
+  "email": "rafi@example.com",
   "phone": "01700000000",
+  "date_of_birth": null,
+  "emergency_contact_name": null,
+  "emergency_contact_phone": null,
   "plan": "monthly",
-  "joined_on": "2026-10-10",
-  "expires_on": "2026-11-10",
-  "is_active": true,
-  "notes": null,
-  "created_at": "2026-10-10T10:00:00Z",
-  "updated_at": "2026-10-10T10:00:00Z"
+  "joined_on": "2026-11-22",
+  "expires_on": "2026-12-22",
+  "is_frozen": false,
+  "notes": null
 }
 ```
+
+In the MVP the same request sent `full_name` instead of `email`, needed no token, and the response had `is_active`, `created_at` and `updated_at`.
 
 Renew a membership:
 
@@ -891,10 +922,9 @@ A catch-all exception handler returns `500` with `{"detail": "Internal server er
 
 ## 7. Database access
 
-- `database.py` creates one engine from the `DATABASE_URL` env var, defaulting to `sqlite:///./gym_buddy.db` locally.
+- `database.py` creates one engine from the `DATABASE_URL` env var (or `POSTGRES_URL`, set by the Supabase integration), defaulting to `backend/gym_buddy.db` (SQLite) locally and `/tmp/gym_buddy.db` on Vercel without one.
 - `get_session()` is a FastAPI dependency that yields a `Session` per request.
-- MVP: tables are created on startup with `SQLModel.metadata.create_all(engine)`.
-- Beta: `create_all` is removed and the schema is managed by Alembic (section 12).
+- On start, `create_db_and_tables()` runs `SQLModel.metadata.create_all(engine)` for new tables, adds the columns and indexes newer code needs to existing tables, and fills `plan_price` (section 12).
 - On Vercel, connect through Supabase's **transaction pooler** (Supavisor, port `6543`), because each serverless function opens its own connections.
 - The transaction pooler does not support prepared statements, so the engine is created with `poolclass=NullPool` (the pooler does the pooling) and `connect_args={"prepare_threshold": None}` for psycopg.
 - URL format: `postgresql+psycopg://postgres.<project-ref>:<password>@aws-0-<region>.pooler.supabase.com:6543/postgres`.
@@ -909,7 +939,6 @@ A catch-all exception handler returns `500` with `{"detail": "Internal server er
 | `JWT_SECRET` | optional (a temporary secret per run) | Required: random 32+ byte secret (`python -c "import secrets; print(secrets.token_urlsafe(48))"`) | Beta |
 | `PASSWORD_PEPPER` | optional (a fixed development pepper) | Required: random 32+ byte secret, generated the same way. Never changed once set: every password hashed with it would stop verifying | Beta |
 | `FRONTEND_ORIGIN` | optional (default `http://localhost:5173`, the Vite dev server) | `https://2321648gymbuddy.vercel.app`; unset allows no other origin (the app and the API share one). One exact origin or several separated by commas; `*` stops the backend at start-up | Beta |
-| `MIGRATION_DATABASE_URL` | not needed | Not on Vercel. Used only on a developer machine to run Alembic against Supabase (session pooler, port `5432`) | Beta |
 
 Token lifetimes are constants, not env vars: `ACCESS_TOKEN_LIFETIME` (15 minutes) in `app/security.py`, `REFRESH_LIFETIME` (7 days) and `ROTATION_GRACE` (30 seconds) in `app/services/session_service.py`.
 
@@ -917,9 +946,8 @@ No secrets are committed. `.env` stays in `.gitignore`. `backend/.env.example` l
 
 Supabase setup (one time):
 1. Create a project at supabase.com and save the database password.
-2. **Connect** -> **Transaction pooler** -> copy the URI, and change the scheme to `postgresql+psycopg://`.
+2. **Connect** -> **Transaction pooler** -> copy the URI (`postgres://` or `postgresql://`; `database.py` switches it to the psycopg driver).
 3. In Vercel -> Project -> **Settings** -> **Environment Variables**, add it as `DATABASE_URL`.
-4. Add `psycopg[binary]` to `backend/requirements.txt`.
 
 Free-tier Supabase projects pause after a week with no activity; open the dashboard and restore the project before a demo if needed.
 
@@ -927,14 +955,16 @@ Free-tier Supabase projects pause after a week with no activity; open the dashbo
 
 ```mermaid
 flowchart LR
-    Dev[git push] --> GH[GitHub]
-    GH -->|Vercel Git integration| Prod[Vercel production URL]
+    PR[Pull request merged] --> Main[main on GitHub]
+    Main -->|git pull| Dev[Developer machine]
+    Dev -->|vercel --prod| Prod[Vercel production URL]
     Prod --> DB[(Supabase)]
 ```
 
-- The repo is connected to Vercel through the Vercel GitHub integration (already set up by the template); a push to `main` deploys to production.
-- Environment variables from section 8 are set in the Vercel project settings.
-- (Beta) Before merging a change that includes a new migration, run `alembic upgrade head` against Supabase (section 12), then merge so Vercel deploys the matching code.
+- The Vercel project is not connected to GitHub, so merging into `main` does not deploy by itself. Production is deployed from an up-to-date `main` with `vercel --prod` (or by connecting the repository under Project → **Settings** → **Git**).
+- Environment variables from section 8 are set in the Vercel project settings; `JWT_SECRET` and `PASSWORD_PEPPER` must be set before the first deploy that needs them, or every logged-in request returns `500`.
+- The first request after a deploy runs `create_db_and_tables()`, which brings the Supabase schema up to date (section 12); there is no separate migration step.
+- Demo data for the live site is made with `scripts/seed_demo.py` (README, **Demo data**), which uses the public API like any other client.
 
 ## 10. Auth and RBAC design — Beta
 
@@ -1051,12 +1081,12 @@ def group_permissions(user, owner_id, member: GroupMember | None) -> frozenset[G
 | Rename or delete the group; add, change or remove members | — | `manage`, else `403` (a member may remove themself) |
 
 Row-level rules that depend on the data are checked inside the route:
-- Own membership: query with `Member.user_id == user.id`; a member can never pass an id to read another member's record.
+- Own membership: the caller's own `app_user` row (`member_service.get_own_membership(user)`); a member can never pass an id to read another member's record.
 - Book class: class must exist (`404`), `starts_at` must be in the future (`400`), `count(bookings) < capacity` (`409` if full), and no existing `(class_id, member_id)` row (`409`). Do the capacity check and insert in one transaction.
 - Cancel booking: delete the caller's own `(class_id, member_id)` row; none found → `404`.
 - Edit class capacity: new `capacity` below the current booking count → `422`.
 - Check-in: member must be valid (`400` otherwise); a second check-in for the same member on the same UTC date is allowed but the dashboard counts distinct members.
-- Link account: `user_id` on a member must reference an existing user not already linked to another member, otherwise `409`.
+- Start a membership: `member_service.start_membership()` finds the account by email (none → `AccountNotFoundError`, `422`) and refuses one that already has a plan (`AlreadyMemberError`, `409`).
 - Change role: `user_id == caller` → `400`.
 - Ban: target is the caller or an admin → `400`. Otherwise set `is_banned = true`, `banned_at = now`, `ban_reason`, and revoke all the user's sessions in the same transaction (`session_service.revoke_all()`). Unban clears the three fields; the revoked sessions stay revoked.
 - Login rejects a banned user with `403`; refresh answers `401`, because the ban revoked the sessions (and `rotate()` also refuses a banned user).
@@ -1075,11 +1105,11 @@ now = datetime.now(timezone.utc)
 today = date.today()
 week_ago = now - timedelta(days=7)
 stats = AdminStats(
-    members={
-        "total": count(Member),
-        "active": count(Member, Member.is_active, Member.expires_on >= today),
-        "expired": count(Member, Member.expires_on < today),
-        "new_last_7_days": count(Member, Member.created_at >= week_ago),
+    members={  # members are accounts with a plan
+        "total": count(User, User.plan.is_not(None)),
+        "active": count(User, User.plan.is_not(None), ~User.is_frozen, User.expires_on >= today),
+        "expired": count(User, User.plan.is_not(None), User.expires_on < today),
+        "new_last_7_days": count(User, User.plan.is_not(None), User.joined_on > today - timedelta(days=7)),
     },
     classes={
         "total": count(GymClass),
@@ -1090,9 +1120,9 @@ stats = AdminStats(
         "last_7_days": count(CheckIn, CheckIn.checked_in_at >= week_ago),
     },
     users={
-        "total": count(AppUser),
-        "admins": count(AppUser, AppUser.role == "admin"),
-        "banned": count(AppUser, AppUser.is_banned),
+        "total": count(User),
+        "admins": count(User, User.role == "admin"),
+        "banned": count(User, User.is_banned),
     },
 )
 ```
@@ -1147,7 +1177,7 @@ stats = AdminStats(
 | CSV export | Text cells starting with `=`, `+`, `-`, `@`, tab or carriage return get a leading `'` (formula injection); UTF-8 with a byte order mark so Excel reads Bengali names correctly; admins only; both exports share `csv_export.py` and are recorded in the activity log |
 | Audit trail | `activity_log` (section 10.5): logins, failed logins, lockouts, password and role changes, bans, ended sessions, deletions and exports with IP and browser, saved in the same transaction as the change; never a password, token or hash; read only with `activity:read` |
 | Errors | Catch-all handler returns a generic `500`; details only in logs |
-| Data exposure | Response schemas (`UserRead`, `MemberRead`) list fields explicitly; `password_hash` and token hashes are never in a response schema. Member phone numbers and notes are returned only to admins and the member themself |
+| Data exposure | Response schemas (`UserRead`, `MemberRead`) list fields explicitly; `password_hash` and token hashes are never in a response schema. Member phone numbers, dates of birth, emergency contacts and notes are returned only to gym staff (gym managers and admins) and the member themself |
 
 ```json
 "headers": [
@@ -1163,15 +1193,18 @@ stats = AdminStats(
 ]
 ```
 
-## 12. Migrations — Beta
+## 12. Schema changes — Beta
 
-- Add Alembic in `backend/alembic/`, with `target_metadata = SQLModel.metadata`.
-- Revision `0001_mvp`: the MVP `member` table. On the existing Supabase database (created by `create_all`), run `alembic stamp 0001_mvp` once instead of upgrading.
-- Revision `0002_beta`: create `app_user` (including lockout and ban columns), `refresh_token`, `gym_class`, `class_booking`, `check_in`; add nullable unique `user_id` and its index to `member` (existing MVP members stay as walk-in members, so no data is deleted).
-- Run migrations from a developer machine: `MIGRATION_DATABASE_URL=... alembic upgrade head` (Supabase session pooler, port `5432`), then merge the code.
-- After `0002_beta`, remove `create_all` from startup.
-- Until Alembic is added, `create_db_and_tables()` also adds columns that were created after a table first existed (`app_user.is_banned`, `banned_at`, `ban_reason`) with `ALTER TABLE ... ADD COLUMN`, only when they are missing, so an existing Supabase database keeps its data. Remove this with `create_all`.
-- Promote the first admin in the Supabase table editor: set `role = 'admin'` on your `app_user` row.
+The plan was Alembic (revisions `0001_mvp` and `0002_beta`, run by hand against Supabase before each merge). It was not adopted: every change in the final release was additive (new tables, new nullable or defaulted columns, new indexes), apart from one planned replacement, so the app brings the schema up to date itself and deployment stays one step. `create_db_and_tables()` in `backend/app/database.py` runs on start, in this order:
+
+1. `_drop_old_member_tables()`: only on a database that still has the MVP `member` table, drop `check_in`, `class_booking`, `payment` and `member` (data included; `CASCADE` on PostgreSQL). This was the one destructive change, made once when members became accounts (PR #40) and announced in the README; accounts, classes and plan prices were kept. On every later start it does nothing.
+2. `SQLModel.metadata.create_all(engine)`: create any table that does not exist yet (and the three dropped ones, now pointing at `app_user`).
+3. `_add_missing_columns()`: for each `(table, column, definition)` in `_ADDED_COLUMNS` (the lockout, ban, password and membership columns on `app_user`, the void columns on `payment`, `trainer_id` on `gym_class`, …), `ALTER TABLE … ADD COLUMN` when the column is missing (`IF NOT EXISTS` on PostgreSQL, since two serverless instances may start together), then `CREATE INDEX IF NOT EXISTS` for `_ADDED_INDEXES`.
+4. `_seed_plan_prices()`: insert the default monthly, quarterly and yearly prices if missing; existing prices are never changed.
+
+A change that renames or removes a column, or changes a type, cannot be made this way; that is the point to adopt Alembic (risks, section 13).
+
+The first admin is promoted by hand in the Supabase table editor or SQL editor (`update app_user set role = 'admin' where email = …`); after that admins give roles on the Users page.
 
 ## 13. Risks
 
@@ -1180,7 +1213,7 @@ stats = AdminStats(
 | Serverless cold starts make the first request slow | Acceptable; measure NFR-01 excluding cold start |
 | Too many DB connections from serverless functions | Use Supabase transaction pooler (port `6543`) with `NullPool` |
 | Free-tier project pauses when idle | Check the Supabase dashboard before demos; any API activity keeps it awake |
-| Code deployed before its migration ran (or the reverse) | Always run `alembic upgrade head` before merging a migration; keep migrations additive where possible |
+| A schema change that is not additive | `create_db_and_tables()` only adds tables, columns and indexes (section 12). Adopt Alembic before the first rename, removal or type change |
 | JWT secret leaked | Only in Vercel env vars; rotating it logs everyone out (acceptable) |
 | Permission bug exposes another member's data | All permission checks go through the dependencies in section 10.3; review every new route against the [SRS permission matrix](02-srs.md#311-permission-matrix--beta) |
 | Two members book the last class spot at the same time | Capacity check and insert run in one transaction; the composite primary key blocks duplicate bookings |
@@ -1200,4 +1233,6 @@ stats = AdminStats(
 | `test_cors.py` | `FRONTEND_ORIGIN` gets `Access-Control-Allow-Origin` and credentials, and its preflight is allowed; other origins (including look-alikes and `null`) and their preflights get no `Access-Control-*` header; `*` is never sent |
 | `test_config.py` | `.env` fills in missing variables but never overrides, is never read on Vercel, may be absent; `FRONTEND_ORIGIN` lists, trailing slashes, `*` and scheme-less values refused, defaults locally and on Vercel |
 
-Run: `pip install -r requirements-dev.txt` (adds `pytest` and `httpx` to `requirements.txt`; Vercel installs only `requirements.txt`), then `pytest` in `backend/`. Not in CI (out of scope).
+Run: `pip install -r requirements-dev.txt` (adds `pytest` and `httpx` to `requirements.txt`; Vercel installs only `requirements.txt`), then `pytest` in `backend/`. 53 tests, all passing. Not in CI (out of scope).
+
+**Smoke test through the public API.** `scripts/seed_demo.py` (README, **Demo data**) signs accounts up, gives roles, starts memberships, takes payments, checks members in, creates classes, books them, posts announcements, logs workouts and sets up a group with mixed permissions, stopping at the first unexpected status code. Run against a fresh local backend and then again, it creates everything once and nothing the second time. Its results were checked by role: each account's role and landing page, `403` when a group member without `update` edits a group workout, `404` for someone outside the group, a class at capacity, and the Overview numbers (`check_ins_today`, `expiring_soon`, `waiting`, `payments_today`) matching the seeded data.
