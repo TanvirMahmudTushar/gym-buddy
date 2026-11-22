@@ -21,6 +21,7 @@ export type Permission =
   | "users:ban"
   | "users:reset_password"
   | "plans:edit"
+  | "activity:read"
 
 /** An account as other screens see it (lists, the admin's user table). */
 export interface User {

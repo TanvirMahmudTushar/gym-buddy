@@ -72,7 +72,7 @@ flowchart LR
 | User | Beta | Logged in with global role `user` (everyone who signs up); edits their own profile, views their own membership and check-ins, browses classes, books and cancels their own bookings |
 | Trainer | Beta | Logged in with global role `trainer` (given by an admin): sees the classes they teach and who booked each one, and has the same own-account pages as a User. Cannot manage members or classes |
 | Gym Manager | Beta | Gym staff with global role `gym_manager`: manage all members, classes and check-ins and view bookings. Cannot list users, change roles or see the dashboard |
-| Admin | Beta | Global role `admin`: everything a Gym Manager can do, plus list users, change roles, view dashboard stats, ban / unban users |
+| Admin | Beta | Global role `admin`: everything a Gym Manager can do, plus list users, change roles, view dashboard stats, ban / unban users, and read the activity log and the security view |
 
 `user`, `trainer`, `gym_manager` and `admin` are **global** roles stored on the user account. A logged-in user is linked to at most one membership record (`member.user_id`). A logged-in `user` with no linked record can log in and edit their profile but gets `404` on membership and booking endpoints until staff link their account.
 
@@ -360,6 +360,21 @@ Story US-28: as a member, I want to keep my phone, date of birth and emergency c
 
 > **Built so far (overview):** FR-62 and FR-63. The payments list also opens on a date range given in its address (`#/payments?from=&to=`), which the overview's payments number links to.
 
+### 3.7i Activity log and security view — Beta
+
+Story US-29: as an admin, I want to see who did what to which account, from where and when, and to spot password guessing, so I can react to an attack or undo a mistake.
+
+| ID | Requirement | Release | Story |
+|---|---|---|---|
+| FR-84 | The system shall keep an activity log: one row per security event with the time (UTC), the event, the account that did it and its email, the account it was done to and its email, details, the client IP address and the browser (User-Agent). Rows are only ever added. The emails are copied into the row, so it still reads correctly after the account is deleted. The log is indexed on time, event and actor. | Beta | US-29 |
+| FR-85 | The system shall record sign up, login, failed login (a wrong password, an email with no account, a locked account or a banned account, always with the email that was typed), account lockout, logout, password change, failed password change, password reset, role change, ban, unban, session revoke (by its owner, or by the server when a replaced refresh token is used again), account deletion (one or many) and CSV export (payments and activity). The row is saved in the same transaction as the change. An action that changes nothing (banning a banned user, giving the same role, logging out twice) adds no row. | Beta | US-29 |
+| FR-86 | On Vercel the client IP address shall be the first address in `X-Forwarded-For`, which the platform sets; anywhere else it is the address of the connection, since the header could be made up. | Beta | US-29 |
+| FR-87 | An admin shall be able to list the log, newest first, paginated, filtered by `event`, by `user_id` (rows where that account acted or was acted on), by date range (`date_from`, `date_to`: UTC days, both inclusive) and by `q` (part of an email, the IP address or the details, any case). An unknown event or `date_from` after `date_to` gives `422`. Every other role gets `403`. | Beta | US-29 |
+| FR-88 | An admin shall be able to download the rows matching the FR-87 filters as CSV, in the same order, up to the newest 10,000 rows, with the FR-51 format (byte order mark, formula-safe cells). The download is itself recorded (FR-85), after the rows are read. | Beta | US-29 |
+| FR-89 | An admin shall be able to see the failed logins of the last 24 hours and of the last 7 days: how many there were, how many lockouts, and the 10 IP addresses and 10 emails with the most failed logins, each with how many different emails (for an address) or addresses (for an email) were involved and the time of the last attempt. | Beta | US-29 |
+
+> **Built so far (activity log):** FR-84 to FR-89 and NFR-23, with the Activity and Security pages for admins (`activity:read`). Deleting old rows and email alerts are out of scope.
+
 ### 3.8 Account security — Beta
 
 | ID | Requirement | Release | Story |
@@ -447,6 +462,7 @@ A new member always starts as `Active` if `expires_on` is today or later. "Expir
 | View and edit a member's date of birth and emergency contact | No | No (`403`) | No (`403`) | Yes | Yes |
 | Read the current announcements | No | Yes | Yes | Yes | Yes |
 | Post, edit, delete announcements; list ended ones | No | No (`403`) | No (`403`) | Yes | Yes |
+| Read the activity log and the security view, export the log as CSV | No | No (`403`) | No (`403`) | No (`403`) | Yes |
 
 Every endpoint except sign up, log in, refresh, health and the docs returns `401` when no valid token is sent.
 
@@ -470,6 +486,7 @@ Every endpoint except sign up, log in, refresh, health and the docs returns `401
 | `users:ban` | Ban and unban (not oneself, not another admin) | No | No | No | Yes |
 | `users:reset_password` | Reset a password (not one's own, not another admin's) | No | No | No | Yes |
 | `plans:edit` | Plan prices and lengths | No | No | No | Yes |
+| `activity:read` | The activity log, its CSV export and the security view | No | No | No | Yes |
 
 Actions on one's own account and data (profile, password, sessions, own membership, bookings and payments, reading classes, plans and current announcements) need only a login: the server takes the user id from the token, never from the request.
 
@@ -517,8 +534,9 @@ Actions on one's own account and data (profile, password, sessions, own membersh
 | NFR-19 | Maintainability | Database schema changes are made through Alembic migrations, not by hand. | Beta |
 | NFR-20 | Privacy | Member phone numbers, dates of birth, emergency contacts and notes are returned only to gym staff (gym managers and admins) and to the member themself. | Beta |
 | NFR-21 | Consistency | Booking a class checks capacity and inserts the booking in one database transaction, so a class is never over capacity and a member never books the same class twice. | Beta |
+| NFR-23 | Security | The activity log never holds a password, a temporary password, a password hash or a token: the server builds each row's details from names, roles, reasons and ids only. | Beta |
 
-> **Built so far (security):** NFR-11 to NFR-17 (headers set for every response in `vercel.json`), NFR-20, NFR-21 and NFR-22. Schema changes are applied on start by `create_db_and_tables()` rather than Alembic (NFR-19). Production is deployed with `vercel --prod`; the project is not connected to GitHub, so a push to `main` does not deploy by itself (NFR-10).
+> **Built so far (security):** NFR-11 to NFR-17 (headers set for every response in `vercel.json`), NFR-20, NFR-21, NFR-22 and NFR-23. Schema changes are applied on start by `create_db_and_tables()` rather than Alembic (NFR-19). Production is deployed with `vercel --prod`; the project is not connected to GitHub, so a push to `main` does not deploy by itself (NFR-10).
 
 ## 5. Acceptance criteria
 
@@ -757,10 +775,19 @@ Actions on one's own account and data (profile, password, sessions, own membersh
 - When browser 2 sends `POST /api/v1/auth/logout`, the response is `204`, the cookie is cleared, browser 2's access token gets `401`, and refresh without a cookie returns `204`.
 
 **AC-43 Permissions (FR-24, FR-83, NFR-17)**
-- When each role logs in, `user.permissions` is `[]` for a User, `["classes:teach"]` for a Trainer, the 7 staff permissions for a Gym Manager, and those plus the 8 admin permissions for an Admin; `GET /api/v1/users/me` returns the same list.
+- When each role logs in, `user.permissions` is `[]` for a User, `["classes:teach"]` for a Trainer, the 7 staff permissions for a Gym Manager, and those plus the 9 admin permissions for an Admin; `GET /api/v1/users/me` returns the same list.
 - A Gym Manager's `GET /api/v1/admin/stats` is `403` and `GET /api/v1/members` is `200`; a User's `GET /api/v1/members` is `403`.
 - Trainer A's `GET /api/v1/classes/{id}/bookings` is `200` for a class A teaches and `403` for trainer B's class.
 - When an admin changes trainer A's role to `user`, A's next `GET /api/v1/trainers/me/classes` is `403` with the same access token, and A's `permissions` become `[]`.
+
+**AC-44 Activity log and security view (FR-84 – FR-89, NFR-23)**
+- Given user A, an admin and a gym manager, on Vercel
+- When someone sends `POST /api/v1/auth/login` with A's email and a wrong password, the admin's `GET /api/v1/admin/activity?event=login_failed` lists it first, with A's email and id, the details `Wrong password`, the first address of `X-Forwarded-For` and the browser's User-Agent. A login with an email that has no account is listed with that email and no account.
+- After 5 wrong passwords in a row, an `account_locked` row names A, and `GET /api/v1/admin/activity/security` counts 5 failed logins for A's email and for that address, and 1 lockout.
+- When the admin bans A with a reason, a `ban` row names the admin, A and the reason; banning A again adds no row.
+- For the same filters, every page of `GET /api/v1/admin/activity` and `GET /api/v1/admin/activity/export.csv` return the same rows in the same order, and the export adds an `export` row.
+- The gym manager, a trainer and a user get `403` on all three endpoints; no login gets `401`.
+- No row holds any password, the temporary password from a reset, a token or a hash.
 
 ## 6. Traceability
 
@@ -795,4 +822,5 @@ Actions on one's own account and data (profile, password, sessions, own membersh
 | US-20 | FR-62, FR-63 | `GET /api/v1/overview` | Beta |
 | US-11, US-16, US-17 | FR-58 – FR-61 | `GET /api/v1/members/{id}/bookings`, `DELETE /api/v1/members/{id}/bookings/{class_id}`, `GET /api/v1/users/me/bookings` | Beta |
 | US-12, US-13 | FR-54 – FR-57 | `GET /api/v1/members?q=`, `GET /api/v1/members/waiting`, `GET /api/v1/admin/users?q=` | Beta |
+| US-29 | FR-84 – FR-89, NFR-23 | `GET /api/v1/admin/activity`, `GET /api/v1/admin/activity/export.csv`, `GET /api/v1/admin/activity/security` | Beta |
 | US-25, US-26 | FR-43 – FR-51, FR-53 | `GET /api/v1/members?status=expiring_soon`, `/api/v1/plans`, `/api/v1/members/{id}/payments`, `/api/v1/payments`, `/api/v1/payments/{id}/void`, `/api/v1/payments/export.csv`, `/api/v1/users/me/payments`, `PUT /api/v1/admin/plans/{plan}` | Beta |

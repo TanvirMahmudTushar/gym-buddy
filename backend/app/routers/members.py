@@ -23,6 +23,7 @@ from app.models import (
     User,
 )
 from app.rbac import Permission, require_permission
+from app.request_info import ClientDep
 from app.services import checkin_service, class_service, member_service, payment_service
 from app.services.member_service import MemberStatus
 
@@ -36,6 +37,8 @@ READ_MEMBERS = Depends(require_permission(Permission.MEMBERS_READ))
 MANAGE_MEMBERS = Depends(require_permission(Permission.MEMBERS_MANAGE))
 RECORD_CHECK_INS = Depends(require_permission(Permission.CHECK_INS_RECORD))
 MANAGE_PAYMENTS = Depends(require_permission(Permission.PAYMENTS_MANAGE))
+# Deleting also needs to know who acts: every deleted account is written to the activity log.
+Manager = Annotated[User, Depends(require_permission(Permission.MEMBERS_MANAGE))]
 
 
 @router.post("", status_code=201, response_model=MemberRead, dependencies=[MANAGE_MEMBERS])
@@ -72,11 +75,11 @@ def list_waiting(
     return {"items": items, "total": total, "offset": offset, "limit": limit}
 
 
-@router.post("/bulk-delete", response_model=MemberBulkDeleteResult, dependencies=[MANAGE_MEMBERS])
-def bulk_delete_members(body: MemberBulkDelete, session: SessionDep) -> dict:
+@router.post("/bulk-delete", response_model=MemberBulkDeleteResult)
+def bulk_delete_members(body: MemberBulkDelete, session: SessionDep, manager: Manager, client: ClientDep) -> dict:
     """Deletes the members' accounts, all in one transaction. An ID that is not a member is skipped, so deleted can
     be lower than the IDs sent. 400 (and nothing deleted) if any of them is a gym manager or admin."""
-    return {"deleted": member_service.bulk_delete_members(session, body.ids)}
+    return {"deleted": member_service.bulk_delete_members(session, body.ids, manager, client)}
 
 
 @router.get("/{member_id}", response_model=MemberRead, dependencies=[READ_MEMBERS])
@@ -147,8 +150,8 @@ def cancel_member_booking(member_id: int, class_id: int, session: SessionDep) ->
     class_service.cancel_booking(session, class_id, member_service.get_member(session, member_id))
 
 
-@router.delete("/{member_id}", status_code=204, dependencies=[MANAGE_MEMBERS])
-def delete_member(member_id: int, session: SessionDep) -> None:
+@router.delete("/{member_id}", status_code=204)
+def delete_member(member_id: int, session: SessionDep, manager: Manager, client: ClientDep) -> None:
     """Deletes the member's account with their check-ins and bookings; payments stay on record.
     400 for a gym manager or admin: change their role first."""
-    member_service.delete_member(session, member_id)
+    member_service.delete_member(session, member_id, manager, client)

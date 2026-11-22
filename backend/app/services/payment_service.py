@@ -1,24 +1,25 @@
 # Taking payments at the front desk, renewing a membership with them, and finding, voiding and exporting them
 # (SRS FR-43 to FR-51).
-import csv
-import io
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import date, timedelta
 
 from sqlalchemy.orm import aliased
 from sqlmodel import Session, col, func, select, update
 
 from app.models import (
     DEFAULT_PLAN_PRICES,
+    ActivityEvent,
     Payment,
     PaymentCreate,
     PaymentFilter,
     PlanPrice,
     User,
-    as_utc,
+    start_of_day,
     utc_now,
     utc_today,
 )
-from app.services import member_service
+from app.request_info import Client
+from app.services import activity_service, member_service
+from app.services.csv_export import describe_filters, to_csv, utc_text
 
 PLAN_ORDER = ["monthly", "quarterly", "yearly"]
 
@@ -41,9 +42,6 @@ CSV_HEADER = [
     "void_reason",
     "voided_by",
 ]
-
-# A cell starting with one of these could run as a formula when the CSV is opened in a spreadsheet.
-_FORMULA_START = ("=", "+", "-", "@", "\t", "\r")
 
 
 class PaymentNotFoundError(Exception):
@@ -112,11 +110,6 @@ def _page(session: Session, filters: list, offset: int, limit: int) -> tuple[lis
     total = session.exec(select(func.count()).select_from(Payment).where(*filters)).one()
     rows = session.exec(_with_names(filters).offset(offset).limit(limit)).all()
     return [_read(p, recorded_by, voided_by) for p, recorded_by, voided_by in rows], total
-
-
-def start_of_day(day: date) -> datetime:
-    """Midnight UTC at the start of a day: the same calendar the expiry check uses (SRS C-7)."""
-    return datetime.combine(day, time.min, tzinfo=timezone.utc)
 
 
 def _conditions(f: PaymentFilter) -> list:
@@ -211,39 +204,34 @@ def void_payment(session: Session, payment_id: int, voided_by: User, reason: str
     return _read(payment, recorded_by, voided_by_name)
 
 
-def _utc_text(value: datetime | None) -> str:
-    return as_utc(value).strftime("%Y-%m-%d %H:%M:%S") if value else ""
-
-
-def _cell(value: object) -> object:
-    """Text that a spreadsheet would treat as a formula gets a leading apostrophe, so it shows as plain text."""
-    if value is None:
-        return ""
-    if isinstance(value, str) and value.startswith(_FORMULA_START):
-        return "'" + value
-    return value
-
-
-def export_csv(session: Session, f: PaymentFilter) -> str:
-    """Every payment matching the filters as CSV, newest first. Starts with a BOM so Excel reads it as UTF-8."""
-    buffer = io.StringIO()
-    writer = csv.writer(buffer, lineterminator="\r\n")
-    writer.writerow(CSV_HEADER)
-    for p, recorded_by, voided_by in session.exec(_with_names(_conditions(f))).all():
-        row = [
-            p.id,
-            _utc_text(p.paid_at),
-            p.member_name,
-            p.member_id,
-            p.amount,
-            p.method,
-            p.plan,
-            p.renewed_until.isoformat() if p.renewed_until else None,
-            p.note,
-            recorded_by,
-            _utc_text(p.voided_at),
-            p.void_reason,
-            voided_by,
-        ]
-        writer.writerow([_cell(v) for v in row])
-    return "﻿" + buffer.getvalue()
+def export_csv(session: Session, f: PaymentFilter, exported_by: User, client: Client) -> str:
+    """Every payment matching the filters as CSV, newest first (csv_export.to_csv: BOM, formula-safe cells).
+    The download is written to the activity log."""
+    rows = session.exec(_with_names(_conditions(f))).all()
+    text = to_csv(
+        CSV_HEADER,
+        (
+            [
+                p.id,
+                utc_text(p.paid_at),
+                p.member_name,
+                p.member_id,
+                p.amount,
+                p.method,
+                p.plan,
+                p.renewed_until.isoformat() if p.renewed_until else None,
+                p.note,
+                recorded_by,
+                utc_text(p.voided_at),
+                p.void_reason,
+                voided_by,
+            ]
+            for p, recorded_by, voided_by in rows
+        ),
+    )
+    filters = describe_filters(f.model_dump(exclude_defaults=True))
+    activity_service.record(
+        session, ActivityEvent.EXPORT, client, actor=exported_by, details=f"payments.csv: {len(rows)} rows; {filters}"
+    )
+    session.commit()
+    return text

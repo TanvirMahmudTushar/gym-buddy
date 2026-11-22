@@ -20,15 +20,16 @@ from app.models import (
     UserRoleUpdate,
 )
 from app.rbac import Permission, require_permission
+from app.request_info import ClientDep
 from app.services import payment_service, revenue_service, stats_service, user_service
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
 
 READ_DASHBOARD = Depends(require_permission(Permission.DASHBOARD_READ))
 READ_USERS = Depends(require_permission(Permission.USERS_READ))
-BAN_USERS = Depends(require_permission(Permission.USERS_BAN))
 EDIT_PLANS = Depends(require_permission(Permission.PLANS_EDIT))
-# These routes also need to know who is acting, for the safety rules (not yourself, not another admin).
+# These routes also need to know who is acting, for the safety rules (not yourself, not another admin) and for
+# the activity log, which records who made each change and from where (ClientDep).
 RoleChanger = Annotated[User, Depends(require_permission(Permission.USERS_CHANGE_ROLE))]
 Banner = Annotated[User, Depends(require_permission(Permission.USERS_BAN))]
 PasswordResetter = Annotated[User, Depends(require_permission(Permission.USERS_RESET_PASSWORD))]
@@ -59,27 +60,31 @@ def list_users(
 
 
 @router.patch("/users/{user_id}/role", response_model=AdminUserRead)
-def change_role(user_id: int, body: UserRoleUpdate, session: SessionDep, admin: RoleChanger) -> User:
+def change_role(user_id: int, body: UserRoleUpdate, session: SessionDep, admin: RoleChanger, client: ClientDep) -> User:
     """An admin cannot change their own role (400), so the system always keeps an admin."""
-    return user_service.change_role(session, admin, user_id, body.role)
+    return user_service.change_role(session, admin, user_id, body.role, client)
 
 
 @router.post("/users/{user_id}/ban", response_model=AdminUserRead)
-def ban_user(user_id: int, session: SessionDep, admin: Banner, body: BanRequest | None = None) -> User:
+def ban_user(
+    user_id: int, session: SessionDep, admin: Banner, client: ClientDep, body: BanRequest | None = None
+) -> User:
     """The user is locked out at once. An admin cannot ban themself or another admin (400)."""
-    return user_service.ban_user(session, admin, user_id, body.reason if body else None)
+    return user_service.ban_user(session, admin, user_id, body.reason if body else None, client)
 
 
-@router.post("/users/{user_id}/unban", response_model=AdminUserRead, dependencies=[BAN_USERS])
-def unban_user(user_id: int, session: SessionDep) -> User:
-    return user_service.unban_user(session, user_id)
+@router.post("/users/{user_id}/unban", response_model=AdminUserRead)
+def unban_user(user_id: int, session: SessionDep, admin: Banner, client: ClientDep) -> User:
+    return user_service.unban_user(session, admin, user_id, client)
 
 
 @router.post("/users/{user_id}/reset-password", response_model=PasswordResetResult)
-def reset_password(user_id: int, session: SessionDep, admin: PasswordResetter, response: Response) -> dict:
+def reset_password(
+    user_id: int, session: SessionDep, admin: PasswordResetter, response: Response, client: ClientDep
+) -> dict:
     """Makes a random temporary password and returns it this once. The account's logins end, and it must choose a
     new password before doing anything else. Not for your own account or another admin's (400)."""
-    user, temporary = user_service.reset_password(session, admin, user_id)
+    user, temporary = user_service.reset_password(session, admin, user_id, client)
     # The temporary password must not be kept by the browser or any cache on the way.
     response.headers["Cache-Control"] = "no-store"
     return {"user": user, "temporary_password": temporary}

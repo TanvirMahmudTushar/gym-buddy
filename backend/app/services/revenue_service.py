@@ -5,8 +5,7 @@ from datetime import date, timedelta
 
 from sqlmodel import Session, col, func, select
 
-from app.models import Payment, utc_today
-from app.services.payment_service import start_of_day
+from app.models import Payment, start_of_day, utc_today
 
 METHOD_ORDER = ["cash", "card", "bank_transfer", "mobile_banking"]
 LAST_DAYS = 30

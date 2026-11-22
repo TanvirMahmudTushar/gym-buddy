@@ -7,7 +7,20 @@ from fastapi.responses import JSONResponse
 
 from app.database import create_db_and_tables
 from app.models import utc_now
-from app.routers import admin, announcements, auth, check_ins, classes, members, overview, payments, plans, trainers, users
+from app.routers import (
+    activity,
+    admin,
+    announcements,
+    auth,
+    check_ins,
+    classes,
+    members,
+    overview,
+    payments,
+    plans,
+    trainers,
+    users,
+)
 from app.services.announcement_service import AnnouncementNotFoundError
 from app.services.auth_service import (
     ACCOUNT_BANNED_MESSAGE,
@@ -68,6 +81,7 @@ app.include_router(payments.router)
 app.include_router(overview.router)
 app.include_router(trainers.router)
 app.include_router(announcements.router)
+app.include_router(activity.router)
 
 # Run at import (not in a lifespan hook) so it also works on Vercel's serverless functions.
 create_db_and_tables()

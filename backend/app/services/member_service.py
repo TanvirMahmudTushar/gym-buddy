@@ -6,6 +6,8 @@ from typing import Literal
 from sqlmodel import Session, col, delete, func, select, update
 
 from app.models import (
+    ActivityEvent,
+    ActivityLog,
     Announcement,
     AuthSession,
     CheckIn,
@@ -16,7 +18,8 @@ from app.models import (
     User,
     utc_today,
 )
-from app.services import profile_service
+from app.request_info import Client
+from app.services import activity_service, profile_service
 from app.services.search import contains_any
 
 # expiring_soon is a part of active: memberships that end today or within the next EXPIRING_SOON_DAYS days.
@@ -177,23 +180,41 @@ def _delete_accounts(session: Session, ids: list[int]) -> int:
     session.exec(update(Payment).where(col(Payment.voided_by).in_(ids)).values(voided_by=None))
     session.exec(update(GymClass).where(col(GymClass.created_by).in_(ids)).values(created_by=None))
     session.exec(update(Announcement).where(col(Announcement.posted_by).in_(ids)).values(posted_by=None))
+    # The activity log keeps its rows about these accounts; they still name them by the email copied into each row.
+    session.exec(update(ActivityLog).where(col(ActivityLog.actor_id).in_(ids)).values(actor_id=None))
+    session.exec(update(ActivityLog).where(col(ActivityLog.target_id).in_(ids)).values(target_id=None))
     return session.exec(delete(User).where(col(User.id).in_(ids))).rowcount
 
 
-def delete_member(session: Session, member_id: int) -> None:
+def _log_deletes(session: Session, members: list[User], actor: User, client: Client, how: str) -> None:
+    """One row per deleted account. The account is gone, so the row keeps only its email (and the name in details)."""
+    for member in members:
+        activity_service.record(
+            session,
+            ActivityEvent.ACCOUNT_DELETE,
+            client,
+            actor=actor,
+            target_email=member.email,
+            details=f"{member.name}; {how}",
+        )
+
+
+def delete_member(session: Session, member_id: int, actor: User, client: Client) -> None:
     """Deletes the member's whole account: they can no longer log in."""
     member = get_member(session, member_id)
     _check_deletable(member)
+    _log_deletes(session, [member], actor, client, "deleted on the Members page")
     _delete_accounts(session, [member_id])
     session.commit()
 
 
-def bulk_delete_members(session: Session, ids: list[int]) -> int:
+def bulk_delete_members(session: Session, ids: list[int], actor: User, client: Client) -> int:
     """All in one transaction. An ID that is not a member is skipped, so the count can be lower than len(ids).
     If any of them is a staff account, nothing is deleted."""
-    members = session.exec(select(User).where(col(User.id).in_(ids), IS_MEMBER)).all()
+    members = list(session.exec(select(User).where(col(User.id).in_(ids), IS_MEMBER)).all())
     for member in members:
         _check_deletable(member)
+    _log_deletes(session, members, actor, client, f"bulk delete of {len(members)}")
     deleted = _delete_accounts(session, [m.id for m in members]) if members else 0
     session.commit()
     return deleted

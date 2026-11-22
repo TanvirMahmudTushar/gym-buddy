@@ -7,7 +7,7 @@ from fastapi.responses import JSONResponse
 from app import rbac
 from app.database import SessionDep
 from app.models import AuthSession, LoginRequest, SignupRequest, TokenResponse, User, UserRead
-from app.request_info import client_ip, user_agent
+from app.request_info import ClientDep
 from app.security import ACCESS_TOKEN_LIFETIME, create_access_token
 from app.services import auth_service, session_service
 
@@ -46,17 +46,17 @@ def _tokens(user: User, auth_session: AuthSession) -> dict:
 
 
 @router.post("/signup", status_code=201, response_model=UserRead)
-def signup(body: SignupRequest, session: SessionDep) -> User:
+def signup(body: SignupRequest, session: SessionDep, client: ClientDep) -> User:
     """Creates an account with the role user. A duplicate email returns 409."""
-    return auth_service.signup(session, body)
+    return auth_service.signup(session, body, client)
 
 
 @router.post("/login", response_model=TokenResponse)
-def login(body: LoginRequest, request: Request, response: Response, session: SessionDep) -> dict:
+def login(body: LoginRequest, response: Response, session: SessionDep, client: ClientDep) -> dict:
     """Starts a session: a 15-minute access token in the body and a 7-day refresh token in an HttpOnly cookie.
-    A wrong email and a wrong password give the same 401."""
-    user = auth_service.authenticate(session, body)
-    auth_session, refresh_token = session_service.start_session(session, user, client_ip(request), user_agent(request))
+    A wrong email and a wrong password give the same 401. Every attempt, failed or not, is in the activity log."""
+    user = auth_service.authenticate(session, body, client)
+    auth_session, refresh_token = session_service.start_session(session, user, client)
     _set_refresh_cookie(response, refresh_token)
     return _tokens(user, auth_session)
 
@@ -66,7 +66,7 @@ def login(body: LoginRequest, request: Request, response: Response, session: Ses
     response_model=TokenResponse,
     responses={204: {"description": "No refresh cookie: nobody is logged in on this browser"}},
 )
-def refresh(request: Request, response: Response, session: SessionDep) -> Any:
+def refresh(request: Request, response: Response, session: SessionDep, client: ClientDep) -> Any:
     """Swaps the refresh cookie for a new one (rotation) and returns a new access token (FR-14). 401 and the
     cookie is cleared if it is expired, revoked or reused. With no cookie at all the answer is 204, so a visitor
     who is not logged in does not see an error when the app starts."""
@@ -74,7 +74,7 @@ def refresh(request: Request, response: Response, session: SessionDep) -> Any:
     if not token:
         return Response(status_code=204)
     try:
-        auth_session, user, new_token = session_service.rotate(session, token)
+        auth_session, user, new_token = session_service.rotate(session, token, client)
     except session_service.InvalidRefreshTokenError:
         # Returned (not raised) so the response can clear the cookie it rejects.
         error = JSONResponse(status_code=401, content={"detail": "Please log in"})
@@ -86,12 +86,12 @@ def refresh(request: Request, response: Response, session: SessionDep) -> Any:
 
 
 @router.post("/logout", status_code=204)
-def logout(request: Request, session: SessionDep) -> Response:
+def logout(request: Request, session: SessionDep, client: ClientDep) -> Response:
     """Revokes this browser's session and clears the cookie (FR-15). The access token stops working at once,
     because every request checks that its session is still active. Always 204."""
     token = request.cookies.get(REFRESH_COOKIE)
     if token:
-        session_service.logout(session, token)
+        session_service.logout(session, token, client)
     response = Response(status_code=204)
     _clear_refresh_cookie(response)
     return response

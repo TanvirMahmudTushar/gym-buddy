@@ -1034,3 +1034,10 @@ input.search {
 .reset-row .hint {
   margin: 8px 0 0;
 }
+
+/* Activity log (admin): events that are neither warnings nor admin actions. */
+.pill.neutral {
+  background: var(--bg);
+  color: var(--muted);
+  border: 1px solid var(--line);
+}

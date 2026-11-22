@@ -6,6 +6,7 @@ from fastapi import APIRouter, Query, Response
 from app import rbac
 from app.database import SessionDep
 from app.deps import AuthDep, CurrentUser, LoggedInUser
+from app.request_info import ClientDep
 from app.models import (
     BookedClassPage,
     CheckInPage,
@@ -105,10 +106,10 @@ def list_my_payments(
 
 
 @router.post("/me/password", status_code=204)
-def change_my_password(body: PasswordChange, auth: AuthDep, session: SessionDep) -> Response:
+def change_my_password(body: PasswordChange, auth: AuthDep, session: SessionDep, client: ClientDep) -> Response:
     """400 if the current password is wrong or the new one is the same. Every other session is logged out; this
     one stays. Also the way out of must_change_password after an admin reset."""
-    auth_service.change_password(session, auth.user, body.current_password, body.new_password, auth.session_id)
+    auth_service.change_password(session, auth.user, body.current_password, body.new_password, auth.session_id, client)
     return Response(status_code=204)
 
 
@@ -122,8 +123,8 @@ def list_my_sessions(user: CurrentUser, auth: AuthDep, session: SessionDep) -> l
 
 
 @router.delete("/me/sessions/{session_id}", status_code=204)
-def revoke_my_session(session_id: int, user: CurrentUser, session: SessionDep) -> Response:
+def revoke_my_session(session_id: int, user: CurrentUser, session: SessionDep, client: ClientDep) -> Response:
     """Logs that browser out: its refresh cookie and its access token stop working at once. Revoking the current
     session is the same as logging out here. 404 for a session that is not mine or no longer active."""
-    session_service.revoke_own_session(session, user.id, session_id)
+    session_service.revoke_own_session(session, user, session_id, client)
     return Response(status_code=204)

@@ -128,7 +128,7 @@ backend/
     security.py        # password hashing (Argon2 + pepper), access tokens (JWT create/verify), refresh token generation and hashing
     deps.py            # get_auth (token + session check), get_current_user
     rbac.py            # permission constants, role → permission map, require_permission(), has_permission(), is_owner()
-    request_info.py    # client_ip() (X-Forwarded-For on Vercel) and user_agent() for the session list
+    request_info.py    # client_ip() (X-Forwarded-For on Vercel), user_agent() and ClientDep: where a request came from, for the session list and the activity log
     routers/
       __init__.py
       members.py       # /api/v1/members (+ check-ins in Beta)
@@ -142,6 +142,7 @@ backend/
       overview.py      # /api/v1/overview (gym manager, admin)
       trainers.py      # /api/v1/trainers (list: gym manager, admin) and /trainers/me/classes (trainer)
       announcements.py # /api/v1/announcements (read the current ones: anyone logged in; post, edit, delete and ended ones: gym manager, admin)
+      activity.py      # /api/v1/admin/activity (list, CSV export, security view: admin)
       classes.py       # (Beta) /api/v1/classes/* (classes and bookings)
     services/
       __init__.py
@@ -157,6 +158,8 @@ backend/
       search.py          # contains_any(): the any-case text search shared by the member, waiting and user lists
       profile_service.py # phone, date of birth and emergency contact: update my own, and the both-or-neither contact check member_service also uses; raises IncompleteEmergencyContactError
       announcement_service.py # post, list (current or all, newest first, with the poster's name), edit, delete; raises AnnouncementNotFoundError
+      activity_service.py # the activity log: record() (called by the other services), list, CSV export, failed-login summary (section 10.5)
+      csv_export.py      # the CSV writer the payments and activity exports share: byte order mark, formula-safe cells, UTC times
   alembic/             # (Beta) migration scripts
   alembic.ini          # (Beta)
   requirements.txt
@@ -166,7 +169,7 @@ frontend/
     components/        # add form, member list, details panel
     context/           # AuthContext: who is logged in, login / signup / logout; restores the login with a refresh on load
     layouts/           # AppLayout: header, and the pages each role may open
-    pages/             # HomePage (members), LoginPage, SignupPage, AccountPage, DashboardPage (admin), OverviewPage (gym manager, admin), UsersPage (admin), ClassesPage (gym manager, admin), PaymentsPage (gym manager, admin), MembershipPage and TimetablePage (user), MyClassesPage (trainer), PlansPage (admin), AnnouncementsPage (gym manager, admin); (Later) AboutPage, MemberDetailsPage; (Beta, Could) MyMembership, Classes, AdminDashboard
+    pages/             # HomePage (members), LoginPage, SignupPage, AccountPage, DashboardPage (admin), OverviewPage (gym manager, admin), UsersPage (admin), ClassesPage (gym manager, admin), PaymentsPage (gym manager, admin), MembershipPage and TimetablePage (user), MyClassesPage (trainer), PlansPage (admin), AnnouncementsPage (gym manager, admin), ActivityPage and SecurityPage (admin); (Later) AboutPage, MemberDetailsPage; (Beta, Could) MyMembership, Classes, AdminDashboard
     services/          # fetch calls to the API; api.ts keeps the access token in memory and refreshes it once on a 401
     types/             # TypeScript types
     utils/             # display helpers; membersLink() builds the #/members?filter=&member= address
@@ -348,7 +351,26 @@ Voiding is a conditional `UPDATE ... WHERE voided_at IS NULL`, so voiding twice 
 
 "Current" is worked out from the date on every read (`ends_on IS NULL OR ends_on >= today`), like an expired membership, so nothing has to run when an announcement ends.
 
-Indexes: `member(user_id)`, `class_booking(member_id)`, `check_in(member_id, checked_in_at)`, `gym_class(starts_at)`, `gym_class(trainer_id)`, `announcement(posted_at)`, `auth_session(user_id)`, `auth_session(token_hash)` (unique), `auth_session(previous_token_hash)`.
+**`activity_log`** (one row per security event; rows are only ever added)
+
+> Built so far: all columns and the indexes on `created_at`, `event`, `actor_id` and `target_id`. A new table, so `create_all()` makes it on start.
+
+| Column | Type | Rules |
+|---|---|---|
+| `id` | integer | Primary key |
+| `created_at` | timestamp (UTC) | Not null, indexed (`ix_activity_log_created_at`): the list is newest first and the security view counts from a time |
+| `event` | varchar(30) | Not null, indexed (`ix_activity_log_event`): one of the `ActivityEvent` values (section 10.5) |
+| `actor_id` | integer | FK → `app_user.id`, nullable, on delete set null, indexed (`ix_activity_log_actor_id`). Null when no account acted: an email with no account on a failed login, or the server itself (a lockout, a reused refresh token) |
+| `actor_email` | varchar(254) | Nullable: the actor's email at the time; on a failed login, the email that was typed (lowercased), which may match no account |
+| `target_id` | integer | FK → `app_user.id`, nullable, on delete set null, indexed (`ix_activity_log_target_id`): the account acted on when it is not the actor's own |
+| `target_email` | varchar(254) | Nullable: the target's email at the time; kept for a deleted account |
+| `details` | varchar(500) | Nullable: built by the server, such as `Wrong password`, `user → trainer`, `Reason: …; sessions ended: 2`, `payments.csv: 12 rows; method=cash` |
+| `ip` | varchar(45) | Nullable: the client address (section 10.5) |
+| `user_agent` | varchar(300) | Nullable: the browser's User-Agent |
+
+`member_service._delete_accounts()` sets `actor_id` and `target_id` to null before deleting an account (SQLite does not enforce `on delete set null`); the copied emails keep the rows readable.
+
+Indexes: `member(user_id)`, `class_booking(member_id)`, `check_in(member_id, checked_in_at)`, `gym_class(starts_at)`, `gym_class(trainer_id)`, `announcement(posted_at)`, `auth_session(user_id)`, `auth_session(token_hash)` (unique), `auth_session(previous_token_hash)`, `activity_log(created_at)`, `activity_log(event)`, `activity_log(actor_id)`, `activity_log(target_id)`.
 
 ```mermaid
 erDiagram
@@ -357,6 +379,7 @@ erDiagram
     APP_USER ||--o{ GYM_CLASS : creates
     APP_USER |o--o{ GYM_CLASS : teaches
     APP_USER |o--o{ ANNOUNCEMENT : posts
+    APP_USER |o--o{ ACTIVITY_LOG : "acts in / is acted on"
     MEMBER ||--o{ CLASS_BOOKING : books
     GYM_CLASS ||--o{ CLASS_BOOKING : has
     MEMBER ||--o{ CHECK_IN : has
@@ -428,6 +451,18 @@ erDiagram
         datetime posted_at
         datetime updated_at
     }
+    ACTIVITY_LOG {
+        int id PK
+        datetime created_at
+        string event
+        int actor_id FK
+        string actor_email
+        int target_id FK
+        string target_email
+        string details
+        string ip
+        string user_agent
+    }
 ```
 
 **Who can see a member record:**
@@ -478,6 +513,9 @@ erDiagram
 | `CheckInRead` | Check-in responses | `id`, `member_id`, `member_name`, `checked_in_at`, `recorded_by_name` | Beta |
 | `CheckInPage` | Check-in lists | `items: CheckInRead[]`, `total`, `offset`, `limit` | Beta |
 | `AnnouncementCreate` / `AnnouncementUpdate` | Post / edit an announcement | `title` (1–100), `message` (1–1,000), `ends_on?` (a date not before today, or null for none); all optional on update, where `title` and `message` cannot be null and a left-out `ends_on` keeps the end date | Beta |
+| `ActivityRead` / `ActivityPage` | Activity log | `id`, `created_at`, `event`, `actor_id?`, `actor_email?`, `target_id?`, `target_email?`, `details?`, `ip?`, `user_agent?`; page: `items`, `total`, `offset`, `limit` | Beta |
+| `ActivityFilter` | Query filters for the activity list and its CSV | `event?` (an `ActivityEvent`), `user_id?` (actor or target), `date_from?`, `date_to?` (UTC days, inclusive; `date_from` after `date_to` is `422`), `q?` (≤ 100: part of an email, the IP or the details) | Beta |
+| `SecuritySummary` | Security view | `last_24_hours`, `last_7_days`, each a `FailedLoginWindow`: `since`, `total`, `lockouts`, `by_ip [{ip?, count, accounts, last_at}]`, `by_account [{email, user_id?, count, ips, last_at}]` (10 of each) | Beta |
 | `AnnouncementRead` / `AnnouncementPage` | Announcement responses and lists | `id`, `title`, `message`, `ends_on?`, `posted_at`, `updated_at?` (null until edited), `posted_by_name?` (null once the poster's account is deleted); page: `items`, `total`, `offset`, `limit` | Beta |
 
 MVP sketch:
@@ -634,6 +672,14 @@ Ban rules: banning is idempotent (banning a banned user changes nothing), an adm
 | `POST` | `/api/v1/announcements` | Gym Manager, Admin | `AnnouncementCreate` | `201` `AnnouncementRead` (`posted_by` = the caller) | `401`, `403`, `422` (empty title or message, too long, `ends_on` before today) | FR-72 |
 | `PATCH` | `/api/v1/announcements/{announcement_id}` | Gym Manager, Admin | `AnnouncementUpdate` | `200` `AnnouncementRead` (only the fields sent change; sets `updated_at`) | `401`, `403`, `404`, `422` | FR-74 |
 | `DELETE` | `/api/v1/announcements/{announcement_id}` | Gym Manager, Admin | — | `204` | `401`, `403`, `404` | FR-74 |
+
+**Activity log and security (admin)**
+
+| Method | Path | Who | Body | Success | Errors | FR |
+|---|---|---|---|---|---|---|
+| `GET` | `/api/v1/admin/activity?event&user_id&date_from&date_to&q&offset&limit` | Admin | — | `200` `ActivityPage` (newest first; `limit` up to 100, default 50) | `401`, `403`, `422` (unknown event, `date_from` after `date_to`) | FR-87 |
+| `GET` | `/api/v1/admin/activity/export.csv?event&user_id&date_from&date_to&q` | Admin | — | `200` `text/csv` attachment `activity-YYYY-MM-DD.csv`, `Cache-Control: no-store`; the same rows as the list, up to 10,000; adds an `export` row | `401`, `403`, `422` | FR-88 |
+| `GET` | `/api/v1/admin/activity/security` | Admin | — | `200` `SecuritySummary` | `401`, `403` | FR-89 |
 
 ### 6.3 Examples
 
@@ -794,13 +840,13 @@ class Permission(str, Enum):
     MEMBERS_READ = "members:read"
     CLASSES_TEACH = "classes:teach"
     USERS_BAN = "users:ban"
-    ...                                   # 16 in all (SRS 3.11)
+    ...                                   # 17 in all (SRS 3.11)
 
 ROLE_PERMISSIONS = {
     "user": frozenset(),                  # only their own account and data
     "trainer": frozenset({Permission.CLASSES_TEACH}),
     "gym_manager": _GYM_MANAGER,          # 7 permissions
-    "admin": _GYM_MANAGER | {...},        # those + 8 admin permissions
+    "admin": _GYM_MANAGER | {...},        # those + 9 admin permissions
 }
 
 def require_permission(*permissions: Permission):
@@ -844,6 +890,7 @@ def ban_user(user_id: int, session: SessionDep, admin: Banner, body: BanRequest 
 | `GET /admin/stats`, `GET /admin/revenue` | `dashboard:read` |
 | `GET /admin/users` / `PATCH .../role` / `POST .../ban`, `.../unban` / `POST .../reset-password` | `users:read` / `users:change_role` / `users:ban` / `users:reset_password` |
 | `PUT /admin/plans/{plan}` | `plans:edit` |
+| `GET /admin/activity`, `GET /admin/activity/export.csv`, `GET /admin/activity/security` | `activity:read` |
 
 Helpers: `has_permission(user, p)`; `roles_with(p)` for queries (the trainer list is every account whose role holds `classes:teach`); `is_owner(user, owner_id)` for records that belong to someone, where the caller answers `404` for a private record and `403` for a public one (a class). `rbac.py` imports `app.deps`, so nothing `app.deps` imports may import `rbac.py`.
 
@@ -900,6 +947,31 @@ stats = AdminStats(
 
 **Revenue (`GET /api/v1/admin/revenue`).** `revenue_service.revenue_stats()` sums `payment.amount` where `voided_at IS NULL` over UTC day ranges built with the same `start_of_day()` the payments list filter uses: today, the first of this month, and today − 29 days (30 days counting today). `by_method` is one `GROUP BY method` over the last 30 days, filled to all four methods. The 6 months are six small range sums (first of the month up to the first of the next), which keeps the code the same on SQLite and PostgreSQL (no date functions in SQL).
 
+### 10.5 Activity log — Beta
+
+`app/services/activity_service.py` holds the log (SRS 3.7i). Other services call `activity_service.record(session, event, client, actor=…, target=…, details=…)`, which only adds the row; the caller commits it together with the change it describes, so a ban and its row are saved together or not at all. A failure that raises an error (a wrong password) commits its row first, so the row survives the error response.
+
+| Event | Recorded by | Actor / target | Details |
+|---|---|---|---|
+| `signup` | `auth_service.signup()` (flushed first for the new id) | the new account / — | — |
+| `login` | `session_service.start_session()`, with the new session | the account / — | — |
+| `login_failed` | `auth_service.authenticate()` | the account if one has the email, with the typed email / — | `Wrong password`, `No account has this email`, `Account is locked` or `Account is banned` |
+| `account_locked` | `auth_service._record_failed_login()` on the 5th wrong password | — / the account | `5 wrong passwords in a row; logins blocked for 15 minutes` |
+| `logout` | `session_service.logout()`, only for a session that was still open | the account / — | — |
+| `session_revoke` | `session_service.revoke_own_session()`; `rotate()` when a replaced refresh token comes back after the grace period | the owner / —; or — / the owner (the IP is whoever sent the old token) | the session id and its address, or why the server ended it |
+| `password_change`, `password_change_failed` | `auth_service.change_password()` | the account / — | how many other sessions were logged out; or `Current password was wrong` / `New password was the same as the current one` |
+| `password_reset` | `user_service.reset_password()` | the admin / the account | `Temporary password issued; sessions ended: N` (never the password) |
+| `role_change` | `user_service.change_role()`, only when the role differs | the admin / the account | `user → trainer` |
+| `ban`, `unban` | `user_service.ban_user()`, `unban_user()`, only when the state changes | the admin / the account | the reason and how many sessions ended |
+| `account_delete` | `member_service.delete_member()`, `bulk_delete_members()` (one row each) | the gym manager or admin / the email only | the person's name and how it was deleted |
+| `export` | `payment_service.export_csv()`, `activity_service.export_csv()`, after the rows are read | the admin / — | the file, the row count and the filters |
+
+- **Client address:** routes take `ClientDep` (`app/request_info.py`), a `Client(ip, user_agent)` built from the request, and pass it to the service. On Vercel (`VERCEL` is set) the IP is the first address in `X-Forwarded-For`, which the platform overwrites; elsewhere it is the connection's address, because the header could be made up. Both are cut to the column lengths.
+- **No secrets (NFR-23):** `record()` takes no request body. Every `details` text is built in the service from names, roles, reasons, ids and counts; no service passes a password, the temporary password, a token or a hash. The end-to-end check scans every row for the passwords and tokens it used.
+- **Reading:** `ActivityFilter` is shared by the list and the CSV, and both use the same `_conditions()` and the same order (`created_at DESC, id DESC`), so they return the same rows. `q` uses `search.contains_any()` over `actor_email`, `target_email`, `ip` and `details`. The CSV stops at `EXPORT_LIMIT` (10,000) so one download stays within a serverless function's limits, and uses `csv_export.to_csv()`, the same writer as the payments CSV (byte order mark, formula-safe cells).
+- **Security view:** for each window (now − 24 h, now − 7 days) one `COUNT` of `login_failed` rows, one of `account_locked` rows, and two `GROUP BY` queries over the `login_failed` rows: by `ip` (`COUNT(*)`, `COUNT(DISTINCT actor_email)`, `MAX(created_at)`) and by `actor_email` (`MAX(actor_id)` for the account, `COUNT(*)`, `COUNT(DISTINCT ip)`, `MAX(created_at)`), ordered by count and limited to 10. The same SQL runs on SQLite and PostgreSQL.
+- Out of scope: deleting old rows and email alerts.
+
 ## 11. Security — Beta
 
 | Area | Design |
@@ -911,7 +983,8 @@ stats = AdminStats(
 | Security headers | Added for all routes in `vercel.json` (below) |
 | Brute force | Login lockout (section 10.2) |
 | Injection | SQLModel/SQLAlchemy parameterised queries only; the member-name filter escapes `%` and `_` |
-| CSV export | Text cells starting with `=`, `+`, `-`, `@`, tab or carriage return get a leading `'` (formula injection); UTF-8 with a byte order mark so Excel reads Bengali names correctly; admins only |
+| CSV export | Text cells starting with `=`, `+`, `-`, `@`, tab or carriage return get a leading `'` (formula injection); UTF-8 with a byte order mark so Excel reads Bengali names correctly; admins only; both exports share `csv_export.py` and are recorded in the activity log |
+| Audit trail | `activity_log` (section 10.5): logins, failed logins, lockouts, password and role changes, bans, ended sessions, deletions and exports with IP and browser, saved in the same transaction as the change; never a password, token or hash; read only with `activity:read` |
 | Errors | Catch-all handler returns a generic `500`; details only in logs |
 | Data exposure | Response schemas (`UserRead`, `MemberRead`) list fields explicitly; `password_hash` and token hashes are never in a response schema. Member phone numbers and notes are returned only to admins and the member themself |
 
