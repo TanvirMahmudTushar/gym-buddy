@@ -3,12 +3,12 @@
 | Field | Value |
 |---|---|
 | Product | Gym Buddy |
-| Version | MVP + Beta |
+| Version | MVP + Beta (final release) |
 | Releases | MVP — Mid-term, Beta — Final |
-| Status | Draft |
-| Related docs | [Product Requirements Document (PRD)](01-prd.md), [Technical Design Document (TDD)](03-tdd.md) |
+| Status | Final: every requirement below is built |
+| Related docs | [Product Requirements Document (PRD)](01-prd.md), [Technical Design Document (TDD)](03-tdd.md), [Final report](FINAL_REPORT.md) |
 
-Every requirement has a **Release** column: **MVP** is built for the mid-term, **Beta** is added for the final.
+Every requirement has a **Release** column: **MVP** is built for the mid-term, **Beta** is added for the final. The "Built so far" notes record how each part was built, including where the final system differs from a requirement's first wording. The biggest such change: in the final release **a member is a user account with a membership** (there is no separate member record to link), so the MVP's `full_name` is the account's `name`, `is_active` became `is_frozen`, and staff start a membership by the email the person signed up with.
 
 **Documents in this set**
 
@@ -25,8 +25,8 @@ This document lists the requirements for Gym Buddy: the MVP (gym member CRUD RES
 
 ### 1.2 Scope
 - **MVP:** a client can create, list, view, update and delete gym members over HTTP. A member record holds name, phone, membership plan, start and expiry dates and an active flag. There are no accounts; all members are in one shared list.
-- **Beta:** gym members sign up and log in, see their own membership and check-in history, and book workout classes. Admins (gym staff) manage members, classes, check-ins, users and roles.
-- Out of scope: see [PRD, section 5](01-prd.md#5-scope). Online payments, billing and equipment tracking are not part of this system; staff record a renewal by changing the expiry date.
+- **Beta:** gym members sign up and log in, see their own membership, visits and payments, book workout classes, and log workouts alone or in training groups. Gym managers run members, check-ins, payments, classes and announcements; trainers see their classes; admins also manage users, roles, prices, the activity log and content.
+- Out of scope: see [PRD, section 5](01-prd.md#5-scope). Online card payments and equipment tracking are not part of this system: staff record payments taken at the desk (cash, card, bank transfer or mobile banking).
 
 ### 1.3 Definitions
 
@@ -34,12 +34,17 @@ This document lists the requirements for Gym Buddy: the MVP (gym member CRUD RES
 |---|---|
 | CRUD | Create, Read, Update, Delete |
 | REST | API style where resources (like `members`) are accessed with HTTP methods (GET, POST, PATCH, DELETE) |
-| Member | A person who has a gym membership record: name, phone, plan, dates and status |
+| Member | A person with a gym membership. In the MVP, a member record (name, phone, plan, dates, status); in the final release, a user account on which staff have set a plan |
 | Plan | The membership type: `monthly`, `quarterly` or `yearly` |
-| Valid membership | A membership with `is_active = true` and `expires_on` on or after today (UTC) |
-| Frozen membership | A membership with `is_active = false` (paused by staff) |
+| Valid membership | A membership that is not frozen and whose `expires_on` is today or later (UTC). (MVP: `is_active = true`) |
+| Frozen membership | A membership paused by staff: `is_frozen = true` (MVP: `is_active = false`) |
 | Expired membership | A membership with `expires_on` before today |
-| Walk-in member | (Beta) A member record with no linked login account; staff manage it for them |
+| Waiting for a membership | (Beta) A User account with no plan yet: it is on the gym manager's waiting list until staff start a membership |
+| Session | (Beta) One login on one browser, stored in `auth_session`; logging out or a ban ends it on the server |
+| Permission | (Beta) A named right such as `members:read`, held by roles (`backend/app/rbac.py`); every protected endpoint asks for one |
+| Payment | (Beta) Money a member paid at the desk, recorded by staff, optionally renewing the membership; it can be voided but never deleted |
+| Workout | (Beta) A training session someone logs: personal (only its owner sees it) or in a training group |
+| Training group | (Beta) A group anyone can start; the owner adds people and ticks what each may do with the group's workouts |
 | Class | (Beta) A scheduled workout session with a name, start time, duration, capacity and an optional trainer |
 | Trainer | (Beta) An account with the role `trainer` who teaches classes; a class's `trainer_id` points at one. Classes from before trainers were accounts keep a free-text `trainer_name` |
 | Booking | (Beta) A member's reserved spot in a class |
@@ -74,7 +79,7 @@ flowchart LR
 | Gym Manager | Beta | Gym staff with global role `gym_manager`: manage all members, classes and check-ins and view bookings. Cannot list users, change roles or see the dashboard |
 | Admin | Beta | Global role `admin`: everything a Gym Manager can do, plus list users, change roles, view dashboard stats, ban / unban users, and read the activity log and the security view |
 
-`user`, `trainer`, `gym_manager` and `admin` are **global** roles stored on the user account. A logged-in user is linked to at most one membership record (`member.user_id`). A logged-in `user` with no linked record can log in and edit their profile but gets `404` on membership and booking endpoints until staff link their account.
+`user`, `trainer`, `gym_manager` and `admin` are **global** roles stored on the user account. An account has at most one membership, stored on the account itself (plan, dates, frozen). A logged-in `user` with no membership can log in, edit their profile, log workouts and join groups, but gets `404` on the membership endpoints and cannot book until staff start their membership.
 
 ### 2.3 Use cases
 
@@ -165,8 +170,8 @@ Every Admin is also a logged-in user, so they can log out, edit their profile an
 - A-1: A hosted database is available to the Vercel project through an environment variable.
 - A-2: The app is used for demos and class work, so traffic is low.
 - A-3: (Beta) The first admin is promoted manually in the Supabase table editor.
-- A-4: (Beta) Existing MVP members are kept as walk-in members; staff link them to accounts later.
-- A-5: Payments happen outside the system. Staff renew a membership by updating `expires_on`.
+- A-4: (Beta) A person signs up before staff start their membership. When members became accounts, the MVP's member records were dropped and staff started memberships again for the people who needed one (README, "Upgrading a database from before members became users").
+- A-5: Money is taken at the front desk; the system records it (section 3.7a) but does not take card payments online.
 
 ## 3. Functional requirements
 
@@ -186,6 +191,8 @@ Every Admin is also a logged-in user, so they can log out, edit their profile an
 | FR-09 | The system shall return `404` when a member ID does not exist. | MVP | US-07 |
 | FR-10 | The system shall expose `GET /api/health` returning `{"status": "ok"}`. | MVP | US-08 |
 | FR-11 | The system shall publish interactive API docs at `/api/docs`. | MVP | US-07 |
+
+> **Built so far (members):** FR-01 to FR-11 in the MVP, and kept in the final release with these changes: a member is a user account with a membership, so a member's `id` is the account's id, `full_name` is the account's `name`, and `is_active` became `is_frozen` (`true` freezes). `POST /members` takes the `email` of an existing account instead of a name (FR-23 as built), and `DELETE` removes the whole account. `created_at` is the account's; there is no separate `updated_at` for a membership (FR-07).
 
 ### 3.2 Authentication and profile — Beta
 
@@ -217,6 +224,8 @@ Every Admin is also a logged-in user, so they can log out, edit their profile an
 |---|---|---|---|
 | FR-19 | In the Beta, the member endpoints (`/api/v1/members`) create, list, view, update and delete shall be available to gym managers and admins only. A caller who is not logged in gets `401`; a `user` gets `403`. | Beta | US-13 |
 | FR-23 | When creating or updating a member, a gym manager or admin may set `user_id` to link the record to an existing account. A user can be linked to only one member (`409` otherwise); an unknown `user_id` returns `422`. | Beta | US-13 |
+
+> **Built so far (member management):** FR-19, and FR-23 in its final form: there is no record to link, because the membership is stored on the account. `POST /members` takes the `email` the person signed up with and starts the membership on that account; an email with no account gives `422` ("Ask the person to sign up first") and an account that already has a membership gives `409`. FR-55 lists the accounts waiting for one, and **Start membership** fills the email in.
 
 ### 3.5 Roles (RBAC) and admin — Beta
 
@@ -267,7 +276,7 @@ Every Admin is also a logged-in user, so they can log out, edit their profile an
 
 > **Built so far (gym manager):** FR-30, FR-31, FR-32 and FR-42. Deleting a member also deletes their check-ins. The member's own view of their check-ins (FR-18) is built, with FR-17, FR-23 and FR-33 (see the user notes).
 
-> **Built so far (user):** FR-17, FR-18, FR-23, FR-33 and FR-41. A person with no linked membership gets a clear message instead of an error page. Gym managers and admins who are linked to a member can book through the API; the screens for booking are the User's.
+> **Built so far (user):** FR-17, FR-18, FR-23, FR-33 and FR-41. A person with no membership yet gets a clear message with the email to give the front desk, instead of an error page. Gym managers and admins who have a membership can book through the API; the screens for booking are the User's.
 
 ### 3.7a Plans and payments — Beta
 
@@ -427,7 +436,7 @@ Story US-31: as an admin, I want to find and remove anyone's workouts and traini
 | `plan` | Required on create, one of `monthly`, `quarterly`, `yearly` | MVP |
 | `joined_on` | Optional, date in `YYYY-MM-DD` format, defaults to today | MVP |
 | `expires_on` | Required on create, date in `YYYY-MM-DD` format, not earlier than `joined_on` | MVP |
-| `is_active` | Boolean | MVP |
+| `is_active` | Boolean (final release: `is_frozen`, boolean, `true` freezes) | MVP |
 | `notes` | Optional, string, max 500 characters | MVP |
 | `offset` | Integer ≥ 0 | MVP |
 | `limit` | Integer 1–100 | MVP |
@@ -437,7 +446,7 @@ Story US-31: as an admin, I want to find and remove anyone's workouts and traini
 | `password` | 8–128 characters | Beta |
 | `role` | `user`, `trainer`, `gym_manager` or `admin` | Beta |
 | `reason` (ban) | Optional, max 500 characters | Beta |
-| `user_id` (member link) | Optional; must be an existing user not linked to another member | Beta |
+| `email` (start a membership) | Required; the email of an existing account that has no membership yet (`422` if no account has it, `409` if it already has one) | Beta |
 | `name` (class) | 1–100 characters | Beta |
 | `description` (class) | Optional, max 500 characters | Beta |
 | `trainer_id` (class) | Optional; an account with the role `trainer` (`422` otherwise), or `null` for none. `trainer_name` is no longer sent: it is read-only and kept only on classes from before trainers were accounts | Beta |
@@ -456,8 +465,8 @@ Story US-31: as an admin, I want to find and remove anyone's workouts and traini
 ```mermaid
 stateDiagram-v2
     [*] --> Active: POST /members
-    Active --> Frozen: PATCH is_active=false
-    Frozen --> Active: PATCH is_active=true
+    Active --> Frozen: PATCH is_frozen=true
+    Frozen --> Active: PATCH is_frozen=false
     Active --> Expired: expires_on passes (today > expires_on)
     Expired --> Active: PATCH expires_on to a future date (renew)
     Active --> [*]: DELETE
@@ -474,16 +483,16 @@ A new member always starts as `Active` if `expires_on` is today or later. "Expir
 | Sign up, log in | Yes | — | — | — | — |
 | Log out, view own profile, change own name and password | No | Yes | Yes | Yes | Yes |
 | List own sessions, log out one of them | No | Yes | Yes | Yes | Yes |
-| View own membership and check-in history | No | Yes (`404` if no membership linked) | Only if linked | Only if linked | Only if linked |
+| View own membership and check-in history | No | Yes (`404` if no membership yet) | Only with a membership | Only with a membership | Only with a membership |
 | Create, list, view, update, delete members | No | No (`403`) | No (`403`) | Yes | Yes |
-| Link a member record to a user account | No | No (`403`) | No (`403`) | Yes | Yes |
+| Start a membership on an account (by its email) | No | No (`403`) | No (`403`) | Yes | Yes |
 | Record or list check-ins for a member | No | No (`403`) | No (`403`) | Yes | Yes |
 | List and view classes | No | Yes | Yes | Yes | Yes |
 | Create, edit, delete classes | No | No (`403`) | No (`403`) | Yes | Yes |
 | List trainers (the class form's choices) | No | No (`403`) | No (`403`) | Yes | Yes |
 | View a class's bookings | No | No (`403`) | Own classes only (`403` for others) | Yes | Yes |
 | List the classes I teach | No | No (`403`) | Yes | No (`403`) | No (`403`) |
-| Book or cancel own class booking | No | Yes (valid membership needed to book) | Only if linked | Only if linked | Only if linked |
+| Book or cancel own class booking | No | Yes (valid membership needed to book) | Only with a membership | Only with a membership | Only with a membership |
 | List own bookings | No | Yes | Yes | Yes | Yes |
 | List or cancel a member's bookings | No | No (`403`) | No (`403`) | Yes | Yes |
 | View today's overview | No | No (`403`) | No (`403`) | Yes | Yes |
@@ -574,7 +583,7 @@ Actions on one's own account and data (profile, password, sessions, own membersh
 | NFR-05 | Security | Database credentials and secrets are stored only in Vercel environment variables, never in Git. `backend/.env.example` lists the variables with placeholders only; a developer's `backend/.env` is ignored by git and never read on Vercel. | MVP |
 | NFR-06 | Security | Database queries use the ORM with parameters, never string-built SQL. | MVP |
 | NFR-07 | Security | Error responses do not expose stack traces or database details. | MVP |
-| NFR-08 | Maintainability | Code is split into layers: routes, schemas, models, database. | MVP |
+| NFR-08 | Maintainability | Code is split into layers: routes, schemas, models, database. (Built: routers only handle HTTP and call `app/services/`, which hold the rules and queries.) | MVP |
 | NFR-09 | Usability (API) | Every endpoint is listed in `/api/docs` with request and response schemas. | MVP |
 | NFR-10 | Deployability | The app runs on Vercel; a push to `main` updates production. | MVP |
 | NFR-11 | Security | Passwords are hashed with Argon2; plain passwords are never stored, logged or returned. | Beta |

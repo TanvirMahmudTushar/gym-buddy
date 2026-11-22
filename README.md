@@ -1,8 +1,22 @@
 # Gym Buddy
 
-A simple gym management system: front-desk staff add, view, edit, renew, freeze and delete gym members on one page. FastAPI backend + Vite/React/TypeScript frontend, deployed to Vercel as one project, with Supabase PostgreSQL as the database.
+A gym management system for a small gym. Members sign up, book classes, see their membership, visits and payments, and log their workouts. Front-desk staff run memberships, check-ins, payments, the class timetable and announcements; admins manage accounts, roles, prices and security. FastAPI backend + Vite/React/TypeScript frontend, deployed to Vercel as one project, with Supabase PostgreSQL as the database.
 
-This is the **MVP** (mid-term). The plan for the Beta (accounts, roles, class bookings, check-ins) is in the docs.
+| | Live URL |
+|---|---|
+| App | https://2321648gymbuddy.vercel.app/ |
+| API (base) | https://2321648gymbuddy.vercel.app/api/v1 |
+| API docs (Swagger UI) | https://2321648gymbuddy.vercel.app/api/docs |
+| Health check | https://2321648gymbuddy.vercel.app/api/health |
+
+**What it does (final release)**
+- **Accounts and security:** sign up, log in and out; a 15-minute access token kept in memory and a rotating refresh cookie, with reuse detection; a list of the browsers you are logged in on, each one able to be logged out; login lockout after 5 wrong passwords; Argon2 password hashing with a server-side pepper; security headers and a CORS allowlist.
+- **Four roles and permissions (RBAC):** User, Trainer, Gym Manager and Admin. Every protected endpoint asks one module ([`backend/app/rbac.py`](backend/app/rbac.py)) for a permission, and the app shows only what the API allows.
+- **Members:** a member is a user with a membership. Staff start, renew, freeze and delete memberships, search and filter them (active, expired, frozen, expiring soon), see the people waiting for a membership, and keep contact and emergency details.
+- **Check-ins, classes and bookings:** check members in (only with a valid membership); a class timetable with trainers and a capacity that two people booking at the same moment can never exceed; members book and cancel; trainers see who booked their classes.
+- **Payments:** take payments (optionally renewing in the same step), plan prices, the list of all payments with totals, void with a reason, and CSV export; a revenue card on the admin Dashboard.
+- **Workouts and training groups:** everyone logs private workouts; anyone can start a group, add people and tick what each may do (add, edit, assign workouts).
+- **Admin tools:** Dashboard and Overview pages, Users page (filters, details, bulk ban and unban, log out everywhere, password reset, CSV), activity log and security view, content moderation, announcements.
 
 ```
 backend/          FastAPI app (routes under /api)
@@ -18,22 +32,68 @@ backend/          FastAPI app (routes under /api)
   tests/          pytest suite (see Tests)
   app/routers/    members.py, auth.py, users.py, admin.py, check_ins.py, classes.py, plans.py, payments.py, overview.py, trainers.py, announcements.py, activity.py, workouts.py, groups.py: the endpoints (HTTP only)
   app/services/   member_service.py, auth_service.py, session_service.py (logins and refresh tokens), user_service.py, checkin_service.py, class_service.py, payment_service.py, stats_service.py, revenue_service.py, announcement_service.py, activity_service.py (the activity log and the security view), csv_export.py (the CSV writer both exports share), workout_service.py and group_service.py (workouts and training groups): rules and database queries
-frontend/         Vite + React + TypeScript, one page (src/pages/HomePage/index.tsx)
-  src/components/ add form, member list, details panel
-  src/context/    AuthContext.tsx: who is logged in
-  src/layouts/    AppLayout.tsx: header with the pages each role may open
-  src/services/   memberService.ts: fetch calls to the API
-  src/types/      member.ts: TypeScript types
-  src/utils/      member.ts: display helpers
-docs/             PRD, SRS and TDD
+frontend/         Vite + React + TypeScript, one page per route (hash router in src/App.tsx)
+  src/pages/      one folder per page: Members (HomePage), Overview, Dashboard, Users, Classes, Payments, Workouts, Groups, Moderation, Activity, ...
+  src/components/ the forms, lists and panels the pages are built from
+  src/context/    AuthContext.tsx: who is logged in, and restoring the login on reload
+  src/layouts/    AppLayout.tsx: header with the pages the caller's permissions allow
+  src/services/   one file per API area (memberService.ts, classService.ts, ...); api.ts adds the token and refreshes it
+  src/types/      TypeScript types for the API's responses
+  src/utils/      display helpers
+  src/hooks/      usePagedList (Load more) and useDebouncedValue (search boxes)
+scripts/          seed_demo.py: creates the demo accounts and sample data through the API (see Demo data)
+docs/             PRD, SRS, TDD and the final report
 vercel.json       Vercel setup: /api/* goes to backend, everything else to frontend
 ```
 
 ## Documents
 
+- [Final report](docs/FINAL_REPORT.md): the finished product, its requirements and its design in one place
 - [Product Requirements Document (PRD)](docs/01-prd.md)
 - [Software Requirements Specification (SRS)](docs/02-srs.md)
 - [Technical Design Document (TDD)](docs/03-tdd.md)
+
+## Test accounts
+
+These accounts are on the live site, each with the role shown. **Passwords are given only in the submission form and the PDF report, never in this repository.** The email is the user ID you log in with.
+
+| User ID (email) | Name | Role | Lands on | Good for trying |
+|---|---|---|---|---|
+| `admin.ayesha@gymbuddy.example` | Ayesha Rahman | Admin | Dashboard | Users, roles, bans, password reset, plans, activity log, security view, moderation, payments void and CSV |
+| `admin.imran@gymbuddy.example` | Imran Hossain | Admin | Dashboard | A second admin: neither admin can ban, reset or change the role of the other |
+| `manager.nadia@gymbuddy.example` | Nadia Islam | Gym Manager | Overview | Members, check-ins, payments, classes and announcements; `403` on the admin pages |
+| `trainer.karim@gymbuddy.example` | Karim Uddin | Trainer | My classes | Who booked the classes he teaches; a member of the shared group who may add, edit and assign |
+| `rafi@gymbuddy.example` | Rafi Ahmed | User | My membership | Monthly membership expiring within 7 days, 3 bookings (one class now full), owner of the shared group |
+| `sadia@gymbuddy.example` | Sadia Karim | User | My membership | Quarterly membership, checked in today; in the shared group, may add workouts only |
+| `tanim@gymbuddy.example` | Tanim Chowdhury | User | My membership | Frozen yearly membership (cannot book or be checked in); in the shared group, read only |
+| `mitu@gymbuddy.example` | Mitu Das | User | My membership | Signed up but no membership yet: shows on the Members page waiting list |
+
+`.example` addresses are reserved and can never receive mail, so nobody's real inbox is involved.
+
+### Shared group with mixed permissions
+
+**Morning Crew**, owned by **Rafi Ahmed** (`rafi@gymbuddy.example`). Open **Groups** after logging in as any of the four people below.
+
+| Person | In the group as | Add workouts | Edit and delete workouts | Assign workouts | Rename, delete, add and remove people |
+|---|---|---|---|---|---|
+| Rafi Ahmed | Owner | ✓ | ✓ | ✓ | ✓ |
+| Karim Uddin (trainer) | Member | ✓ | ✓ | ✓ | |
+| Sadia Karim | Member | ✓ | | | |
+| Tanim Chowdhury | Member (read only) | | | | |
+
+Everyone in the group sees its workouts and its people. The group has three workouts: **Saturday long run** (added by Rafi, assigned to Sadia), **Week 1 circuit** (added by Karim, assigned to Tanim) and **Core finisher** (added by Sadia). Things to try: as Sadia, **Add** works but there is no **Edit** button, and the API answers `403` if asked anyway; as Tanim, nothing can be changed; as Mitu, who is not in the group, the group and its workouts answer `404`, as if they did not exist; as Rafi, tick or untick a box and the change applies on that person's next request.
+
+## Demo data
+
+[`scripts/seed_demo.py`](scripts/seed_demo.py) creates the accounts above and the sample data: three memberships (one expiring soon, one frozen) with their payments, two check-ins today, three classes in the coming days (two taught by Karim, one full), bookings, two announcements, personal workouts and the shared group. It uses only the public API, so the passwords are hashed with the server's own pepper and every rule is checked as in the app. It needs only Python 3.10+, no packages, and running it again skips what already exists.
+
+```bash
+python scripts/seed_demo.py --base-url https://2321648gymbuddy.vercel.app
+```
+
+- The passwords are read from `gym-buddy-demo-passwords.json` in your home folder, outside the repository (`--passwords` picks another file). If the file does not exist, random passwords are made and saved there.
+- Nobody can make themselves an admin through the API, so the first run signs the accounts up, then stops and prints one SQL line that makes `admin.ayesha@gymbuddy.example` an admin. Run it in Supabase → **SQL editor** and run the script again; from then on that admin gives the other roles.
+- Class and workout dates are relative to the day the script runs, so run it shortly before a demo.
 
 ## Accounts and roles
 

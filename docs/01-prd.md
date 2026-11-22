@@ -3,12 +3,14 @@
 | Field | Value |
 |---|---|
 | Product | Gym Buddy |
-| Version | MVP + Beta |
+| Version | MVP + Beta (final release) |
 | Releases | MVP — Mid-term, Beta — Final |
-| Status | Draft |
-| Related docs | [Software Requirements Specification (SRS)](02-srs.md), [Technical Design Document (TDD)](03-tdd.md) |
+| Status | Final: both releases shipped |
+| Related docs | [Software Requirements Specification (SRS)](02-srs.md), [Technical Design Document (TDD)](03-tdd.md), [Final report](FINAL_REPORT.md) |
 
 This document covers **both releases**. Every goal, feature and story has a **Release** column so it is clear what is built for the mid-term and what is added for the final.
+
+> **Final status.** Every MVP and Beta feature below shipped. The plan is kept as it was written; what changed on the way is recorded in the [final report, section 3.3](FINAL_REPORT.md#33-scope-what-was-planned-and-what-shipped). In short: the two planned roles became four (User, Trainer, Gym Manager, Admin) under one permission module, members became user accounts with a membership, and several items listed below as out of scope were added: payment records, trainer accounts, search, workouts and training groups, an admin password reset and an automated test suite.
 
 **Documents in this set**
 
