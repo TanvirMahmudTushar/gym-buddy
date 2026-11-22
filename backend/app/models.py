@@ -1,6 +1,7 @@
 # The tables and the request / response schemas built on them (TDD 5.1, 5.3).
 # There is no separate member table: a member is a user whose account has a membership (a plan).
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time, timezone
+from enum import Enum
 from typing import Annotated, Literal
 
 from pydantic import BeforeValidator, EmailStr, PlainSerializer, StringConstraints, field_validator, model_validator
@@ -29,6 +30,11 @@ UtcDateTime = Annotated[datetime, PlainSerializer(lambda v: as_utc(v).isoformat(
 def utc_today() -> date:
     """'Today' for expiry checks is the server's UTC date (SRS C-7)."""
     return utc_now().date()
+
+
+def start_of_day(day: date) -> datetime:
+    """Midnight UTC at the start of a day: the calendar the date filters and the expiry check use (SRS C-7)."""
+    return datetime.combine(day, time.min, tzinfo=timezone.utc)
 
 
 def _blank_to_none(value: object) -> object:
@@ -748,3 +754,123 @@ class AnnouncementPage(SQLModel):
     total: int
     offset: int
     limit: int
+
+
+# --- Activity log (security events, final spec 2.3) ---
+
+
+class ActivityEvent(str, Enum):
+    SIGNUP = "signup"
+    LOGIN = "login"
+    # A wrong password, an email with no account, or a login to a locked or banned account.
+    LOGIN_FAILED = "login_failed"
+    # The 5th wrong password in a row blocked the account's logins for 15 minutes.
+    ACCOUNT_LOCKED = "account_locked"
+    LOGOUT = "logout"
+    PASSWORD_CHANGE = "password_change"
+    PASSWORD_CHANGE_FAILED = "password_change_failed"
+    PASSWORD_RESET = "password_reset"
+    ROLE_CHANGE = "role_change"
+    BAN = "ban"
+    UNBAN = "unban"
+    # One session ended: by its owner, or by the server when a replaced refresh token came back.
+    SESSION_REVOKE = "session_revoke"
+    ACCOUNT_DELETE = "account_delete"
+    # A CSV download (payments or activity).
+    EXPORT = "export"
+
+
+class ActivityLog(SQLModel, table=True):
+    """One security event: who did it, to which account, from where and when. Rows are only ever added.
+    The emails are copied in, so a row still reads correctly after the account is deleted.
+    Never holds a password, a password hash or a token (NFR-23)."""
+
+    __tablename__ = "activity_log"
+
+    id: int | None = Field(default=None, primary_key=True)
+    created_at: datetime = Field(default_factory=utc_now, index=True)
+    event: str = Field(max_length=30, index=True)
+    # Who did it. Null when no account did: an email with no account on a failed login, or the server itself.
+    actor_id: int | None = Field(default=None, foreign_key="app_user.id", ondelete="SET NULL", index=True)
+    # The actor's email at the time. On a failed login, the email that was typed, which may match no account.
+    actor_email: str | None = Field(default=None, max_length=254)
+    # The account acted on, when it is not the actor's own (a ban, a role change, a lockout, a deleted account).
+    target_id: int | None = Field(default=None, foreign_key="app_user.id", ondelete="SET NULL", index=True)
+    target_email: str | None = Field(default=None, max_length=254)
+    details: str | None = Field(default=None, max_length=500)
+    ip: str | None = Field(default=None, max_length=45)
+    user_agent: str | None = Field(default=None, max_length=300)
+
+
+class ActivityRead(SQLModel):
+    id: int
+    created_at: UtcDateTime
+    event: ActivityEvent
+    actor_id: int | None
+    actor_email: str | None
+    target_id: int | None
+    target_email: str | None
+    details: str | None
+    ip: str | None
+    user_agent: str | None
+
+
+class ActivityPage(SQLModel):
+    items: list[ActivityRead]
+    total: int
+    offset: int
+    limit: int
+
+
+class ActivityFilter(SQLModel):
+    """Query filters shared by the activity list and its CSV export. Dates are UTC calendar days, both inclusive."""
+
+    event: ActivityEvent | None = None
+    # Rows where this account acted or was acted on.
+    user_id: AccountId | None = None
+    date_from: date | None = None
+    date_to: date | None = None
+    # Part of an email, the IP address or the details, any case.
+    q: Annotated[str, StringConstraints(strip_whitespace=True, max_length=100)] | None = None
+
+    @model_validator(mode="after")
+    def check_range(self) -> "ActivityFilter":
+        if self.date_from and self.date_to and self.date_from > self.date_to:
+            raise ValueError("date_from must be on or before date_to")
+        return self
+
+
+class FailedLoginsByIp(SQLModel):
+    # None: the address was not known.
+    ip: str | None
+    count: int
+    # How many different emails were tried from this address: many points to someone trying a list of accounts.
+    accounts: int
+    last_at: UtcDateTime
+
+
+class FailedLoginsByAccount(SQLModel):
+    # The email that was typed.
+    email: str
+    # The account with that email, or None when there is none.
+    user_id: int | None
+    count: int
+    # From how many different addresses.
+    ips: int
+    last_at: UtcDateTime
+
+
+class FailedLoginWindow(SQLModel):
+    """Failed logins since `since`, grouped by IP address and by account, the most first (10 of each)."""
+
+    since: UtcDateTime
+    total: int
+    # How many times an account was locked after 5 wrong passwords in a row.
+    lockouts: int
+    by_ip: list[FailedLoginsByIp]
+    by_account: list[FailedLoginsByAccount]
+
+
+class SecuritySummary(SQLModel):
+    last_24_hours: FailedLoginWindow
+    last_7_days: FailedLoginWindow

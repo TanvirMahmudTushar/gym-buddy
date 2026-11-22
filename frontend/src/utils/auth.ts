@@ -7,7 +7,7 @@ export const ROLES: { value: Role; label: string; description: string }[] = [
   { value: "user", label: "User", description: "A gym member: sees their own membership and books classes." },
   { value: "trainer", label: "Trainer", description: "Teaches classes: sees the classes they teach and who booked each one." },
   { value: "gym_manager", label: "Gym Manager", description: "Manages memberships: start, edit, renew and freeze them, and delete member accounts." },
-  { value: "admin", label: "Admin", description: "Everything a Gym Manager can do, plus managing users and roles." },
+  { value: "admin", label: "Admin", description: "Everything a Gym Manager can do, plus managing users and roles, and reading the activity log." },
 ]
 
 export const roleLabel = (role: Role) => ROLES.find((r) => r.value === role)?.label ?? role
@@ -29,6 +29,8 @@ export type ProtectedPage =
   | "plans"
   | "account"
   | "users"
+  | "activity"
+  | "security"
 
 /** What each page needs: the permission of the API calls it makes. */
 const PAGE_ACCESS: Record<ProtectedPage, (user: Me) => boolean> = {
@@ -41,6 +43,8 @@ const PAGE_ACCESS: Record<ProtectedPage, (user: Me) => boolean> = {
   "my-classes": (u) => can(u, "classes:teach"),
   plans: (u) => can(u, "plans:edit"),
   users: (u) => can(u, "users:read"),
+  activity: (u) => can(u, "activity:read"),
+  security: (u) => can(u, "activity:read"),
   account: () => true,
   // The member pages call only endpoints about the caller's own account, which any login may use, so no
   // permission is involved. They are laid out for gym members, so they are shown to the User role.

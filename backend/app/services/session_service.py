@@ -4,8 +4,10 @@ from datetime import timedelta
 
 from sqlmodel import Session, col, select, update
 
-from app.models import AuthSession, User, as_utc, utc_now
+from app.models import ActivityEvent, AuthSession, User, as_utc, utc_now
+from app.request_info import Client
 from app.security import hash_refresh_token, new_refresh_token
+from app.services import activity_service
 
 # A refresh token is valid for 7 days. Each refresh gives a new one with a fresh 7 days.
 REFRESH_LIFETIME = timedelta(days=7)
@@ -26,8 +28,9 @@ def _is_active(auth_session: AuthSession) -> bool:
     return auth_session.revoked_at is None and as_utc(auth_session.expires_at) > utc_now()
 
 
-def start_session(session: Session, user: User, ip: str | None, user_agent: str | None) -> tuple[AuthSession, str]:
-    """A new session for a login. Returns it with the refresh token for the cookie (never stored as it is)."""
+def start_session(session: Session, user: User, client: Client) -> tuple[AuthSession, str]:
+    """A new session for a login, saved together with the login's activity row. Returns it with the refresh token
+    for the cookie (never stored as it is)."""
     token = new_refresh_token()
     now = utc_now()
     auth_session = AuthSession(
@@ -36,16 +39,17 @@ def start_session(session: Session, user: User, ip: str | None, user_agent: str 
         created_at=now,
         last_used_at=now,
         expires_at=now + REFRESH_LIFETIME,
-        ip=ip,
-        user_agent=user_agent,
+        ip=client.ip,
+        user_agent=client.user_agent,
     )
     session.add(auth_session)
+    activity_service.record(session, ActivityEvent.LOGIN, client, actor=user)
     session.commit()
     session.refresh(auth_session)
     return auth_session, token
 
 
-def rotate(session: Session, token: str) -> tuple[AuthSession, User, str | None]:
+def rotate(session: Session, token: str, client: Client) -> tuple[AuthSession, User, str | None]:
     """Swap a refresh token for a new one. Returns the session, its user and the new token for the cookie. The new
     token is None when another request rotated this token a moment earlier: the cookie that request set stays."""
     token_hash = hash_refresh_token(token)
@@ -64,7 +68,15 @@ def rotate(session: Session, token: str) -> tuple[AuthSession, User, str | None]
     if replaced is not None:
         if replaced.rotated_at is not None and utc_now() - as_utc(replaced.rotated_at) <= ROTATION_GRACE:
             return replaced, user, None
-        # A token that was already replaced came back: two parties hold this session. End it for both.
+        # A token that was already replaced came back: two parties hold this session. End it for both. The address
+        # logged is the one that sent the old token, which may be whoever copied it.
+        activity_service.record(
+            session,
+            ActivityEvent.SESSION_REVOKE,
+            client,
+            target=user,
+            details=f"Session {replaced.id} ended: a refresh token was used again after it had been replaced",
+        )
         revoke(session, replaced)
         raise InvalidRefreshTokenError
 
@@ -116,11 +128,15 @@ def revoke(session: Session, auth_session: AuthSession) -> None:
         session.commit()
 
 
-def revoke_own_session(session: Session, user_id: int, session_id: int) -> None:
+def revoke_own_session(session: Session, user: User, session_id: int, client: Client) -> None:
     """Another user's session gives the same error as one that does not exist, so ids cannot be probed."""
-    auth_session = get_active_session(session, session_id, user_id)
+    auth_session = get_active_session(session, session_id, user.id)
     if auth_session is None:
         raise SessionNotFoundError(session_id)
+    where = auth_session.ip or "an unknown address"
+    activity_service.record(
+        session, ActivityEvent.SESSION_REVOKE, client, actor=user, details=f"Session {session_id} (from {where})"
+    )
     revoke(session, auth_session)
 
 
@@ -133,10 +149,13 @@ def revoke_all(session: Session, user_id: int, keep: int | None = None) -> int:
     return session.exec(update(AuthSession).where(*filters).values(revoked_at=utc_now())).rowcount
 
 
-def logout(session: Session, token: str) -> None:
-    """Revoke the session whose current refresh token this is. An unknown token is ignored: logout always succeeds."""
+def logout(session: Session, token: str, client: Client) -> None:
+    """Revoke the session whose current refresh token this is. An unknown token is ignored: logout always succeeds.
+    Only a session that was still open is logged, so a second logout adds nothing."""
     auth_session = session.exec(
         select(AuthSession).where(col(AuthSession.token_hash) == hash_refresh_token(token))
     ).first()
-    if auth_session is not None:
+    if auth_session is not None and auth_session.revoked_at is None:
+        user = session.get(User, auth_session.user_id)
+        activity_service.record(session, ActivityEvent.LOGOUT, client, actor=user)
         revoke(session, auth_session)

@@ -1,13 +1,15 @@
-# Looking at users and changing their role or name.
+# Looking at users and changing their role or name. Every admin action that changes an account is written to the
+# activity log in the same commit (FR-85); one that changes nothing (banning a banned user) is not.
 import secrets
 
 from sqlmodel import Session, col, func, select
 
 from app import rbac
-from app.models import Role, User, utc_now
+from app.models import ActivityEvent, Role, User, utc_now
 from app.rbac import Permission
+from app.request_info import Client
 from app.security import hash_password
-from app.services import class_service, session_service
+from app.services import activity_service, class_service, session_service
 from app.services.search import contains_any
 
 
@@ -60,14 +62,19 @@ def list_trainers(session: Session) -> list[User]:
     return list(session.exec(query).all())
 
 
-def change_role(session: Session, acting_admin: User, user_id: int, role: Role) -> User:
+def change_role(session: Session, acting_admin: User, user_id: int, role: Role, client: Client) -> User:
     if acting_admin.id == user_id:
         raise CannotChangeOwnRoleError
     user = get_user(session, user_id)
+    if user.role == role:
+        return user
     # A class's trainer is always an account that can teach, so classes keep only the name of an ex-trainer.
     teach = Permission.CLASSES_TEACH
     if teach in rbac.permissions_for(user.role) and teach not in rbac.permissions_for(role):
         class_service.release_trainer(session, user)
+    activity_service.record(
+        session, ActivityEvent.ROLE_CHANGE, client, actor=acting_admin, target=user, details=f"{user.role} → {role}"
+    )
     user.role = role
     session.add(user)
     session.commit()
@@ -83,7 +90,7 @@ def rename_user(session: Session, user: User, name: str) -> User:
     return user
 
 
-def ban_user(session: Session, acting_admin: User, user_id: int, reason: str | None) -> User:
+def ban_user(session: Session, acting_admin: User, user_id: int, reason: str | None, client: Client) -> User:
     """Banning an already banned user changes nothing, so a double click is harmless. Every session of the user is
     revoked in the same transaction (FR-36), so their refresh cookie stops working too."""
     if acting_admin.id == user_id:
@@ -96,13 +103,22 @@ def ban_user(session: Session, acting_admin: User, user_id: int, reason: str | N
         user.banned_at = utc_now()
         user.ban_reason = reason or None
         session.add(user)
-        session_service.revoke_all(session, user.id)
+        ended = session_service.revoke_all(session, user.id)
+        details = f"Reason: {reason}" if reason else "No reason given"
+        activity_service.record(
+            session,
+            ActivityEvent.BAN,
+            client,
+            actor=acting_admin,
+            target=user,
+            details=f"{details}; sessions ended: {ended}",
+        )
         session.commit()
         session.refresh(user)
     return user
 
 
-def unban_user(session: Session, user_id: int) -> User:
+def unban_user(session: Session, acting_admin: User, user_id: int, client: Client) -> User:
     """The role and everything else on the account are kept."""
     user = get_user(session, user_id)
     if user.is_banned:
@@ -110,12 +126,13 @@ def unban_user(session: Session, user_id: int) -> User:
         user.banned_at = None
         user.ban_reason = None
         session.add(user)
+        activity_service.record(session, ActivityEvent.UNBAN, client, actor=acting_admin, target=user)
         session.commit()
         session.refresh(user)
     return user
 
 
-def reset_password(session: Session, acting_admin: User, user_id: int) -> tuple[User, str]:
+def reset_password(session: Session, acting_admin: User, user_id: int, client: Client) -> tuple[User, str]:
     """Give the account a random temporary password, which the admin hands over. Every session is revoked, any login
     lockout is cleared, and the account must choose a new password before it can do anything else."""
     if acting_admin.id == user_id:
@@ -130,7 +147,16 @@ def reset_password(session: Session, acting_admin: User, user_id: int) -> tuple[
     user.failed_login_count = 0
     user.locked_until = None
     session.add(user)
-    session_service.revoke_all(session, user.id)
+    ended = session_service.revoke_all(session, user.id)
+    # The temporary password itself is never logged.
+    activity_service.record(
+        session,
+        ActivityEvent.PASSWORD_RESET,
+        client,
+        actor=acting_admin,
+        target=user,
+        details=f"Temporary password issued; sessions ended: {ended}",
+    )
     session.commit()
     session.refresh(user)
     return user, temporary

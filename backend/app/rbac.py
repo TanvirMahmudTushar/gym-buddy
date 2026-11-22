@@ -35,6 +35,7 @@ class Permission(str, Enum):
     USERS_BAN = "users:ban"  # ban and unban
     USERS_RESET_PASSWORD = "users:reset_password"
     PLANS_EDIT = "plans:edit"  # plan prices and lengths
+    ACTIVITY_READ = "activity:read"  # the activity log, its CSV export and the security view
 
 
 _GYM_MANAGER = frozenset(
@@ -64,6 +65,7 @@ ROLE_PERMISSIONS: dict[str, frozenset[Permission]] = {
         Permission.USERS_BAN,
         Permission.USERS_RESET_PASSWORD,
         Permission.PLANS_EDIT,
+        Permission.ACTIVITY_READ,
     },
 }
 
