@@ -122,7 +122,9 @@ backend/
   main.py              # creates the app, includes routers, health check
   app/
     __init__.py
-    config.py          # (Beta) settings from env vars: JWT secret, token lifetimes
+    __init__.py        # loads backend/.env (developer machines only) before any module reads a variable
+    config.py          # settings: load_local_env() (backend/.env, never on Vercel, never overriding) and frontend_origins() (FRONTEND_ORIGIN for CORS)
+    cors.py            # AllowlistCORSMiddleware: CORS only for FRONTEND_ORIGIN; other origins get no CORS headers
     database.py        # engine, get_session()
     models.py          # tables + Create / Update / Read schemas
     security.py        # password hashing (Argon2 + pepper), access tokens (JWT create/verify), refresh token generation and hashing
@@ -166,6 +168,10 @@ backend/
       group_service.py   # training groups: access() and require() on rbac.group_permissions(), list with counts, members, delete_for_accounts(); raises GroupNotFoundError / GroupPermissionError / GroupOwnerError
       moderation_service.py # admin lists, CSVs and deletes of anyone's workouts and groups (one activity row per delete)
       workout_service.py # personal and group workouts: lists, add, edit, assign, delete; raises WorkoutNotFoundError / NotGroupWorkoutError / AssigneeNotInGroupError
+  tests/               # pytest suite (section 14): conftest.py, test_login.py, test_tokens.py, test_refresh.py, test_rbac.py, test_cors.py, test_config.py
+  .env.example         # the four variables with placeholders only (copy to backend/.env)
+  requirements-dev.txt # -r requirements.txt + pytest, httpx (not installed by Vercel)
+  pytest.ini
   alembic/             # (Beta) migration scripts
   alembic.ini          # (Beta)
   requirements.txt
@@ -902,11 +908,12 @@ A catch-all exception handler returns `500` with `{"detail": "Internal server er
 | `DATABASE_URL` | not set (SQLite default) | Supabase transaction pooler URL (port `6543`) | MVP |
 | `JWT_SECRET` | optional (a temporary secret per run) | Required: random 32+ byte secret (`python -c "import secrets; print(secrets.token_urlsafe(48))"`) | Beta |
 | `PASSWORD_PEPPER` | optional (a fixed development pepper) | Required: random 32+ byte secret, generated the same way. Never changed once set: every password hashed with it would stop verifying | Beta |
+| `FRONTEND_ORIGIN` | optional (default `http://localhost:5173`, the Vite dev server) | `https://2321648gymbuddy.vercel.app`; unset allows no other origin (the app and the API share one). One exact origin or several separated by commas; `*` stops the backend at start-up | Beta |
 | `MIGRATION_DATABASE_URL` | not needed | Not on Vercel. Used only on a developer machine to run Alembic against Supabase (session pooler, port `5432`) | Beta |
 
 Token lifetimes are constants, not env vars: `ACCESS_TOKEN_LIFETIME` (15 minutes) in `app/security.py`, `REFRESH_LIFETIME` (7 days) and `ROTATION_GRACE` (30 seconds) in `app/services/session_service.py`.
 
-No secrets are committed. `.env` stays in `.gitignore`.
+No secrets are committed. `.env` stays in `.gitignore`. `backend/.env.example` lists `DATABASE_URL`, `JWT_SECRET`, `PASSWORD_PEPPER` and `FRONTEND_ORIGIN` with placeholders only; the secrets' placeholder (`change-me`) is shorter than 32 bytes on purpose, so it is ignored locally (temporary secrets are used) and refused on Vercel. On a developer machine `app/config.load_local_env()`, run from `app/__init__.py`, reads `backend/.env` with python-dotenv (`override=False`), so the terminal's variables win; it never runs on Vercel.
 
 Supabase setup (one time):
 1. Create a project at supabase.com and save the database password.
@@ -941,7 +948,7 @@ flowchart LR
 - **Create:** `POST /auth/login` checks the password, inserts an `auth_session` row, sets the cookie and returns an access token naming that row in `sid`.
 - **Verify (every protected request):** `deps.get_auth()` decodes the token with `JWT_SECRET` (a bad signature, an expired `exp` or a missing claim → `401`), loads the user (gone → `401`; banned → `403 Account banned`), then checks that session `sid` belongs to the user and is active (otherwise `401`). Every other dependency builds on it, and FastAPI runs it once per request.
 - **Refresh rotation:** `session_service.rotate()` finds the session by the cookie's hash and replaces the hash with a new token's in one `UPDATE ... WHERE id = ? AND token_hash = <old hash>`. If that matches no row, another request rotated first: this one still gets an access token but no new cookie, so the browser keeps the winner's cookie. The session id stays the same, so `sid` in new access tokens does not change.
-- **Reuse detection:** the replaced hash is kept in `previous_token_hash`. Sent again within `ROTATION_GRACE` (30 s, for example two tabs refreshing at once), it gets an access token without a new cookie. Sent later, only a copy can hold it, so the whole session is revoked (`401`) and both holders must log in again.
+- **Reuse detection:** the replaced hash is kept in `previous_token_hash`. Sent again within `ROTATION_GRACE` (30 s, for example two tabs refreshing at once), it gets an access token without a new cookie. Sent later, only a copy can hold it, so the whole session is revoked (`401`) and both holders must log in again. Only the last replaced hash is kept: a token two or more rotations old matches no row, so it is refused like an unknown token (`401`) but does not end the session.
 - **Revoke:** logout (`POST /auth/logout`, by the cookie), `DELETE /users/me/sessions/{id}`, a password change (every session but the caller's), an admin reset or a ban (every session) set `revoked_at`. The access tokens of a revoked session fail on their next request, because `get_auth()` checks the session; there is no wait for `exp`.
 - **Expiry:** after 15 minutes the API answers `401`. `services/api.ts` then calls `refreshSession()` once (all requests failing together share one promise) and repeats the request. If the refresh fails, `AuthContext.endSession()` shows Log in. On page load the app always calls refresh (scripts cannot see the HttpOnly cookie); with no cookie the answer is `204`, so a visitor sees no console error, and "Loading…" covers the wait instead of a flash of the Log in page.
 - The `role` claim is only informational; permission checks always use the role loaded from the database, so a role change applies on the next request.
@@ -1133,7 +1140,7 @@ stats = AdminStats(
 | Passwords | Argon2 (`argon2-cffi`) over HMAC-SHA256 with `PASSWORD_PEPPER`, minimum 8 characters |
 | Tokens | Section 10.1: 15-minute access token checked against its session on every request; rotating refresh token with reuse detection; `JWT_SECRET` and `PASSWORD_PEPPER` only in env vars, required on Vercel |
 | Cookies | `HttpOnly`, `Secure`, `SameSite=Strict`, path-limited |
-| CORS | Not enabled: frontend and API share the Vercel origin; locally Vite proxies `/api` |
+| CORS | Frontend and API share the Vercel origin (locally Vite proxies `/api`), so the app needs no CORS. `AllowlistCORSMiddleware` (Starlette's `CORSMiddleware` with `allow_origins=frontend_origins()`, `allow_credentials=True`, methods `GET`/`POST`/`PUT`/`PATCH`/`DELETE`, headers `Authorization`/`Content-Type`) answers only `FRONTEND_ORIGIN`. A request whose `Origin` is not on the list skips the middleware entirely, so it gets no CORS headers (plain Starlette would still add `Access-Control-Allow-Credentials`), and its preflight gets the app's `405`. `*` is refused at start-up |
 | Security headers | Added for all routes in `vercel.json` (below) |
 | Brute force | Login lockout (section 10.2) |
 | Injection | SQLModel/SQLAlchemy parameterised queries only; the member-name filter escapes `%` and `_` |
@@ -1178,4 +1185,19 @@ stats = AdminStats(
 | Permission bug exposes another member's data | All permission checks go through the dependencies in section 10.3; review every new route against the [SRS permission matrix](02-srs.md#311-permission-matrix--beta) |
 | Two members book the last class spot at the same time | Capacity check and insert run in one transaction; the composite primary key blocks duplicate bookings |
 | Expiry compared against the wrong date (time zones) | Store `expires_on` as a plain date; compare with the server's `date.today()` in UTC and state this in the SRS |
-| No automated tests or CI yet | Review each PR manually against the [SRS acceptance criteria](02-srs.md#5-acceptance-criteria); tests and CI are planned after this semester's scope |
+| No CI | The pytest suite (section 14) runs locally before each merge; review each PR against the [SRS acceptance criteria](02-srs.md#5-acceptance-criteria). CI is out of scope this semester |
+
+## 14. Testing — Beta
+
+`backend/tests/` (pytest, `pytest.ini`: `testpaths = tests`, `pythonpath = .`). `conftest.py` sets `DATABASE_URL` to a SQLite file in a new temporary folder, test-only `JWT_SECRET` and `PASSWORD_PEPPER`, and `FRONTEND_ORIGIN=https://frontend.test` **before** importing the app (the database URL is read at import), so no real setting or `backend/.env` reaches the tests (the `.env` loader never overrides a variable that is set). An autouse fixture drops and re-creates every table before each test. `account("ana", role="admin")` signs up, sets the role in the database and returns a `TestClient` logged in as that account; clients use `https://testserver` so the `Secure` refresh cookie is sent back.
+
+| File | Covers |
+|---|---|
+| `test_login.py` | Right password (tokens, cookie flags), any-case email, wrong password and unknown email give the same `401`, the 5th wrong password answers `429` with `Retry-After` and blocks even the right one, a right password resets the count, the failed login is logged without the password |
+| `test_tokens.py` | Missing, garbage, tampered (signature), forged (another `sub`), expired and `sid`-less tokens get `401`; the token stops working after logout although it is still well signed; a ban answers `403` |
+| `test_refresh.py` | No cookie `204`; rotation gives a new cookie and a working token; the replaced cookie within the grace period gets a token but no cookie; after the grace period it ends the whole session for both holders; a cookie two rotations old is refused; refresh after logout or a ban is refused |
+| `test_rbac.py` | Every admin `GET` route without a path parameter (found from the OpenAPI schema) is `403` for a user, trainer and gym manager, `200` for an admin, `401` for a visitor; staff routes; a role change applies with the same token; another user's personal workout is `404` (an admin's too); a group member without `can_update` gets `403`, then `200` once ticked; only the owner renames or deletes a group; an admin cannot ban another admin or themself, nor change their own role; a bulk ban skips the admin |
+| `test_cors.py` | `FRONTEND_ORIGIN` gets `Access-Control-Allow-Origin` and credentials, and its preflight is allowed; other origins (including look-alikes and `null`) and their preflights get no `Access-Control-*` header; `*` is never sent |
+| `test_config.py` | `.env` fills in missing variables but never overrides, is never read on Vercel, may be absent; `FRONTEND_ORIGIN` lists, trailing slashes, `*` and scheme-less values refused, defaults locally and on Vercel |
+
+Run: `pip install -r requirements-dev.txt` (adds `pytest` and `httpx` to `requirements.txt`; Vercel installs only `requirements.txt`), then `pytest` in `backend/`. Not in CI (out of scope).

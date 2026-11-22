@@ -13,6 +13,9 @@ backend/          FastAPI app (routes under /api)
   app/deps.py     who is calling (token and session check)
   app/rbac.py     what each role may do: permission constants, the role → permission map, require_permission()
   app/request_info.py  where a request came from: client IP (X-Forwarded-For on Vercel) and browser
+  app/config.py   settings: reads backend/.env on a developer machine, and the CORS origins (FRONTEND_ORIGIN)
+  app/cors.py     CORS that answers only the frontend's origin
+  tests/          pytest suite (see Tests)
   app/routers/    members.py, auth.py, users.py, admin.py, check_ins.py, classes.py, plans.py, payments.py, overview.py, trainers.py, announcements.py, activity.py, workouts.py, groups.py: the endpoints (HTTP only)
   app/services/   member_service.py, auth_service.py, session_service.py (logins and refresh tokens), user_service.py, checkin_service.py, class_service.py, payment_service.py, stats_service.py, revenue_service.py, announcement_service.py, activity_service.py (the activity log and the security view), csv_export.py (the CSV writer both exports share), workout_service.py and group_service.py (workouts and training groups): rules and database queries
 frontend/         Vite + React + TypeScript, one page (src/pages/HomePage/index.tsx)
@@ -250,6 +253,19 @@ Example body for `POST`:
 { "email": "rafi@example.com", "phone": "01700000000", "plan": "monthly", "expires_on": "2026-12-01", "notes": "Prefers morning sessions" }
 ```
 
+## Tests
+
+The backend has a pytest suite in `backend/tests/` (login, token rejection, refresh rotation and reuse, RBAC, CORS and the settings). It runs against a throwaway SQLite database that is emptied before every test, with test-only secrets, so it never touches `backend/gym_buddy.db`, Supabase or your `.env`.
+
+```bash
+cd backend
+.venv\Scripts\Activate.ps1          # macOS/Linux: source .venv/bin/activate
+pip install -r requirements-dev.txt  # pytest and httpx, plus everything in requirements.txt
+pytest
+```
+
+`requirements-dev.txt` is for development only: Vercel installs `requirements.txt`, which has no test tools. The tests run locally; there is no CI job for them.
+
 ## Requirements
 
 - [Python](https://www.python.org/downloads/) 3.10+
@@ -270,6 +286,8 @@ fastapi dev main.py
 ```
 
 With no `DATABASE_URL` set, the backend uses a local SQLite file, `backend/gym_buddy.db`, created on first start.
+
+**Settings (optional locally).** Copy `backend/.env.example` to `backend/.env` and fill in what you need: `DATABASE_URL`, `JWT_SECRET`, `PASSWORD_PEPPER` and `FRONTEND_ORIGIN`. The example holds placeholders only (the secrets are deliberately too short to be accepted). The backend reads `backend/.env` on a developer machine only, never on Vercel, and a variable already set in your terminal wins over the file. `.env` is ignored by git; never commit real values.
 
 **Frontend** (terminal 2):
 
@@ -308,8 +326,11 @@ Free-tier Supabase projects pause after a week with no activity; open the dashbo
 2. Go to https://vercel.com/new, import the repo and click **Deploy**. Keep **Root Directory** as `./`.
 3. Set `DATABASE_URL` as above. Without it, data is kept only in `/tmp` and is lost between requests.
 4. Set `JWT_SECRET` and `PASSWORD_PEPPER` (see **Accounts and roles**), then redeploy. Without them, sign up, login and every logged-in request return `500`.
+5. Set `FRONTEND_ORIGIN` to the site's address, `https://2321648gymbuddy.vercel.app` (exact, no trailing slash). The app and the API share that origin, so the app works without it; it names the one origin CORS answers.
 
 The Vercel project is not connected to GitHub, so merging into `main` does not deploy by itself. Deploy from an up-to-date `main` with `vercel --prod`, or connect the repository under Project → **Settings** → **Git** so every push to `main` deploys.
+
+**CORS.** The API answers cross-origin requests only from `FRONTEND_ORIGIN` (one exact origin, or several separated by commas; `*` is refused at start-up), with credentials. A request from any other origin, including its preflight, gets no CORS headers at all, so the browser does not let that site read the response. Unset, a developer machine allows the Vite dev server (`http://localhost:5173`) and Vercel allows no other origin.
 
 `vercel.json` adds security headers to every response (pages and API): `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin` and `Strict-Transport-Security`. They apply on Vercel only, not to `fastapi dev`.
 

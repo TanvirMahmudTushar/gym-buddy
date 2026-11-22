@@ -571,7 +571,7 @@ Actions on one's own account and data (profile, password, sessions, own membersh
 | NFR-02 | Persistence | Data is stored in a database and is not lost on redeploy or restart. | MVP |
 | NFR-03 | Availability | The production API is reachable on the Vercel URL during the semester. | MVP |
 | NFR-04 | Security | All traffic uses HTTPS (provided by Vercel). | MVP |
-| NFR-05 | Security | Database credentials and secrets are stored only in Vercel environment variables, never in Git. | MVP |
+| NFR-05 | Security | Database credentials and secrets are stored only in Vercel environment variables, never in Git. `backend/.env.example` lists the variables with placeholders only; a developer's `backend/.env` is ignored by git and never read on Vercel. | MVP |
 | NFR-06 | Security | Database queries use the ORM with parameters, never string-built SQL. | MVP |
 | NFR-07 | Security | Error responses do not expose stack traces or database details. | MVP |
 | NFR-08 | Maintainability | Code is split into layers: routes, schemas, models, database. | MVP |
@@ -582,16 +582,17 @@ Actions on one's own account and data (profile, password, sessions, own membersh
 | NFR-12 | Security | Access tokens are JWTs signed with a secret of at least 32 bytes from an env var, valid for 15 minutes. | Beta |
 | NFR-13 | Security | Refresh tokens are random, valid for 7 days, stored only as a hash, and replaced on every refresh. | Beta |
 | NFR-14 | Security | The refresh token cookie is `HttpOnly`, `Secure`, `SameSite=Strict` and limited to path `/api/v1/auth`. | Beta |
-| NFR-15 | Security | Frontend and API share one origin, so CORS stays disabled (no cross-origin access). | Beta |
+| NFR-15 | Security | Frontend and API share one origin. CORS allows only the origins in `FRONTEND_ORIGIN` (exact origins, never `*`, with credentials); a request from any other origin, preflight included, gets no CORS headers. | Beta |
 | NFR-16 | Security | Responses include security headers: `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Strict-Transport-Security`. | Beta |
 | NFR-17 | Security | Every permission check runs on the server for every request; the frontend hiding a button is never the only protection. | Beta |
 | NFR-18 | Performance | Sign up and login answer in under 1 s (password hashing is slow on purpose). | Beta |
 | NFR-19 | Maintainability | Database schema changes are made through Alembic migrations, not by hand. | Beta |
 | NFR-20 | Privacy | Member phone numbers, dates of birth, emergency contacts and notes are returned only to gym staff (gym managers and admins) and to the member themself. | Beta |
 | NFR-21 | Consistency | Booking a class checks capacity and inserts the booking in one database transaction, so a class is never over capacity and a member never books the same class twice. | Beta |
+| NFR-24 | Maintainability | An automated test suite (`pytest`, throwaway SQLite database) covers login and lockout, access token rejection (missing, tampered, expired, after logout), refresh rotation and reuse, at least four RBAC rules and CORS, and passes before a change is merged. | Beta |
 | NFR-23 | Security | The activity log never holds a password, a temporary password, a password hash or a token: the server builds each row's details from names, roles, reasons and ids only. | Beta |
 
-> **Built so far (security):** NFR-11 to NFR-17 (headers set for every response in `vercel.json`), NFR-20, NFR-21, NFR-22 and NFR-23. Schema changes are applied on start by `create_db_and_tables()` rather than Alembic (NFR-19). Production is deployed with `vercel --prod`; the project is not connected to GitHub, so a push to `main` does not deploy by itself (NFR-10).
+> **Built so far (security):** NFR-11 to NFR-17 (headers set for every response in `vercel.json`), NFR-20, NFR-21, NFR-22, NFR-23 and NFR-24 (`backend/tests/`, run with `pytest`; not in CI). NFR-15 now has a CORS allowlist (`FRONTEND_ORIGIN`). Schema changes are applied on start by `create_db_and_tables()` rather than Alembic (NFR-19). Production is deployed with `vercel --prod`; the project is not connected to GitHub, so a push to `main` does not deploy by itself (NFR-10).
 
 ## 5. Acceptance criteria
 
@@ -860,6 +861,11 @@ Actions on one's own account and data (profile, password, sessions, own membersh
 - `DELETE /api/v1/admin/groups/{G}` is `204`; G's workouts and memberships are gone, B's `GET /api/v1/groups/{G}` is `404`, and a `group_delete` row names the admin and A.
 - `POST /api/v1/admin/workouts/bulk-delete` with C's workout, a duplicate and an unknown id returns `{"deleted": 1}` and adds one `workout_delete` row.
 - A user, a trainer and a gym manager get `403` on all eight moderation endpoints; no login gets `401`.
+
+**AC-48 Settings, CORS and tests (NFR-05, NFR-15, NFR-24)**
+- `backend/.env.example` names `DATABASE_URL`, `JWT_SECRET`, `PASSWORD_PEPPER` and `FRONTEND_ORIGIN` with placeholders only, and `git ls-files` lists no `.env`, database or key file.
+- With `FRONTEND_ORIGIN=https://2321648gymbuddy.vercel.app`, a request with that `Origin` gets `Access-Control-Allow-Origin` with that origin and `Access-Control-Allow-Credentials: true`; a request or preflight from `https://evil.example` gets no `Access-Control-*` header; `FRONTEND_ORIGIN=*` stops the backend at start-up.
+- `pip install -r requirements-dev.txt` then `pytest` in `backend/` passes.
 
 **AC-46 Admin user management (FR-98 – FR-103)**
 - Given an admin, a second admin B, users C and D, and a trainer

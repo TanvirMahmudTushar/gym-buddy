@@ -5,6 +5,8 @@ from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from app.config import frontend_origins
+from app.cors import AllowlistCORSMiddleware
 from app.database import create_db_and_tables
 from app.models import utc_now
 from app.routers import (
@@ -81,6 +83,18 @@ app = FastAPI(
     docs_url="/api/docs",
     openapi_url="/api/openapi.json",
     redoc_url=None,
+)
+
+# CORS (NFR-15): only the frontend's origin may call the API from another origin, with cookies, and never "*".
+# The app and the API share one origin on Vercel, so the browser needs no CORS there; any other site gets no CORS
+# headers, so it cannot read a response even if a logged-in user visits it.
+app.add_middleware(
+    AllowlistCORSMiddleware,
+    allow_origins=frontend_origins(),
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+    allow_headers=["Authorization", "Content-Type"],
+    max_age=600,
 )
 
 app.include_router(auth.router)
