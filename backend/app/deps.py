@@ -1,12 +1,11 @@
-# Who is calling: read the Bearer token, check its session, and check the caller's role.
-from collections.abc import Callable
+# Who is calling: read the Bearer token and check its session. What the caller may do is in app/rbac.py.
 from typing import Annotated, NamedTuple
 
 from fastapi import Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.database import SessionDep
-from app.models import Role, User
+from app.models import User
 from app.security import InvalidTokenError, read_access_token
 from app.services import session_service
 from app.services.auth_service import ACCOUNT_BANNED_MESSAGE, MUST_CHANGE_PASSWORD_MESSAGE
@@ -71,14 +70,3 @@ def get_current_user(user: LoggedInUser) -> User:
 
 
 CurrentUser = Annotated[User, Depends(get_current_user)]
-
-
-def require_roles(*allowed: Role) -> Callable[[User], User]:
-    """A dependency that lets only users with one of the given roles through (403 for the rest)."""
-
-    def check(user: CurrentUser) -> User:
-        if user.role not in allowed:
-            raise HTTPException(status_code=403, detail="You do not have permission to do this")
-        return user
-
-    return check

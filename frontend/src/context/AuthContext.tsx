@@ -1,10 +1,10 @@
 import { type ReactNode, createContext, useCallback, useContext, useEffect, useMemo, useState } from "react"
 import * as authService from "../services/authService"
 import { refreshSession, setSessionExpiredHandler, setToken } from "../services/api"
-import type { SignupBody, User } from "../types/auth"
+import type { Me, SignupBody } from "../types/auth"
 
 interface AuthValue {
-  user: User | null
+  user: Me | null
   /** True while the app asks the server, on first load, whether this browser is still logged in. */
   loading: boolean
   login: (email: string, password: string) => Promise<void>
@@ -14,13 +14,13 @@ interface AuthValue {
   logout: () => Promise<void>
   /** Forget the login in this tab only, after the server has already ended the session. */
   endSession: () => void
-  setUser: (user: User) => void
+  setUser: (user: Me) => void
 }
 
 const AuthContext = createContext<AuthValue | null>(null)
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null)
+  const [user, setUser] = useState<Me | null>(null)
   // Starts true on every load: the refresh cookie cannot be read by scripts, so only the server can say whether
   // there is a session. Until it answers the app shows "Loading…", never the Log in page for a split second.
   const [loading, setLoading] = useState(true)

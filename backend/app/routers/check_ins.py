@@ -4,15 +4,15 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 
 from app.database import SessionDep
-from app.deps import require_roles
 from app.models import CheckInPage
+from app.rbac import Permission, require_permission
 from app.services import checkin_service
 
-# Gym managers and admins only (401 without a login, 403 for a user).
+# The front desk's check-in screen: needs check_ins:record (gym managers and admins; 401 without a login, 403 else).
 router = APIRouter(
     prefix="/api/v1/check-ins",
     tags=["check-ins"],
-    dependencies=[Depends(require_roles("gym_manager", "admin"))],
+    dependencies=[Depends(require_permission(Permission.CHECK_INS_RECORD))],
 )
 
 

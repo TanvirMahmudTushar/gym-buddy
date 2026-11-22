@@ -225,7 +225,8 @@ Every Admin is also a logged-in user, so they can log out, edit their profile an
 | FR-20 | Every user shall have exactly one global role: `user`, `trainer`, `gym_manager` or `admin`. | Beta | US-12 |
 | FR-21 | An admin shall be able to list all users (paginated). | Beta | US-12 |
 | FR-22 | An admin shall be able to change another user's role. An admin cannot change their own role (`400`), so the system always keeps at least one admin. | Beta | US-12 |
-| FR-24 | A caller whose role is not allowed on an endpoint shall get `403` (admin-only endpoints: every role except `admin`). | Beta | US-12, US-13 |
+| FR-24 | A caller whose role does not hold the permission an endpoint needs shall get `403` (admin permissions: every role except `admin`). | Beta | US-12, US-13 |
+| FR-83 | Every protected endpoint shall name the permission it needs, and the roles that hold each permission shall be defined in one server module. `GET /users/me`, login and refresh shall return the caller's permissions, and the app shall show only the pages and buttons those permissions allow. | Beta | US-12 |
 | FR-35 | An admin shall be able to view dashboard stats: total members, active members, expired members, new members in the last 7 days, memberships expiring soon (FR-53), total and upcoming classes, check-ins today and in the last 7 days, and total users, admins and banned users. | Beta | US-20 |
 | FR-36 | An admin shall be able to ban a user with an optional reason. Banning revokes all the user's refresh tokens. An admin cannot ban themself or another admin (`400`); demote the admin first. | Beta | US-21 |
 | FR-37 | A banned user shall get `403` ("Account banned") on login and on every authenticated request, even with an access token that has not expired yet. | Beta | US-21 |
@@ -448,6 +449,31 @@ A new member always starts as `Active` if `expires_on` is today or later. "Expir
 | Post, edit, delete announcements; list ended ones | No | No (`403`) | No (`403`) | Yes | Yes |
 
 Every endpoint except sign up, log in, refresh, health and the docs returns `401` when no valid token is sent.
+
+**Permissions (RBAC).** Each endpoint asks for a permission, not a role. The map from role to permissions lives in one place on the server (`backend/app/rbac.py`); the role is read from the database on every request.
+
+| Permission | Allows | User | Trainer | Gym Manager | Admin |
+|---|---|---|---|---|---|
+| `members:read` | Member list and details, waiting list, a member's visits and bookings | No | No | Yes | Yes |
+| `members:manage` | Start, edit and delete memberships; cancel a booking for a member | No | No | Yes | Yes |
+| `check_ins:record` | Check a member in; today's check-ins | No | No | Yes | Yes |
+| `payments:manage` | Take payments; a member's payments; the list of all payments | No | No | Yes | Yes |
+| `payments:void` | Void a payment | No | No | No | Yes |
+| `payments:export` | Export payments as CSV | No | No | No | Yes |
+| `classes:manage` | Add, edit and delete classes; list trainers; any class's bookings | No | No | Yes | Yes |
+| `classes:teach` | My classes and their bookings (only the classes I teach) | No | Yes | No | No |
+| `overview:read` | Today's overview | No | No | Yes | Yes |
+| `announcements:manage` | Post, edit and delete announcements; list ended ones | No | No | Yes | Yes |
+| `dashboard:read` | Dashboard stats and revenue | No | No | No | Yes |
+| `users:read` | List users | No | No | No | Yes |
+| `users:change_role` | Change a role (not one's own) | No | No | No | Yes |
+| `users:ban` | Ban and unban (not oneself, not another admin) | No | No | No | Yes |
+| `users:reset_password` | Reset a password (not one's own, not another admin's) | No | No | No | Yes |
+| `plans:edit` | Plan prices and lengths | No | No | No | Yes |
+
+Actions on one's own account and data (profile, password, sessions, own membership, bookings and payments, reading classes, plans and current announcements) need only a login: the server takes the user id from the token, never from the request.
+
+> **Built so far (RBAC):** FR-83. Every protected route declares its permission with `require_permission(...)`; no router compares role names. Moving from role checks to permissions changed no status code for any role (every route was called as each role before and after).
 
 ### 3.12 Status codes
 
@@ -730,6 +756,12 @@ Every endpoint except sign up, log in, refresh, health and the docs returns `401
 - `GET /api/v1/users/me/sessions` on browser 2 lists its session with `current = true`. When browser 2 revokes browser 1's session, browser 1's next request gets `401`; revoking it again, or revoking user B's session, is `404`.
 - When browser 2 sends `POST /api/v1/auth/logout`, the response is `204`, the cookie is cleared, browser 2's access token gets `401`, and refresh without a cookie returns `204`.
 
+**AC-43 Permissions (FR-24, FR-83, NFR-17)**
+- When each role logs in, `user.permissions` is `[]` for a User, `["classes:teach"]` for a Trainer, the 7 staff permissions for a Gym Manager, and those plus the 8 admin permissions for an Admin; `GET /api/v1/users/me` returns the same list.
+- A Gym Manager's `GET /api/v1/admin/stats` is `403` and `GET /api/v1/members` is `200`; a User's `GET /api/v1/members` is `403`.
+- Trainer A's `GET /api/v1/classes/{id}/bookings` is `200` for a class A teaches and `403` for trainer B's class.
+- When an admin changes trainer A's role to `user`, A's next `GET /api/v1/trainers/me/classes` is `403` with the same access token, and A's `permissions` become `[]`.
+
 ## 6. Traceability
 
 | Story | Requirements | Endpoint (see [TDD, section 6](03-tdd.md#6-rest-api-design)) | Release |
@@ -744,7 +776,7 @@ Every endpoint except sign up, log in, refresh, health and the docs returns `401
 | US-09 | FR-12 | `POST /api/v1/auth/signup` | Beta |
 | US-10 | FR-13 – FR-16, FR-80 – FR-82 | `/api/v1/auth/login`, `/refresh`, `/logout`, `GET /api/v1/users/me`, `GET /api/v1/users/me/sessions`, `DELETE /api/v1/users/me/sessions/{id}` | Beta |
 | US-11 | FR-17, FR-18, FR-33 | `GET /api/v1/users/me/membership`, `GET /api/v1/users/me/check-ins` | Beta |
-| US-12 | FR-20 – FR-22, FR-24 | `GET /api/v1/admin/users`, `PATCH /api/v1/admin/users/{id}/role` | Beta |
+| US-12 | FR-20 – FR-22, FR-24, FR-83 | `GET /api/v1/admin/users`, `PATCH /api/v1/admin/users/{id}/role`, `GET /api/v1/users/me` (permissions) | Beta |
 | US-13 | FR-19, FR-23, FR-24 | `/api/v1/members` (admin-only in Beta) | Beta |
 | US-14 | FR-25, FR-27 | `POST /api/v1/classes`, `PATCH` / `DELETE /api/v1/classes/{id}` | Beta |
 | US-15 | FR-26 | `GET /api/v1/classes`, `GET /api/v1/classes/{id}` | Beta |

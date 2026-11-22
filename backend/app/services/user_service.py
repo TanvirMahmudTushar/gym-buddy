@@ -3,7 +3,9 @@ import secrets
 
 from sqlmodel import Session, col, func, select
 
+from app import rbac
 from app.models import Role, User, utc_now
+from app.rbac import Permission
 from app.security import hash_password
 from app.services import class_service, session_service
 from app.services.search import contains_any
@@ -53,7 +55,8 @@ def list_users(session: Session, offset: int, limit: int, q: str | None = None) 
 
 def list_trainers(session: Session) -> list[User]:
     """Every account with the Trainer role, by name: the choices for a class's trainer. A gym has only a few."""
-    query = select(User).where(col(User.role) == "trainer").order_by(col(User.name), col(User.id))
+    teachers = rbac.roles_with(Permission.CLASSES_TEACH)
+    query = select(User).where(col(User.role).in_(teachers)).order_by(col(User.name), col(User.id))
     return list(session.exec(query).all())
 
 
@@ -61,8 +64,9 @@ def change_role(session: Session, acting_admin: User, user_id: int, role: Role) 
     if acting_admin.id == user_id:
         raise CannotChangeOwnRoleError
     user = get_user(session, user_id)
-    # A class's trainer is always an account with the Trainer role, so classes keep only the name of an ex-trainer.
-    if user.role == "trainer" and role != "trainer":
+    # A class's trainer is always an account that can teach, so classes keep only the name of an ex-trainer.
+    teach = Permission.CLASSES_TEACH
+    if teach in rbac.permissions_for(user.role) and teach not in rbac.permissions_for(role):
         class_service.release_trainer(session, user)
     user.role = role
     session.add(user)

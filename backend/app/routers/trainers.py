@@ -5,19 +5,20 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 
 from app.database import SessionDep
-from app.deps import require_roles
 from app.models import ClassPage, TrainerRead, User
+from app.rbac import Permission, require_permission
 from app.services import class_service, user_service
 from app.services.class_service import When
 
 router = APIRouter(prefix="/api/v1/trainers", tags=["trainers"])
 
-Staff = Annotated[User, Depends(require_roles("gym_manager", "admin"))]
-Trainer = Annotated[User, Depends(require_roles("trainer"))]
+# The trainer list is for whoever manages classes; "my classes" for whoever teaches (the Trainer role).
+MANAGE_CLASSES = Depends(require_permission(Permission.CLASSES_MANAGE))
+Teacher = Annotated[User, Depends(require_permission(Permission.CLASSES_TEACH))]
 
 
-@router.get("", response_model=list[TrainerRead])
-def list_trainers(session: SessionDep, _staff: Staff) -> list[User]:
+@router.get("", response_model=list[TrainerRead], dependencies=[MANAGE_CLASSES])
+def list_trainers(session: SessionDep) -> list[User]:
     """Every account with the Trainer role, by name, for the class form. Not paged (like /plans): a gym has few."""
     return user_service.list_trainers(session)
 
@@ -25,7 +26,7 @@ def list_trainers(session: SessionDep, _staff: Staff) -> list[User]:
 @router.get("/me/classes", response_model=ClassPage)
 def list_my_classes(
     session: SessionDep,
-    trainer: Trainer,
+    trainer: Teacher,
     when: When = "upcoming",
     offset: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=100)] = 20,

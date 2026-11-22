@@ -6,7 +6,9 @@ from sqlalchemy import exists, false
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, col, delete, func, select, update
 
+from app import rbac
 from app.models import ClassBooking, ClassCreate, GymClass, User, as_utc, utc_now
+from app.rbac import Permission
 from app.services import checkin_service
 
 
@@ -101,8 +103,9 @@ def _trainer_name(session: Session, gym_class: GymClass) -> str | None:
 
 
 def _check_trainer(session: Session, trainer_id: int) -> None:
+    # A class's trainer must be an account that can teach (the Trainer role).
     trainer = session.get(User, trainer_id)
-    if trainer is None or trainer.role != "trainer":
+    if trainer is None or not rbac.has_permission(trainer, Permission.CLASSES_TEACH):
         raise TrainerNotFoundError(trainer_id)
 
 
@@ -204,9 +207,10 @@ def delete_class(session: Session, class_id: int) -> None:
 
 def list_bookings(session: Session, class_id: int, offset: int, limit: int, viewer: User) -> tuple[list[dict], int]:
     """Who booked this class: member name and booking time, in the order they booked.
-    Staff see every class's bookings; a trainer only those of the classes they teach."""
+    Whoever manages classes sees every class's bookings; a trainer only those of the classes they teach."""
     gym_class = _get(session, class_id)
-    if viewer.role == "trainer" and gym_class.trainer_id != viewer.id:
+    # The class itself is public, so another trainer's class is a 403, not a 404.
+    if not rbac.has_permission(viewer, Permission.CLASSES_MANAGE) and not rbac.is_owner(viewer, gym_class.trainer_id):
         raise NotYourClassError(class_id)
     total = _count_bookings(session, class_id)
     query = (

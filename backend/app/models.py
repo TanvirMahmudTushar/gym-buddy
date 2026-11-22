@@ -242,6 +242,13 @@ class UserRead(SQLModel):
     must_change_password: bool
 
 
+class MeRead(UserRead):
+    """The logged-in user's own account, with the permissions of their role (app/rbac.py). The app builds its
+    menus and page guards from them; the server checks the same permissions on every request."""
+
+    permissions: list[str]
+
+
 class AccountPage(SQLModel):
     """A page of accounts, such as the ones waiting for a membership."""
 
@@ -258,7 +265,7 @@ class TokenResponse(SQLModel):
     token_type: Literal["bearer"] = "bearer"
     # Seconds until the access token expires.
     expires_in: int
-    user: UserRead
+    user: MeRead
 
 
 class SessionRead(SQLModel):

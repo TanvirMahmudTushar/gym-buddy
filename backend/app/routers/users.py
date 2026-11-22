@@ -3,12 +3,14 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Query, Response
 
+from app import rbac
 from app.database import SessionDep
 from app.deps import AuthDep, CurrentUser, LoggedInUser
 from app.models import (
     BookedClassPage,
     CheckInPage,
     MemberRead,
+    MeRead,
     PasswordChange,
     PaymentPage,
     ProfileRead,
@@ -16,7 +18,6 @@ from app.models import (
     SessionRead,
     User,
     UserNameUpdate,
-    UserRead,
 )
 from app.services import (
     auth_service,
@@ -32,16 +33,17 @@ from app.services import (
 router = APIRouter(prefix="/api/v1/users", tags=["users"])
 
 
-@router.get("/me", response_model=UserRead)
-def get_me(user: LoggedInUser) -> User:
-    """Works even while a new password is due (must_change_password), so the app knows to ask for one."""
-    return user
+@router.get("/me", response_model=MeRead)
+def get_me(user: LoggedInUser) -> dict:
+    """My account and the permissions of my role. Works even while a new password is due (must_change_password),
+    so the app knows to ask for one."""
+    return rbac.me(user)
 
 
-@router.patch("/me", response_model=UserRead)
-def update_me(body: UserNameUpdate, user: CurrentUser, session: SessionDep) -> User:
+@router.patch("/me", response_model=MeRead)
+def update_me(body: UserNameUpdate, user: CurrentUser, session: SessionDep) -> dict:
     """Only the name can be changed here; email and role cannot."""
-    return user_service.rename_user(session, user, body.name)
+    return rbac.me(user_service.rename_user(session, user, body.name))
 
 
 @router.get("/me/profile", response_model=ProfileRead)

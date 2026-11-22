@@ -5,22 +5,20 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query, Response
 
 from app.database import SessionDep
-from app.deps import require_roles
 from app.models import PaymentFilter, PaymentListPage, PaymentRead, User, VoidRequest, utc_today
+from app.rbac import Permission, require_permission
 from app.services import payment_service
 
-# Gym managers and admins can read the list (401 without a login, 403 for a user).
-router = APIRouter(
-    prefix="/api/v1/payments",
-    tags=["payments"],
-    dependencies=[Depends(require_roles("gym_manager", "admin"))],
-)
+router = APIRouter(prefix="/api/v1/payments", tags=["payments"])
 
-AdminUser = Annotated[User, Depends(require_roles("admin"))]
+# payments:manage (gym managers and admins) reads the list; voiding and exporting have their own permissions (admins).
+MANAGE_PAYMENTS = Depends(require_permission(Permission.PAYMENTS_MANAGE))
+EXPORT_PAYMENTS = Depends(require_permission(Permission.PAYMENTS_EXPORT))
+Voider = Annotated[User, Depends(require_permission(Permission.PAYMENTS_VOID))]
 Filters = Annotated[PaymentFilter, Query()]
 
 
-@router.get("", response_model=PaymentListPage)
+@router.get("", response_model=PaymentListPage, dependencies=[MANAGE_PAYMENTS])
 def list_payments(
     session: SessionDep,
     filters: Filters,
@@ -36,9 +34,10 @@ def list_payments(
     "/export.csv",
     response_class=Response,
     responses={200: {"content": {"text/csv": {}}, "description": "The matching payments as CSV"}},
+    dependencies=[EXPORT_PAYMENTS],
 )
-def export_payments(session: SessionDep, filters: Filters, _admin: AdminUser) -> Response:
-    """Admin only. The same filters as the list, every matching payment, newest first."""
+def export_payments(session: SessionDep, filters: Filters) -> Response:
+    """Needs payments:export (admins). The same filters as the list, every matching payment, newest first."""
     filename = f"payments-{utc_today().isoformat()}.csv"
     return Response(
         content=payment_service.export_csv(session, filters),
@@ -48,6 +47,7 @@ def export_payments(session: SessionDep, filters: Filters, _admin: AdminUser) ->
 
 
 @router.post("/{payment_id}/void", response_model=PaymentRead)
-def void_payment(payment_id: int, body: VoidRequest, session: SessionDep, admin: AdminUser) -> dict:
-    """Admin only. The payment stays on record but is left out of totals. Voiding it again changes nothing."""
-    return payment_service.void_payment(session, payment_id, admin, body.reason)
+def void_payment(payment_id: int, body: VoidRequest, session: SessionDep, voider: Voider) -> dict:
+    """Needs payments:void (admins). The payment stays on record but is left out of totals. Voiding it again
+    changes nothing."""
+    return payment_service.void_payment(session, payment_id, voider, body.reason)

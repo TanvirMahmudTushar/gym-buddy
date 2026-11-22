@@ -10,7 +10,8 @@ backend/          FastAPI app (routes under /api)
   app/database.py engine and session (Supabase or local SQLite)
   app/models.py   tables (a member is a user with a membership) and request / response schemas
   app/security.py password hashing (Argon2 with a pepper), access tokens (JWT) and refresh tokens
-  app/deps.py     who is calling (token and session check), and the role check
+  app/deps.py     who is calling (token and session check)
+  app/rbac.py     what each role may do: permission constants, the role → permission map, require_permission()
   app/routers/    members.py, auth.py, users.py, admin.py, check_ins.py, classes.py, plans.py, payments.py, overview.py, trainers.py, announcements.py: the endpoints (HTTP only)
   app/services/   member_service.py, auth_service.py, session_service.py (logins and refresh tokens), user_service.py, checkin_service.py, class_service.py, payment_service.py, stats_service.py, revenue_service.py, announcement_service.py: rules and database queries
 frontend/         Vite + React + TypeScript, one page (src/pages/HomePage/index.tsx)
@@ -42,6 +43,25 @@ Everyone who signs up is a **User**. Only an admin can change a role.
 | Trainer | Log in, see and rename their own account, change their password, and see the classes they teach with who booked each one |
 | Gym Manager | Everything a User can, plus manage gym members (add, edit, renew, freeze, delete), record check-ins, take payments and see the list of all payments, run the class timetable, and post announcements |
 | Admin | Everything a Gym Manager can, plus list users and change their roles (including giving the Trainer role), set plan prices, void payments and export them as CSV |
+
+**Permissions (RBAC).** The server never asks "is this an admin?". Every protected endpoint asks for a permission, and [`backend/app/rbac.py`](backend/app/rbac.py) says which roles hold it. The role is read from the database on every request, so a role change applies on the next request. A missing permission gets `403`; no login gets `401`. Endpoints about your own data (profile, membership, bookings, payments, sessions) need only a login, because they take your id from the token, never from the request.
+
+| Permission | Allows | User | Trainer | Gym Manager | Admin |
+|---|---|---|---|---|---|
+| `members:read` | Member list and details, waiting list, a member's visits and bookings | | | ✓ | ✓ |
+| `members:manage` | Start, edit and delete memberships; cancel a booking for a member | | | ✓ | ✓ |
+| `check_ins:record` | Check a member in; today's check-ins | | | ✓ | ✓ |
+| `payments:manage` | Take payments; a member's payments; the list of all payments | | | ✓ | ✓ |
+| `classes:manage` | Add, edit and delete classes; list trainers; any class's bookings | | | ✓ | ✓ |
+| `classes:teach` | My classes, and who booked them (only classes I teach) | | ✓ | | |
+| `overview:read` | The Overview page | | | ✓ | ✓ |
+| `announcements:manage` | Post, edit and delete announcements; see ended ones | | | ✓ | ✓ |
+| `payments:void`, `payments:export` | Void a payment; export payments as CSV | | | | ✓ |
+| `dashboard:read` | Dashboard stats and revenue | | | | ✓ |
+| `users:read`, `users:change_role`, `users:ban`, `users:reset_password` | The Users page and its actions | | | | ✓ |
+| `plans:edit` | Plan prices and lengths | | | | ✓ |
+
+`GET /api/v1/users/me` (and the login and refresh responses) include the caller's `permissions`. The app builds its menu and page guards from them, so it shows exactly what the API allows. The two member pages, My membership and Classes, use only your-own-data endpoints and are shown to Users.
 
 Pages: `#/login`, `#/signup`, `#/dashboard` (Admin), `#/overview` (Gym Manager, Admin), `#/members` (Gym Manager, Admin), `#/classes` (Gym Manager, Admin), `#/payments` (Gym Manager, Admin), `#/announcements` (Gym Manager, Admin), `#/users` (Admin), `#/plans` (Admin), `#/membership` and `#/timetable` (User), `#/my-classes` (Trainer), `#/account` (everyone). After logging in, an Admin lands on the Dashboard, a Gym Manager on the Overview, a Trainer on My classes and a User on My membership.
 
@@ -149,7 +169,7 @@ Interactive docs: `/api/docs` (for example http://localhost:8000/api/docs).
 | Log in | `POST /api/v1/auth/login` `{email, password}` | `200` `{access_token, token_type, expires_in, user}` and a `refresh_token` cookie | `401`, `403` (banned), `422`, `429` (locked after 5 wrong passwords) |
 | Refresh | `POST /api/v1/auth/refresh` (the browser sends the cookie) | `200` same as Log in, with a new cookie (rotation); `204` when there is no cookie (not logged in) | `401` (expired, revoked or reused; the cookie is cleared) |
 | Log out | `POST /api/v1/auth/logout` | `204`; the session is revoked and the cookie cleared (always `204`) | |
-| My account | `GET` / `PATCH /api/v1/users/me` | `200` user | `401`, `422` |
+| My account | `GET` / `PATCH /api/v1/users/me` | `200` user with `permissions` (the list from `app/rbac.py` for my role) | `401`, `422` |
 | Overview (Gym Manager, Admin) | `GET /api/v1/overview` | `200` `{check_ins_today, expiring_soon, waiting, payments_today: {count, amount}, next_classes}` | `401`, `403` |
 | Current announcements | `GET /api/v1/announcements?offset=0&limit=20` (any logged-in user; `include_ended=true` for Gym Manager, Admin) | `200` `{items, total, offset, limit}` of `{id, title, message, ends_on, posted_at, updated_at, posted_by_name}`, newest first; without `include_ended`, only those with no `ends_on` or one of today or later (UTC) | `401`, `403` (`include_ended` from a User or Trainer) |
 | Post an announcement (Gym Manager, Admin) | `POST /api/v1/announcements` `{title, message, ends_on?}` | `201` announcement | `403`, `422` (empty or too long, or `ends_on` before today) |
