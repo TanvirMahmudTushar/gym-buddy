@@ -36,6 +36,8 @@ class Permission(str, Enum):
     USERS_CHANGE_ROLE = "users:change_role"
     USERS_BAN = "users:ban"  # ban and unban
     USERS_RESET_PASSWORD = "users:reset_password"
+    USERS_REVOKE_SESSIONS = "users:revoke_sessions"  # log a user out of every browser
+    USERS_EXPORT = "users:export"  # the users CSV
     PLANS_EDIT = "plans:edit"  # plan prices and lengths
     ACTIVITY_READ = "activity:read"  # the activity log, its CSV export and the security view
 
@@ -66,6 +68,8 @@ ROLE_PERMISSIONS: dict[str, frozenset[Permission]] = {
         Permission.USERS_CHANGE_ROLE,
         Permission.USERS_BAN,
         Permission.USERS_RESET_PASSWORD,
+        Permission.USERS_REVOKE_SESSIONS,
+        Permission.USERS_EXPORT,
         Permission.PLANS_EDIT,
         Permission.ACTIVITY_READ,
     },

@@ -151,7 +151,7 @@ backend/
       member_service.py  # member rules and queries; raises MemberNotFoundError / InvalidExpiryError
       auth_service.py    # sign up (always role user), log in (re-hashes a pre-pepper hash), change password; raises EmailTakenError / InvalidCredentialsError
       session_service.py # login sessions: start, rotate the refresh token (grace period, reuse detection), list, revoke one or all; raises InvalidRefreshTokenError / SessionNotFoundError
-      user_service.py    # list users and trainers, change role (an ex-trainer's classes keep the name as text), rename, ban / unban; raises UserNotFoundError / CannotChangeOwnRoleError / CannotBanError
+      user_service.py    # list users (search, role, status) and trainers, users CSV, a user's details, change role (an ex-trainer's classes keep the name as text), rename, ban / unban one or many, end a user's sessions; raises UserNotFoundError / CannotChangeOwnRoleError / CannotBanError / CannotRevokeOwnSessionsError
       stats_service.py   # member, check-in, class and user counts for the admin dashboard and the gym manager overview (each reuses the rule of the list it links to)
       revenue_service.py # revenue today, this month, last 30 days, by method and by month (voided left out)
       payment_service.py # plan prices, record a payment (and renew), payment lists and total, void, CSV export; raises PaymentNotFoundError
@@ -173,7 +173,7 @@ frontend/
     components/        # add form, member list, details panel
     context/           # AuthContext: who is logged in, login / signup / logout; restores the login with a refresh on load
     layouts/           # AppLayout: header, and the pages each role may open
-    pages/             # HomePage (members), LoginPage, SignupPage, AccountPage, DashboardPage (admin), OverviewPage (gym manager, admin), UsersPage (admin), ClassesPage (gym manager, admin), PaymentsPage (gym manager, admin), MembershipPage and TimetablePage (user), MyClassesPage (trainer), PlansPage (admin), AnnouncementsPage (gym manager, admin), ActivityPage and SecurityPage (admin), WorkoutsPage and GroupsPage (everyone; GroupsPage shows one group with `#/groups?group=ID`); (Later) AboutPage, MemberDetailsPage; (Beta, Could) MyMembership, Classes, AdminDashboard
+    pages/             # HomePage (members), LoginPage, SignupPage, AccountPage, DashboardPage (admin), OverviewPage (gym manager, admin), UsersPage (admin; one user's details at `#/users?user=ID`), ClassesPage (gym manager, admin), PaymentsPage (gym manager, admin), MembershipPage and TimetablePage (user), MyClassesPage (trainer), PlansPage (admin), AnnouncementsPage (gym manager, admin), ActivityPage and SecurityPage (admin), WorkoutsPage and GroupsPage (everyone; GroupsPage shows one group with `#/groups?group=ID`); (Later) AboutPage, MemberDetailsPage; (Beta, Could) MyMembership, Classes, AdminDashboard
     services/          # fetch calls to the API; api.ts keeps the access token in memory and refreshes it once on a 401
     types/             # TypeScript types
     utils/             # display helpers; membersLink() builds the #/members?filter=&member= address
@@ -566,8 +566,13 @@ erDiagram
 | `AdminUserRead` | Admin user list | `UserRead` + `is_banned`, `banned_at`, `ban_reason`, `plan?`, `expires_on?`, `is_frozen` | Beta |
 | `AccountPage` | Accounts waiting for a membership | `items: UserRead[]`, `total`, `offset`, `limit` | Beta |
 | `BanRequest` | Ban a user | `reason?` | Beta |
+| `UserFilter` | Query filters for the admin user list and the users CSV | `q?` (≤ 100: part of the name or email), `role?`, `status?` (`active` / `banned`) | Beta |
+| `BulkUserAction` | Bulk ban / unban | `ids` (1 to 100 account ids; duplicates count once), `reason?` (≤ 500) | Beta |
+| `BulkBanResult` / `BulkUnbanResult` | Bulk ban / unban response | `banned` (or `unbanned`): the ids changed; `skipped: [{id, name?, reason}]` | Beta |
+| `SessionsRevoked` | End a user's sessions | `revoked` (how many active sessions ended) | Beta |
+| `AdminUserDetail` | A user's details | `AdminUserRead` + `joined_on?`, `locked_until?`, `sessions: AdminSessionRead[]` (`id`, `created_at`, `last_used_at`, `expires_at`, `ip?`, `user_agent?`), `workouts {personal, in_groups, assigned}`, `groups [{id, name, is_owner, member_count}]`, `recent_activity: ActivityRead[]` (10); never the password hash | Beta |
 | `PasswordResetResult` | Admin password reset | `user: AdminUserRead`, `temporary_password` (shown once) | Beta |
-| `AdminStats` | Dashboard | `members {total, active, expired, frozen, new_last_7_days, expiring_soon}`, `classes {total, upcoming}`, `check_ins {today, last_7_days}`, `users {total, users, trainers, gym_managers, admins, banned}` | Beta |
+| `AdminStats` | Dashboard | `members {total, active, expired, frozen, new_last_7_days, expiring_soon}`, `classes {total, upcoming}`, `check_ins {today, last_7_days}`, `users {total, users, trainers, gym_managers, admins, banned, new_last_7_days}`, `workouts {total, last_7_days}`, `groups {total}` | Beta |
 | `Overview` | Gym manager start page | `check_ins_today`, `expiring_soon`, `waiting`, `payments_today {count, amount}`, `next_classes: ClassRead[]` (5) | Beta |
 | `RevenueStats` | Dashboard revenue | `today`, `this_month`, `last_30_days`, `last_30_days_from` (date), `by_method [{method, amount, count}]` (all four methods), `months [{month: "YYYY-MM", amount}]` (6, oldest first) | Beta |
 | `ClassCreate` / `ClassUpdate` | Create / edit class | `name`, `description?`, `trainer_id?` (an account with the role `trainer`, or null), `starts_at`, `duration_minutes`, `capacity` (all optional on update; on update a `trainer_id` left out keeps the trainer) | Beta |
@@ -696,7 +701,12 @@ In the MVP no login is needed. In the Beta the member endpoints become admin-onl
 
 | Method | Path | Who | Body | Success | Errors | FR |
 |---|---|---|---|---|---|---|
-| `GET` | `/api/v1/admin/users?offset&limit&q` | Admin | — | `200` `AdminUserPage` (`AdminUserRead` items, with ban info and membership) | `403` | FR-21, FR-56 |
+| `GET` | `/api/v1/admin/users?offset&limit&q&role&status` | Admin | — | `200` `AdminUserPage` (`AdminUserRead` items, with ban info and membership; the filters combine) | `403`, `422` | FR-21, FR-56, FR-98 |
+| `GET` | `/api/v1/admin/users/export.csv?q&role&status` | Admin (`users:export`) | — | `200` `text/csv` attachment `users-YYYY-MM-DD.csv`, `Cache-Control: no-store`; adds an `export` row | `401`, `403`, `422` | FR-98 |
+| `POST` | `/api/v1/admin/users/bulk-ban` | Admin (`users:ban`) | `BulkUserAction` | `200` `BulkBanResult` (one transaction; one `ban` row per banned user) | `403`, `422` | FR-101 |
+| `POST` | `/api/v1/admin/users/bulk-unban` | Admin (`users:ban`) | `BulkUserAction` | `200` `BulkUnbanResult` | `403`, `422` | FR-101 |
+| `GET` | `/api/v1/admin/users/{user_id}` | Admin (`users:read`) | — | `200` `AdminUserDetail` | `403`, `404`, `422` | FR-99 |
+| `POST` | `/api/v1/admin/users/{user_id}/revoke-sessions` | Admin (`users:revoke_sessions`) | — | `200` `SessionsRevoked` (a `session_revoke` row when at least one ended) | `400` (yourself), `403`, `404` | FR-100 |
 | `PATCH` | `/api/v1/admin/users/{user_id}/role` | Admin | `RoleUpdate` | `200` `AdminUserRead` (from `trainer` to another role: the trainer's classes keep the name as text) | `400` (own role), `403`, `404` | FR-22, FR-67 |
 | `GET` | `/api/v1/admin/stats` | Admin | — | `200` `AdminStats` | `403` | FR-35 |
 | `GET` | `/api/v1/admin/revenue` | Admin | — | `200` `RevenueStats` | `401`, `403` | FR-52 |
@@ -942,13 +952,13 @@ class Permission(str, Enum):
     MEMBERS_READ = "members:read"
     CLASSES_TEACH = "classes:teach"
     USERS_BAN = "users:ban"
-    ...                                   # 17 in all (SRS 3.11)
+    ...                                   # 19 in all (SRS 3.11)
 
 ROLE_PERMISSIONS = {
     "user": frozenset(),                  # only their own account and data
     "trainer": frozenset({Permission.CLASSES_TEACH}),
     "gym_manager": _GYM_MANAGER,          # 7 permissions
-    "admin": _GYM_MANAGER | {...},        # those + 9 admin permissions
+    "admin": _GYM_MANAGER | {...},        # those + 11 admin permissions
 }
 
 def require_permission(*permissions: Permission):
@@ -990,7 +1000,8 @@ def ban_user(user_id: int, session: SessionDep, admin: Banner, body: BanRequest 
 | `GET /overview` | `overview:read` |
 | `POST /announcements`, `PATCH` / `DELETE /announcements/{id}`; `GET /announcements?include_ended=true` | `announcements:manage` (the last one checked in the route with `rbac.has_permission()`) |
 | `GET /admin/stats`, `GET /admin/revenue` | `dashboard:read` |
-| `GET /admin/users` / `PATCH .../role` / `POST .../ban`, `.../unban` / `POST .../reset-password` | `users:read` / `users:change_role` / `users:ban` / `users:reset_password` |
+| `GET /admin/users`, `GET /admin/users/{id}` / `PATCH .../role` / `POST .../ban`, `.../unban`, `POST /admin/users/bulk-ban`, `/bulk-unban` / `POST .../reset-password` | `users:read` / `users:change_role` / `users:ban` / `users:reset_password` |
+| `POST /admin/users/{id}/revoke-sessions` / `GET /admin/users/export.csv` | `users:revoke_sessions` / `users:export` |
 | `PUT /admin/plans/{plan}` | `plans:edit` |
 | `GET /admin/activity`, `GET /admin/activity/export.csv`, `GET /admin/activity/security` | `activity:read` |
 | `/workouts/*`, `/groups/*` | `CurrentUser`, then the group permissions below (`rbac.group_permissions()`) inside the service |
@@ -1067,6 +1078,10 @@ stats = AdminStats(
 ```
 
 `count(model, *filters)` is a small helper around `select(func.count()).select_from(model).where(*filters)`.
+
+> Built so far (accounts, workouts, groups): `users.new_last_7_days` counts `app_user.created_at >= now − 7 days`; `workouts` is `COUNT(workout)` and the ones with `created_at` in the last 7 days (`workout_service.workout_stats()`); `groups.total` is `COUNT(training_group)`. These are counts only, so no workout's content reaches the dashboard.
+
+**Admin user management (`user_service`).** The list and the CSV share `UserFilter` and `_conditions()` (search with `contains_any()`, `role =`, `is_banned` for the status) and the same order (`created_at DESC, id DESC`). `bulk_ban()` / `bulk_unban()` take the ids once each, load the accounts in one query, and apply the single ban's rules through the same `_ban()` / `_unban()` helpers (which revoke sessions and add the activity row) to each, collecting the refusals into `skipped`; one `commit()` at the end makes the whole list one transaction. `revoke_sessions()` reuses `session_service.revoke_all()`, which `get_auth()` then sees on the user's next request (`401`). `user_detail()` builds the response from `session_service.list_active_sessions()`, `workout_service.counts_for()`, `group_service.groups_of()` and `activity_service.list_activity(user_id=…)`, and leaves out `password_hash` before the response schema is applied.
 
 > Built so far: members are users with a plan, so the member counts are `COUNT`s on `app_user` with the member list's `status_filters()` (including `expiring_soon`: not frozen, `today <= expires_on <= today + 7`).
 

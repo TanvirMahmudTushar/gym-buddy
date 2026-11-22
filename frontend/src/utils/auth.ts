@@ -15,6 +15,9 @@ export const ROLES: { value: Role; label: string; description: string }[] = [
 
 export const roleLabel = (role: Role) => ROLES.find((r) => r.value === role)?.label ?? role
 
+/** The Users page, or one user's details on it: #/users?user=5. */
+export const usersLink = (id: number | null) => (id === null ? "#/users" : `#/users?user=${id}`)
+
 /** True when the logged-in person's role holds this permission. */
 export const can = (user: Me | null, permission: Permission) => user?.permissions.includes(permission) ?? false
 

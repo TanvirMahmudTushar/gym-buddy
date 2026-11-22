@@ -278,3 +278,27 @@ def delete_for_accounts(session: Session, ids: list[int]) -> None:
     session.exec(delete(Workout).where(col(Workout.owner_id).in_(ids), col(Workout.group_id).is_(None)))
     session.exec(update(Workout).where(col(Workout.owner_id).in_(ids)).values(owner_id=None))
     session.exec(update(Workout).where(col(Workout.assigned_to).in_(ids)).values(assigned_to=None))
+
+
+def groups_of(session: Session, user_id: int) -> list[dict]:
+    """The groups an account owns or is in, by name, for the admin's user details. Names and sizes only."""
+    members = (
+        select(func.count())
+        .select_from(GroupMember)
+        .where(col(GroupMember.group_id) == col(TrainingGroup.id))
+        .correlate(TrainingGroup)
+        .scalar_subquery()
+    )
+    member_of = select(GroupMember.group_id).where(col(GroupMember.user_id) == user_id)
+    rows = session.exec(
+        select(TrainingGroup, members)
+        .where(or_(col(TrainingGroup.owner_id) == user_id, col(TrainingGroup.id).in_(member_of)))
+        .order_by(col(TrainingGroup.name), col(TrainingGroup.id))
+    ).all()
+    return [
+        {"id": g.id, "name": g.name, "is_owner": g.owner_id == user_id, "member_count": count + 1} for g, count in rows
+    ]
+
+
+def count_groups(session: Session) -> int:
+    return session.exec(select(func.count()).select_from(TrainingGroup)).one()

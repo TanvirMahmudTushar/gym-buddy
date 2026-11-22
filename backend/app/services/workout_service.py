@@ -157,3 +157,21 @@ def delete_workout(session: Session, user: User, workout_id: int) -> None:
     workout = _access(session, user, workout_id, GroupPermission.UPDATE)
     session.delete(workout)
     session.commit()
+
+
+def _count(session: Session, *filters) -> int:
+    return session.exec(select(func.count()).select_from(Workout).where(*filters)).one()
+
+
+def counts_for(session: Session, user_id: int) -> dict:
+    """How many workouts an account has, for the admin's user details. Counts only: the content stays private."""
+    return {
+        "personal": _count(session, col(Workout.owner_id) == user_id, col(Workout.group_id).is_(None)),
+        "in_groups": _count(session, col(Workout.owner_id) == user_id, col(Workout.group_id).is_not(None)),
+        "assigned": _count(session, col(Workout.assigned_to) == user_id),
+    }
+
+
+def workout_stats(session: Session, since) -> dict:
+    """Every workout, and the ones added since `since`, for the admin dashboard."""
+    return {"total": _count(session), "last_7_days": _count(session, col(Workout.created_at) >= since)}

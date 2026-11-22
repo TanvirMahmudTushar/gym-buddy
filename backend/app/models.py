@@ -317,6 +317,51 @@ class BanRequest(SQLModel):
     reason: Annotated[str, StringConstraints(strip_whitespace=True, max_length=500)] | None = None
 
 
+UserStatus = Literal["active", "banned"]
+
+
+class UserFilter(SQLModel):
+    """Query filters shared by the admin user list and its CSV export. They combine with each other."""
+
+    # Part of the name or email, any case.
+    q: Annotated[str, StringConstraints(strip_whitespace=True, max_length=100)] | None = None
+    role: Role | None = None
+    status: UserStatus | None = None
+
+
+class BulkUserAction(SQLModel):
+    """Ban or unban several accounts in one transaction. Duplicate ids count once."""
+
+    ids: list[AccountId] = Field(min_length=1, max_length=100)
+    # Saved on each ban, and written to the activity log for a ban or an unban.
+    reason: Annotated[str, StringConstraints(strip_whitespace=True, max_length=500)] | None = None
+
+
+class SkippedUser(SQLModel):
+    """An id a bulk action left alone, and why (yourself, an admin, no change needed, no such user)."""
+
+    id: int
+    # None when no account has the id.
+    name: str | None
+    reason: str
+
+
+class BulkBanResult(SQLModel):
+    banned: list[int]
+    skipped: list[SkippedUser]
+
+
+class BulkUnbanResult(SQLModel):
+    unbanned: list[int]
+    skipped: list[SkippedUser]
+
+
+class SessionsRevoked(SQLModel):
+    """How many active sessions an admin ended (0 when the account had none)."""
+
+    revoked: int
+
+
 class CheckInRead(SQLModel):
     id: int
     member_id: int
@@ -354,6 +399,8 @@ class UserStats(SQLModel):
     gym_managers: int
     admins: int
     banned: int
+    # Accounts created in the last 7 days (rolling, from now).
+    new_last_7_days: int
 
 
 class ClassStats(SQLModel):
@@ -361,11 +408,24 @@ class ClassStats(SQLModel):
     upcoming: int
 
 
+class WorkoutStats(SQLModel):
+    # Every workout, personal and in groups.
+    total: int
+    # Added in the last 7 days (rolling, from now).
+    last_7_days: int
+
+
+class GroupStats(SQLModel):
+    total: int
+
+
 class AdminStats(SQLModel):
     members: MemberStats
     users: UserStats
     check_ins: CheckInStats
     classes: ClassStats
+    workouts: WorkoutStats
+    groups: GroupStats
 
 
 class UserNameUpdate(SQLModel):
@@ -1069,3 +1129,48 @@ class GroupMemberRead(SQLModel):
     can_assign: bool
     # When they were added; for the owner, when the group was made.
     added_at: UtcDateTime
+
+
+# --- One user, for the admin (defined last: it uses the activity and group schemas above) ---
+
+
+class AdminSessionRead(SQLModel):
+    """One of the user's active logins, as an admin sees it."""
+
+    id: int
+    created_at: UtcDateTime
+    last_used_at: UtcDateTime
+    expires_at: UtcDateTime
+    ip: str | None
+    user_agent: str | None
+
+
+class UserWorkoutCounts(SQLModel):
+    """How many workouts the user has, without their content: a personal workout stays private (FR-90)."""
+
+    personal: int
+    # Workouts the user added to groups.
+    in_groups: int
+    # Group workouts assigned to the user.
+    assigned: int
+
+
+class UserGroupRead(SQLModel):
+    id: int
+    name: str
+    is_owner: bool
+    # The owner included.
+    member_count: int
+
+
+class AdminUserDetail(AdminUserRead):
+    """GET /admin/users/{id}: the account and membership, plus its logins, workouts, groups and recent activity."""
+
+    joined_on: date | None
+    # Set while too many wrong passwords block the account's logins.
+    locked_until: UtcDateTime | None
+    sessions: list[AdminSessionRead]
+    workouts: UserWorkoutCounts
+    groups: list[UserGroupRead]
+    # The newest rows where the user acted or was acted on (the Activity page has the rest).
+    recent_activity: list[ActivityRead]
