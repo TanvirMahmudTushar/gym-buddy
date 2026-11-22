@@ -19,7 +19,7 @@ from app.models import (
     utc_today,
 )
 from app.request_info import Client
-from app.services import activity_service, profile_service
+from app.services import activity_service, group_service, profile_service
 from app.services.search import contains_any
 
 # expiring_soon is a part of active: memberships that end today or within the next EXPIRING_SOON_DAYS days.
@@ -167,6 +167,8 @@ def _check_deletable(member: User) -> None:
 
 def _delete_accounts(session: Session, ids: list[int]) -> int:
     """Delete these accounts and what belongs to them. The caller commits."""
+    # Their groups and workouts (group_service.delete_for_accounts() says what is kept).
+    group_service.delete_for_accounts(session, ids)
     # Sessions, check-ins and bookings go first: the database cascades too, but SQLite does not enforce that by default.
     session.exec(delete(AuthSession).where(col(AuthSession.user_id).in_(ids)))
     session.exec(delete(CheckIn).where(col(CheckIn.member_id).in_(ids)))

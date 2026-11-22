@@ -14,12 +14,14 @@ from app.routers import (
     auth,
     check_ins,
     classes,
+    groups,
     members,
     overview,
     payments,
     plans,
     trainers,
     users,
+    workouts,
 )
 from app.services.announcement_service import AnnouncementNotFoundError
 from app.services.auth_service import (
@@ -50,6 +52,14 @@ from app.services.member_service import (
     MemberNotFoundError,
     NoMembershipError,
 )
+from app.services.group_service import (
+    AlreadyInGroupError,
+    GroupAccountNotFoundError,
+    GroupMemberNotFoundError,
+    GroupNotFoundError,
+    GroupOwnerError,
+    GroupPermissionError,
+)
 from app.services.payment_service import PaymentNotFoundError
 from app.services.profile_service import IncompleteEmergencyContactError
 from app.services.session_service import SessionNotFoundError
@@ -59,6 +69,7 @@ from app.services.user_service import (
     CannotResetPasswordError,
     UserNotFoundError,
 )
+from app.services.workout_service import AssigneeNotInGroupError, NotGroupWorkoutError, WorkoutNotFoundError
 
 logger = logging.getLogger("gym_buddy")
 
@@ -82,6 +93,8 @@ app.include_router(overview.router)
 app.include_router(trainers.router)
 app.include_router(announcements.router)
 app.include_router(activity.router)
+app.include_router(workouts.router)
+app.include_router(groups.router)
 
 # Run at import (not in a lifespan hook) so it also works on Vercel's serverless functions.
 create_db_and_tables()
@@ -141,6 +154,13 @@ _plain_error(NotYourClassError, 403, "You can only see the bookings of the class
 _plain_error(PaymentNotFoundError, 404, "Payment not found")
 _plain_error(AnnouncementNotFoundError, 404, "Announcement not found")
 _plain_error(SessionNotFoundError, 404, "Session not found")
+_plain_error(WorkoutNotFoundError, 404, "Workout not found")
+_plain_error(NotGroupWorkoutError, 400, "Only a group workout can be assigned")
+_plain_error(AssigneeNotInGroupError, 422, "user_id: pick someone in this workout's group")
+_plain_error(GroupNotFoundError, 404, "Group not found")
+_plain_error(GroupAccountNotFoundError, 422, "No account has that email. Ask the person to sign up first.")
+_plain_error(AlreadyInGroupError, 409, "That account is already in this group")
+_plain_error(GroupMemberNotFoundError, 404, "That account is not a member of this group")
 _plain_error(
     IncompleteEmergencyContactError,
     422,
@@ -181,6 +201,17 @@ async def account_banned(request: Request, exc: AccountBannedError) -> JSONRespo
 
 @app.exception_handler(CannotResetPasswordError)
 async def cannot_reset_password(request: Request, exc: CannotResetPasswordError) -> JSONResponse:
+    return JSONResponse(status_code=400, content={"detail": str(exc)})
+
+
+# The message says which group permission is missing, or what the owner cannot have done to them.
+@app.exception_handler(GroupPermissionError)
+async def group_permission(request: Request, exc: GroupPermissionError) -> JSONResponse:
+    return JSONResponse(status_code=403, content={"detail": str(exc)})
+
+
+@app.exception_handler(GroupOwnerError)
+async def group_owner(request: Request, exc: GroupOwnerError) -> JSONResponse:
     return JSONResponse(status_code=400, content={"detail": str(exc)})
 
 

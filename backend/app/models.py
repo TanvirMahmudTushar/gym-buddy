@@ -874,3 +874,198 @@ class FailedLoginWindow(SQLModel):
 class SecuritySummary(SQLModel):
     last_24_hours: FailedLoginWindow
     last_7_days: FailedLoginWindow
+
+
+# --- Workouts and training groups (final spec 2.2) ---
+
+WorkoutTitle = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
+# Optional free text: trimmed, and blank becomes null.
+WorkoutNotes = Annotated[Annotated[str, StringConstraints(max_length=1000)] | None, BeforeValidator(_blank_to_none)]
+GroupName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
+EARLIEST_WORKOUT_DATE = date(2000, 1, 1)
+# A workout can be planned up to a year ahead.
+WORKOUT_DAYS_AHEAD = 365
+
+
+def _check_workout_date(value: date | None) -> date | None:
+    if value is not None:
+        latest = date.fromordinal(utc_today().toordinal() + WORKOUT_DAYS_AHEAD)
+        if not EARLIEST_WORKOUT_DATE <= value <= latest:
+            raise ValueError(f"workout_date must be between {EARLIEST_WORKOUT_DATE.isoformat()} and a year from today")
+    return value
+
+
+class TrainingGroup(SQLModel, table=True):
+    """A group that shares workouts. Its owner holds every group permission (app/rbac.py) and is not a row in
+    group_member; the other people in it are."""
+
+    __tablename__ = "training_group"
+
+    id: int | None = Field(default=None, primary_key=True)
+    name: str = Field(max_length=100)
+    owner_id: int = Field(foreign_key="app_user.id", ondelete="CASCADE", index=True)
+    created_at: datetime = Field(default_factory=utc_now)
+
+
+class GroupMember(SQLModel, table=True):
+    """Someone the owner added to a group, with the permissions the owner ticked for them. Every member can read the
+    group's workouts; the three flags allow more."""
+
+    __tablename__ = "group_member"
+
+    group_id: int = Field(foreign_key="training_group.id", ondelete="CASCADE", primary_key=True)
+    user_id: int = Field(foreign_key="app_user.id", ondelete="CASCADE", primary_key=True, index=True)
+    can_create: bool = False
+    can_update: bool = False
+    can_assign: bool = False
+    added_at: datetime = Field(default_factory=utc_now)
+
+
+class Workout(SQLModel, table=True):
+    """A workout. Without a group it is personal: only its owner can see it. In a group, the group's members see it
+    and their group permissions decide who may add, edit and assign it."""
+
+    __tablename__ = "workout"
+
+    id: int | None = Field(default=None, primary_key=True)
+    # Who added it. A personal workout is deleted with its owner's account; a group workout stays, with no owner.
+    owner_id: int | None = Field(default=None, foreign_key="app_user.id", ondelete="SET NULL", index=True)
+    group_id: int | None = Field(default=None, foreign_key="training_group.id", ondelete="CASCADE", index=True)
+    title: str = Field(max_length=100)
+    workout_date: date
+    notes: str | None = Field(default=None, max_length=1000)
+    # Only on a group workout: the group member (or the owner) it is for.
+    assigned_to: int | None = Field(default=None, foreign_key="app_user.id", ondelete="SET NULL", index=True)
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+
+
+class WorkoutCreate(SQLModel):
+    title: WorkoutTitle
+    workout_date: date
+    notes: WorkoutNotes = None
+    # Set to add it to that group (needs the create permission there); left out, the workout is personal.
+    group_id: AccountId | None = None
+    # A member of that group to assign it to (needs the assign permission too).
+    assigned_to: AccountId | None = None
+
+    @field_validator("workout_date")
+    @classmethod
+    def date_in_range(cls, value: date) -> date:
+        return _check_workout_date(value)
+
+    @model_validator(mode="after")
+    def assign_only_in_group(self) -> "WorkoutCreate":
+        if self.assigned_to is not None and self.group_id is None:
+            raise ValueError("assigned_to needs a group_id: only a group workout can be assigned")
+        return self
+
+
+class WorkoutUpdate(SQLModel):
+    """Only the fields sent change. The group cannot change, and assigning has its own endpoint and permission."""
+
+    title: WorkoutTitle | None = None
+    workout_date: date | None = None
+    notes: WorkoutNotes = None
+
+    @field_validator("workout_date")
+    @classmethod
+    def date_in_range(cls, value: date | None) -> date | None:
+        return _check_workout_date(value)
+
+    @model_validator(mode="after")
+    def check_required_not_null(self) -> "WorkoutUpdate":
+        # These columns are NOT NULL, so they may be left out but not sent as null.
+        for name in ("title", "workout_date"):
+            if name in self.model_fields_set and getattr(self, name) is None:
+                raise ValueError(f"{name} cannot be null")
+        return self
+
+
+class WorkoutAssign(SQLModel):
+    # Required: a member of the workout's group (or its owner), or null to unassign.
+    user_id: AccountId | None
+
+
+class WorkoutRead(SQLModel):
+    id: int
+    title: str
+    workout_date: date
+    notes: str | None
+    group_id: int | None
+    group_name: str | None
+    # Who added it; null once that account is deleted.
+    owner_id: int | None
+    owner_name: str | None
+    assigned_to: int | None
+    assigned_to_name: str | None
+    created_at: UtcDateTime
+    updated_at: UtcDateTime
+
+
+class WorkoutPage(SQLModel):
+    items: list[WorkoutRead]
+    total: int
+    offset: int
+    limit: int
+
+
+class GroupCreate(SQLModel):
+    name: GroupName
+
+
+class GroupRead(SQLModel):
+    id: int
+    name: str
+    owner_id: int
+    owner_name: str
+    created_at: UtcDateTime
+    # The owner included.
+    member_count: int
+    workout_count: int
+    # What the caller may do in this group (rbac.GroupPermission values), for the app's buttons.
+    my_permissions: list[str]
+
+
+class GroupPage(SQLModel):
+    items: list[GroupRead]
+    total: int
+    offset: int
+    limit: int
+
+
+class GroupMemberAdd(SQLModel):
+    """The owner adds an existing account by its email (there are no invitations)."""
+
+    email: EmailStr
+    can_create: bool = False
+    can_update: bool = False
+    can_assign: bool = False
+
+
+class GroupMemberUpdate(SQLModel):
+    """Only the permissions sent change."""
+
+    can_create: bool | None = None
+    can_update: bool | None = None
+    can_assign: bool | None = None
+
+    @model_validator(mode="after")
+    def check_not_null(self) -> "GroupMemberUpdate":
+        for name in ("can_create", "can_update", "can_assign"):
+            if name in self.model_fields_set and getattr(self, name) is None:
+                raise ValueError(f"{name} cannot be null")
+        return self
+
+
+class GroupMemberRead(SQLModel):
+    user_id: int
+    name: str
+    # Only the group's owner sees the members' emails.
+    email: str | None
+    is_owner: bool
+    can_create: bool
+    can_update: bool
+    can_assign: bool
+    # When they were added; for the owner, when the group was made.
+    added_at: UtcDateTime
