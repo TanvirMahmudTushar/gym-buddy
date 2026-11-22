@@ -143,6 +143,8 @@ backend/
       trainers.py      # /api/v1/trainers (list: gym manager, admin) and /trainers/me/classes (trainer)
       announcements.py # /api/v1/announcements (read the current ones: anyone logged in; post, edit, delete and ended ones: gym manager, admin)
       activity.py      # /api/v1/admin/activity (list, CSV export, security view: admin)
+      workouts.py      # /api/v1/workouts (my workouts, assigned to me, add, read, edit, assign, delete: anyone logged in, by group permission)
+      groups.py        # /api/v1/groups (my groups, start, read, rename, delete, a group's workouts and members)
       classes.py       # (Beta) /api/v1/classes/* (classes and bookings)
     services/
       __init__.py
@@ -160,6 +162,8 @@ backend/
       announcement_service.py # post, list (current or all, newest first, with the poster's name), edit, delete; raises AnnouncementNotFoundError
       activity_service.py # the activity log: record() (called by the other services), list, CSV export, failed-login summary (section 10.5)
       csv_export.py      # the CSV writer the payments and activity exports share: byte order mark, formula-safe cells, UTC times
+      group_service.py   # training groups: access() and require() on rbac.group_permissions(), list with counts, members, delete_for_accounts(); raises GroupNotFoundError / GroupPermissionError / GroupOwnerError
+      workout_service.py # personal and group workouts: lists, add, edit, assign, delete; raises WorkoutNotFoundError / NotGroupWorkoutError / AssigneeNotInGroupError
   alembic/             # (Beta) migration scripts
   alembic.ini          # (Beta)
   requirements.txt
@@ -169,7 +173,7 @@ frontend/
     components/        # add form, member list, details panel
     context/           # AuthContext: who is logged in, login / signup / logout; restores the login with a refresh on load
     layouts/           # AppLayout: header, and the pages each role may open
-    pages/             # HomePage (members), LoginPage, SignupPage, AccountPage, DashboardPage (admin), OverviewPage (gym manager, admin), UsersPage (admin), ClassesPage (gym manager, admin), PaymentsPage (gym manager, admin), MembershipPage and TimetablePage (user), MyClassesPage (trainer), PlansPage (admin), AnnouncementsPage (gym manager, admin), ActivityPage and SecurityPage (admin); (Later) AboutPage, MemberDetailsPage; (Beta, Could) MyMembership, Classes, AdminDashboard
+    pages/             # HomePage (members), LoginPage, SignupPage, AccountPage, DashboardPage (admin), OverviewPage (gym manager, admin), UsersPage (admin), ClassesPage (gym manager, admin), PaymentsPage (gym manager, admin), MembershipPage and TimetablePage (user), MyClassesPage (trainer), PlansPage (admin), AnnouncementsPage (gym manager, admin), ActivityPage and SecurityPage (admin), WorkoutsPage and GroupsPage (everyone; GroupsPage shows one group with `#/groups?group=ID`); (Later) AboutPage, MemberDetailsPage; (Beta, Could) MyMembership, Classes, AdminDashboard
     services/          # fetch calls to the API; api.ts keeps the access token in memory and refreshes it once on a 401
     types/             # TypeScript types
     utils/             # display helpers; membersLink() builds the #/members?filter=&member= address
@@ -370,7 +374,46 @@ Voiding is a conditional `UPDATE ... WHERE voided_at IS NULL`, so voiding twice 
 
 `member_service._delete_accounts()` sets `actor_id` and `target_id` to null before deleting an account (SQLite does not enforce `on delete set null`); the copied emails keep the rows readable.
 
-Indexes: `member(user_id)`, `class_booking(member_id)`, `check_in(member_id, checked_in_at)`, `gym_class(starts_at)`, `gym_class(trainer_id)`, `announcement(posted_at)`, `auth_session(user_id)`, `auth_session(token_hash)` (unique), `auth_session(previous_token_hash)`, `activity_log(created_at)`, `activity_log(event)`, `activity_log(actor_id)`, `activity_log(target_id)`.
+**`training_group`**
+
+> Built so far: all columns and the `owner_id` index. New tables (`training_group`, `group_member`, `workout`), so `create_all()` makes them on start.
+
+| Column | Type | Rules |
+|---|---|---|
+| `id` | integer | Primary key |
+| `name` | varchar(100) | Not null, 1–100 characters after trimming |
+| `owner_id` | integer | FK → `app_user.id`, on delete cascade, indexed (`ix_training_group_owner_id`). The owner holds every group permission and has no `group_member` row |
+| `created_at` | timestamp (UTC) | Not null |
+
+**`group_member`** (the people the owner added, and what each may do)
+
+| Column | Type | Rules |
+|---|---|---|
+| `group_id` | integer | PK part, FK → `training_group.id`, on delete cascade |
+| `user_id` | integer | PK part, FK → `app_user.id`, on delete cascade, indexed (`ix_group_member_user_id`: "my groups") |
+| `can_create` | boolean | Default false: add workouts to the group |
+| `can_update` | boolean | Default false: edit and delete the group's workouts |
+| `can_assign` | boolean | Default false: assign the group's workouts |
+| `added_at` | timestamp (UTC) | Not null |
+
+The composite primary key stops the same account being added twice, even by two requests at once (`409`).
+
+**`workout`**
+
+| Column | Type | Rules |
+|---|---|---|
+| `id` | integer | Primary key |
+| `owner_id` | integer | FK → `app_user.id`, nullable, on delete set null, indexed: who added it. A personal workout is deleted with its owner's account (by the service); a group workout stays with `null` |
+| `group_id` | integer | FK → `training_group.id`, nullable, on delete cascade, indexed. `null` = personal: only the owner can see it. Cannot change after creation |
+| `title` | varchar(100) | Not null, 1–100 characters after trimming |
+| `workout_date` | date | Not null, 2000-01-01 to today + 365 days when sent |
+| `notes` | varchar(1000) | Nullable; blank text becomes null |
+| `assigned_to` | integer | FK → `app_user.id`, nullable, on delete set null, indexed. Only on a group workout, and only someone in that group (the owner or a member) |
+| `created_at`, `updated_at` | timestamp (UTC) | Not null; `updated_at` changes on every edit and assignment |
+
+`group_service.delete_for_accounts()` runs inside `member_service._delete_accounts()`: it deletes the account's own groups (their workouts and members first), its `group_member` rows and its personal workouts, and sets `owner_id` and `assigned_to` to null on the group workouts that remain. Deleting a group, and leaving one, delete or update the dependent rows in the service too, since SQLite does not enforce the cascades by default.
+
+Indexes: `member(user_id)`, `class_booking(member_id)`, `check_in(member_id, checked_in_at)`, `gym_class(starts_at)`, `gym_class(trainer_id)`, `announcement(posted_at)`, `auth_session(user_id)`, `auth_session(token_hash)` (unique), `auth_session(previous_token_hash)`, `activity_log(created_at)`, `activity_log(event)`, `activity_log(actor_id)`, `activity_log(target_id)`, `training_group(owner_id)`, `group_member(user_id)`, `workout(owner_id)`, `workout(group_id)`, `workout(assigned_to)`.
 
 ```mermaid
 erDiagram
@@ -380,6 +423,12 @@ erDiagram
     APP_USER |o--o{ GYM_CLASS : teaches
     APP_USER |o--o{ ANNOUNCEMENT : posts
     APP_USER |o--o{ ACTIVITY_LOG : "acts in / is acted on"
+    APP_USER ||--o{ TRAINING_GROUP : owns
+    TRAINING_GROUP ||--o{ GROUP_MEMBER : has
+    APP_USER ||--o{ GROUP_MEMBER : "is in"
+    TRAINING_GROUP |o--o{ WORKOUT : shares
+    APP_USER |o--o{ WORKOUT : adds
+    APP_USER |o--o{ WORKOUT : "is assigned"
     MEMBER ||--o{ CLASS_BOOKING : books
     GYM_CLASS ||--o{ CLASS_BOOKING : has
     MEMBER ||--o{ CHECK_IN : has
@@ -463,6 +512,29 @@ erDiagram
         string ip
         string user_agent
     }
+    TRAINING_GROUP {
+        int id PK
+        string name
+        int owner_id FK
+        datetime created_at
+    }
+    GROUP_MEMBER {
+        int group_id PK
+        int user_id PK
+        bool can_create
+        bool can_update
+        bool can_assign
+        datetime added_at
+    }
+    WORKOUT {
+        int id PK
+        int owner_id FK
+        int group_id FK
+        string title
+        date workout_date
+        string notes
+        int assigned_to FK
+    }
 ```
 
 **Who can see a member record:**
@@ -515,6 +587,13 @@ erDiagram
 | `AnnouncementCreate` / `AnnouncementUpdate` | Post / edit an announcement | `title` (1–100), `message` (1–1,000), `ends_on?` (a date not before today, or null for none); all optional on update, where `title` and `message` cannot be null and a left-out `ends_on` keeps the end date | Beta |
 | `ActivityRead` / `ActivityPage` | Activity log | `id`, `created_at`, `event`, `actor_id?`, `actor_email?`, `target_id?`, `target_email?`, `details?`, `ip?`, `user_agent?`; page: `items`, `total`, `offset`, `limit` | Beta |
 | `ActivityFilter` | Query filters for the activity list and its CSV | `event?` (an `ActivityEvent`), `user_id?` (actor or target), `date_from?`, `date_to?` (UTC days, inclusive; `date_from` after `date_to` is `422`), `q?` (≤ 100: part of an email, the IP or the details) | Beta |
+| `WorkoutCreate` / `WorkoutUpdate` | Add / edit a workout | `title` (1–100), `workout_date` (2000-01-01 to today + 365), `notes?` (≤ 1,000, blank → null); create also `group_id?` and `assigned_to?` (needs `group_id`); update: all optional, `title` and `workout_date` not null | Beta |
+| `WorkoutAssign` | Assign a group workout | `user_id` (required; `null` unassigns) | Beta |
+| `WorkoutRead` / `WorkoutPage` | Workout responses and lists | `id`, `title`, `workout_date`, `notes?`, `group_id?`, `group_name?`, `owner_id?`, `owner_name?`, `assigned_to?`, `assigned_to_name?`, `created_at`, `updated_at`; page: `items`, `total`, `offset`, `limit` | Beta |
+| `GroupCreate` | Start or rename a group | `name` (1–100) | Beta |
+| `GroupRead` / `GroupPage` | Group responses and lists | `id`, `name`, `owner_id`, `owner_name`, `created_at`, `member_count` (owner included), `workout_count`, `my_permissions` (`read`, `create`, `update`, `assign`, `manage`) | Beta |
+| `GroupMemberAdd` / `GroupMemberUpdate` | Add someone / change their permissions | add: `email`, `can_create`, `can_update`, `can_assign` (default false); update: the three flags, optional, not null | Beta |
+| `GroupMemberRead` | A group's people | `user_id`, `name`, `email?` (owner's view only), `is_owner`, `can_create`, `can_update`, `can_assign`, `added_at` | Beta |
 | `SecuritySummary` | Security view | `last_24_hours`, `last_7_days`, each a `FailedLoginWindow`: `since`, `total`, `lockouts`, `by_ip [{ip?, count, accounts, last_at}]`, `by_account [{email, user_id?, count, ips, last_at}]` (10 of each) | Beta |
 | `AnnouncementRead` / `AnnouncementPage` | Announcement responses and lists | `id`, `title`, `message`, `ends_on?`, `posted_at`, `updated_at?` (null until edited), `posted_by_name?` (null once the poster's account is deleted); page: `items`, `total`, `offset`, `limit` | Beta |
 
@@ -672,6 +751,29 @@ Ban rules: banning is idempotent (banning a banned user changes nothing), an adm
 | `POST` | `/api/v1/announcements` | Gym Manager, Admin | `AnnouncementCreate` | `201` `AnnouncementRead` (`posted_by` = the caller) | `401`, `403`, `422` (empty title or message, too long, `ends_on` before today) | FR-72 |
 | `PATCH` | `/api/v1/announcements/{announcement_id}` | Gym Manager, Admin | `AnnouncementUpdate` | `200` `AnnouncementRead` (only the fields sent change; sets `updated_at`) | `401`, `403`, `404`, `422` | FR-74 |
 | `DELETE` | `/api/v1/announcements/{announcement_id}` | Gym Manager, Admin | — | `204` | `401`, `403`, `404` | FR-74 |
+
+**Workouts and training groups (anyone logged in; group permissions in section 10.3)**
+
+| Method | Path | Who | Body | Success | Errors | FR |
+|---|---|---|---|---|---|---|
+| `GET` | `/api/v1/workouts?offset&limit` | Any logged-in user | — | `200` `WorkoutPage` (my personal workouts, latest date first) | `401` | FR-90 |
+| `GET` | `/api/v1/workouts/assigned?offset&limit` | Any logged-in user | — | `200` `WorkoutPage` (group workouts assigned to me; declared before `/{workout_id}`) | `401` | FR-96 |
+| `POST` | `/api/v1/workouts` | Any logged-in user; `create` in the group | `WorkoutCreate` | `201` `WorkoutRead` | `403`, `404` (not in the group), `422` | FR-90, FR-93 |
+| `GET` | `/api/v1/workouts/{workout_id}` | Owner; `read` in the group | — | `200` `WorkoutRead` | `404` | FR-90, FR-93 |
+| `PATCH` | `/api/v1/workouts/{workout_id}` | Owner; `update` in the group | `WorkoutUpdate` | `200` `WorkoutRead` | `403`, `404`, `422` | FR-90, FR-93 |
+| `PUT` | `/api/v1/workouts/{workout_id}/assignee` | `assign` in the group | `WorkoutAssign` | `200` `WorkoutRead` | `400` (personal), `403`, `404`, `422` (not in the group) | FR-93 |
+| `DELETE` | `/api/v1/workouts/{workout_id}` | Owner; `update` in the group | — | `204` | `403`, `404` | FR-90, FR-93 |
+| `GET` | `/api/v1/groups?offset&limit` | Any logged-in user | — | `200` `GroupPage` (groups I own or am in, by name) | `401` | FR-91 |
+| `POST` | `/api/v1/groups` | Any logged-in user | `GroupCreate` | `201` `GroupRead` (I am the owner) | `401`, `422` | FR-91 |
+| `GET` | `/api/v1/groups/{group_id}` | `read` | — | `200` `GroupRead` | `404` | FR-91 |
+| `PATCH` / `DELETE` | `/api/v1/groups/{group_id}` | `manage` (owner) | `GroupCreate` / — | `200` `GroupRead` / `204` | `403`, `404`, `422` | FR-94 |
+| `GET` | `/api/v1/groups/{group_id}/workouts?offset&limit` | `read` | — | `200` `WorkoutPage` | `404` | FR-93 |
+| `GET` | `/api/v1/groups/{group_id}/members` | `read` | — | `200` `GroupMemberRead[]` (owner first, then by name; not paged) | `404` | FR-92 |
+| `POST` | `/api/v1/groups/{group_id}/members` | `manage` | `GroupMemberAdd` | `201` `GroupMemberRead` | `403`, `404`, `409`, `422` (no account) | FR-92 |
+| `PATCH` | `/api/v1/groups/{group_id}/members/{user_id}` | `manage` | `GroupMemberUpdate` | `200` `GroupMemberRead` | `400` (owner), `403`, `404` | FR-92, FR-95 |
+| `DELETE` | `/api/v1/groups/{group_id}/members/{user_id}` | `manage`; or the member themself (leave) | — | `204` (their assigned workouts in the group are unassigned) | `400` (owner), `403`, `404` | FR-92, FR-96 |
+
+Path ids above 2,147,483,647 (the 32-bit id columns) are refused with `422` before reaching the database.
 
 **Activity log and security (admin)**
 
@@ -891,8 +993,31 @@ def ban_user(user_id: int, session: SessionDep, admin: Banner, body: BanRequest 
 | `GET /admin/users` / `PATCH .../role` / `POST .../ban`, `.../unban` / `POST .../reset-password` | `users:read` / `users:change_role` / `users:ban` / `users:reset_password` |
 | `PUT /admin/plans/{plan}` | `plans:edit` |
 | `GET /admin/activity`, `GET /admin/activity/export.csv`, `GET /admin/activity/security` | `activity:read` |
+| `/workouts/*`, `/groups/*` | `CurrentUser`, then the group permissions below (`rbac.group_permissions()`) inside the service |
 
 Helpers: `has_permission(user, p)`; `roles_with(p)` for queries (the trainer list is every account whose role holds `classes:teach`); `is_owner(user, owner_id)` for records that belong to someone, where the caller answers `404` for a private record and `403` for a public one (a class). `rbac.py` imports `app.deps`, so nothing `app.deps` imports may import `rbac.py`.
+
+**Group permissions (training groups).** A second, per-group layer lives in the same module:
+
+```python
+class GroupPermission(str, Enum):
+    READ = "read"; CREATE = "create"; UPDATE = "update"; ASSIGN = "assign"; MANAGE = "manage"
+
+def group_permissions(user, owner_id, member: GroupMember | None) -> frozenset[GroupPermission]:
+    if is_owner(user, owner_id): return frozenset(GroupPermission)       # the owner: all five
+    if member is None: return frozenset()                                 # outsider: the caller answers 404
+    return {READ} | {CREATE if member.can_create} | {UPDATE if ...} | {ASSIGN if ...}
+```
+
+`group_service.access(session, user, group_id)` loads the group and the caller's `group_member` row, asks `group_permissions()`, and raises `GroupNotFoundError` (`404`) for an empty set; `group_service.require(permissions, p)` raises `GroupPermissionError` (`403`, naming the missing permission). Every group route and every group-workout action goes through these two, so the flags are read from the database on every request and a change applies on the member's next request. `workout_service._access()` treats a personal workout like a private record (`rbac.is_owner()`, else `404`) and a group workout through `access()`; an outsider's `GroupNotFoundError` becomes `WorkoutNotFoundError`, so a group workout's id does not show that it exists either. Deleting a group workout needs `update`; `PUT /workouts/{id}/assignee` needs `assign` and an assignee for whom `group_service.in_group()` is true. A member may call `DELETE /groups/{id}/members/{own id}` without `manage` (leave). `GroupRead.my_permissions` lists the caller's set in the enum's order for the app's buttons.
+
+| Action | Personal workout | Group workout / group |
+|---|---|---|
+| Read a workout, the group, its people, its workouts | owner, else `404` | `read`, else `404` |
+| Add a workout | anyone (their own) | `create` (and `assign` with `assigned_to`), else `403` |
+| Edit or delete a workout | owner, else `404` | `update`, else `403` |
+| Assign a workout | `400` | `assign`, else `403` |
+| Rename or delete the group; add, change or remove members | — | `manage`, else `403` (a member may remove themself) |
 
 Row-level rules that depend on the data are checked inside the route:
 - Own membership: query with `Member.user_id == user.id`; a member can never pass an id to read another member's record.

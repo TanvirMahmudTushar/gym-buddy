@@ -13,8 +13,8 @@ backend/          FastAPI app (routes under /api)
   app/deps.py     who is calling (token and session check)
   app/rbac.py     what each role may do: permission constants, the role → permission map, require_permission()
   app/request_info.py  where a request came from: client IP (X-Forwarded-For on Vercel) and browser
-  app/routers/    members.py, auth.py, users.py, admin.py, check_ins.py, classes.py, plans.py, payments.py, overview.py, trainers.py, announcements.py, activity.py: the endpoints (HTTP only)
-  app/services/   member_service.py, auth_service.py, session_service.py (logins and refresh tokens), user_service.py, checkin_service.py, class_service.py, payment_service.py, stats_service.py, revenue_service.py, announcement_service.py, activity_service.py (the activity log and the security view), csv_export.py (the CSV writer both exports share): rules and database queries
+  app/routers/    members.py, auth.py, users.py, admin.py, check_ins.py, classes.py, plans.py, payments.py, overview.py, trainers.py, announcements.py, activity.py, workouts.py, groups.py: the endpoints (HTTP only)
+  app/services/   member_service.py, auth_service.py, session_service.py (logins and refresh tokens), user_service.py, checkin_service.py, class_service.py, payment_service.py, stats_service.py, revenue_service.py, announcement_service.py, activity_service.py (the activity log and the security view), csv_export.py (the CSV writer both exports share), workout_service.py and group_service.py (workouts and training groups): rules and database queries
 frontend/         Vite + React + TypeScript, one page (src/pages/HomePage/index.tsx)
   src/components/ add form, member list, details panel
   src/context/    AuthContext.tsx: who is logged in
@@ -63,9 +63,19 @@ Everyone who signs up is a **User**. Only an admin can change a role.
 | `plans:edit` | Plan prices and lengths | | | | ✓ |
 | `activity:read` | The Activity and Security pages, and the activity CSV | | | | ✓ |
 
+**Group permissions.** Training groups add a second layer, per group, decided in the same module (`rbac.group_permissions()`). The owner holds all five; each member holds `read` plus the ones the owner ticked; anyone outside the group holds none and gets `404` for the group and its workouts, as if they did not exist. A member without the permission an action needs gets `403`. Every group response includes the caller's `my_permissions`, and the app shows only the buttons they allow.
+
+| Group permission | Allows | Owner | Member |
+|---|---|---|---|
+| `read` | See the group, its people and its workouts | ✓ | ✓ |
+| `create` | Add a workout to the group | ✓ | if **Add** is ticked (`can_create`) |
+| `update` | Edit or delete the group's workouts | ✓ | if **Edit** is ticked (`can_update`) |
+| `assign` | Assign a group workout to someone in the group | ✓ | if **Assign** is ticked (`can_assign`) |
+| `manage` | Rename or delete the group; add, remove and set the permissions of members | ✓ | |
+
 `GET /api/v1/users/me` (and the login and refresh responses) include the caller's `permissions`. The app builds its menu and page guards from them, so it shows exactly what the API allows. The two member pages, My membership and Classes, use only your-own-data endpoints and are shown to Users.
 
-Pages: `#/login`, `#/signup`, `#/dashboard` (Admin), `#/overview` (Gym Manager, Admin), `#/members` (Gym Manager, Admin), `#/classes` (Gym Manager, Admin), `#/payments` (Gym Manager, Admin), `#/announcements` (Gym Manager, Admin), `#/users` (Admin), `#/plans` (Admin), `#/activity` and `#/security` (Admin), `#/membership` and `#/timetable` (User), `#/my-classes` (Trainer), `#/account` (everyone). After logging in, an Admin lands on the Dashboard, a Gym Manager on the Overview, a Trainer on My classes and a User on My membership.
+Pages: `#/login`, `#/signup`, `#/dashboard` (Admin), `#/overview` (Gym Manager, Admin), `#/members` (Gym Manager, Admin), `#/classes` (Gym Manager, Admin), `#/payments` (Gym Manager, Admin), `#/announcements` (Gym Manager, Admin), `#/users` (Admin), `#/plans` (Admin), `#/activity` and `#/security` (Admin), `#/membership` and `#/timetable` (User), `#/my-classes` (Trainer), `#/workouts`, `#/groups` and `#/account` (everyone). After logging in, an Admin lands on the Dashboard, a Gym Manager on the Overview, a Trainer on My classes and a User on My membership.
 
 **Gym Manager features (also available to Admins)**
 - **Check in a member:** open a member on the Members page and click **Check in**. Frozen and expired members cannot be checked in (the page says why; renew or unfreeze first). The same member can check in more than once a day.
@@ -100,6 +110,12 @@ Pages: `#/login`, `#/signup`, `#/dashboard` (Admin), `#/overview` (Gym Manager, 
 **Trainer features**
 - **My classes:** the classes the trainer teaches, upcoming ones soonest first, with places booked; **Past** lists the classes that have started, latest first. **Who booked** lists the people booked on a class, in booking order (the next class opens with it showing). A trainer can read the bookings of their own classes only: any other class's bookings answer `403`. Trainers land here after logging in.
 - **Becoming a trainer:** an admin gives the **Trainer** role on the Users page; the person logs in again and a Gym Manager can then pick them for classes. If an admin changes a trainer's role, their classes keep their name as plain text and no longer show on their My classes.
+
+**Workouts and groups (everyone)**
+- **My workouts:** every logged-in person logs their own workouts on the **Workouts** page: a title, a date (from 2000 up to a year ahead, so the next sessions can be planned) and optional notes. Only they can see them: anyone else, even an admin, gets `404` for another person's workout. **Assigned to me** lists the group workouts someone assigned to them, with a link to each group.
+- **Training groups:** on the **Groups** page, anyone can start a group and becomes its owner. The owner adds people who have already signed up by their email (no invitations) and ticks what each one may do: **Add** workouts, **Edit** (and delete) them, **Assign** them to someone in the group. Ticking a box applies on that person's next request. Everyone in the group sees its workouts and its people; only the owner sees their emails.
+- **A group's page:** its workouts (latest date first) with the buttons the person's permissions allow, and the people table. Only the owner can rename or delete the group (which deletes its workouts) and add or remove people; a member can **Leave group**, which unassigns the workouts assigned to them. The owner cannot leave: they delete the group instead.
+- Deleting an account deletes the groups it owns and its personal workouts; workouts it added to other groups stay, without a name.
 
 **Admin features**
 - **Dashboard:** members (total, active, expired, frozen, new in the last 7 days, and **Expiring in 7 days**, which links to that list), check-ins (today, last 7 days), classes (total, upcoming) and accounts (total, users, trainers, gym managers, admins, banned).
@@ -189,6 +205,22 @@ Interactive docs: `/api/docs` (for example http://localhost:8000/api/docs).
 | Reset a password (admin) | `POST /api/v1/admin/users/{id}/reset-password` | `200` `{user, temporary_password}` (`Cache-Control: no-store`); the user's `must_change_password` is `true` until they choose a new one | `400` (yourself or another admin), `403`, `404` |
 | Activity log (admin) | `GET /api/v1/admin/activity?event=&user_id=&date_from=&date_to=&q=&offset=0&limit=50` (`user_id`: rows where that account acted or was acted on; `q`: part of an email, the IP address or the details) | `200` `{items, total, offset, limit}` of `{id, created_at, event, actor_id, actor_email, target_id, target_email, details, ip, user_agent}`, newest first | `401`, `403`, `422` (unknown event, or `date_from` after `date_to`) |
 | Export the activity log (admin) | `GET /api/v1/admin/activity/export.csv` with the same filters | `200` `text/csv` file `activity-YYYY-MM-DD.csv` (`Cache-Control: no-store`), the same rows as the list up to 10,000; the export is logged | `401`, `403`, `422` |
+| My workouts | `GET /api/v1/workouts?offset=0&limit=20` | `200` `{items, total, offset, limit}` of my personal workouts `{id, title, workout_date, notes, group_id, group_name, owner_id, owner_name, assigned_to, assigned_to_name, created_at, updated_at}`, latest date first | `401` |
+| Assigned to me | `GET /api/v1/workouts/assigned?offset=0&limit=20` | `200` the same shape: group workouts assigned to me | `401` |
+| Add a workout | `POST /api/v1/workouts` `{title, workout_date, notes?, group_id?, assigned_to?}` | `201` workout (personal without `group_id`) | `403` (no `create`, or `assigned_to` without `assign`), `404` (not in that group), `422` (bad date or text, `assigned_to` without a group or outside it) |
+| One workout | `GET /api/v1/workouts/{id}` | `200` workout | `404` (another person's personal workout, or a group I am not in) |
+| Edit a workout | `PATCH /api/v1/workouts/{id}` `{title?, workout_date?, notes?}` | `200` workout | `403` (group workout without `update`), `404`, `422` |
+| Assign a workout | `PUT /api/v1/workouts/{id}/assignee` `{"user_id": 5}` (`null` unassigns) | `200` workout | `400` (personal workout), `403` (no `assign`), `404`, `422` (not in the group) |
+| Delete a workout | `DELETE /api/v1/workouts/{id}` | `204` | `403` (group workout without `update`), `404` |
+| My groups | `GET /api/v1/groups?offset=0&limit=20` | `200` `{items, total, offset, limit}` of `{id, name, owner_id, owner_name, created_at, member_count, workout_count, my_permissions}`, by name | `401` |
+| Start a group | `POST /api/v1/groups` `{name}` | `201` group; I am its owner | `401`, `422` |
+| One group | `GET /api/v1/groups/{id}` | `200` group | `404` (not in it) |
+| Rename / delete a group | `PATCH /api/v1/groups/{id}` `{name}` / `DELETE /api/v1/groups/{id}` | `200` group / `204` (its workouts and members go too) | `403` (a member), `404` (not in it) |
+| A group's workouts | `GET /api/v1/groups/{id}/workouts?offset=0&limit=20` | `200` page of workouts, latest date first | `404` |
+| A group's people | `GET /api/v1/groups/{id}/members` | `200` list of `{user_id, name, email, is_owner, can_create, can_update, can_assign, added_at}`, owner first; `email` only for the owner | `404` |
+| Add someone (owner) | `POST /api/v1/groups/{id}/members` `{email, can_create?, can_update?, can_assign?}` | `201` member | `403`, `404`, `409` (already in the group), `422` (no account has the email) |
+| Change permissions (owner) | `PATCH /api/v1/groups/{id}/members/{user_id}` (only the flags sent) | `200` member | `400` (the owner's row), `403`, `404` |
+| Remove someone / leave | `DELETE /api/v1/groups/{id}/members/{user_id}` (my own id: leave) | `204`; their assigned workouts in the group become unassigned | `400` (the owner), `403` (a member removing someone else), `404` |
 | Security view (admin) | `GET /api/v1/admin/activity/security` | `200` `{last_24_hours, last_7_days}`, each `{since, total, lockouts, by_ip: [{ip, count, accounts, last_at}], by_account: [{email, user_id, count, ips, last_at}]}` (10 of each, the most first) | `401`, `403` |
 
 - Every `/api/v1/members` endpoint needs `Authorization: Bearer <access_token>` from a Gym Manager or Admin: `401` without a token, `403` for a User.
@@ -249,7 +281,7 @@ vercel dev -L
 2. **Connect** → **Transaction pooler** → copy the URI (port `6543`).
 3. In Vercel → Project → **Settings** → **Environment Variables**, add it as `DATABASE_URL`, then redeploy.
 
-The backend accepts `postgres://` or `postgresql://` URLs and creates the `app_user`, `auth_session`, `check_in`, `gym_class`, `class_booking`, `plan_price`, `payment`, `announcement` and `activity_log` tables on start (and fills `plan_price` with monthly 1,500 / 30 days, quarterly 4,000 / 90 days and yearly 14,000 / 365 days), and adds any columns an older table is missing (the ban and membership columns on `app_user`, `trainer_id` and its index on `gym_class`), keeping existing data.
+The backend accepts `postgres://` or `postgresql://` URLs and creates the `app_user`, `auth_session`, `check_in`, `gym_class`, `class_booking`, `plan_price`, `payment`, `announcement`, `activity_log`, `training_group`, `group_member` and `workout` tables on start (and fills `plan_price` with monthly 1,500 / 30 days, quarterly 4,000 / 90 days and yearly 14,000 / 365 days), and adds any columns an older table is missing (the ban and membership columns on `app_user`, `trainer_id` and its index on `gym_class`), keeping existing data.
 
 **Upgrading a database from before members became users:** on its first start the backend drops the old `member` table together with `check_in`, `class_booking` and `payment` (all of their rows are deleted) and creates the last three again, pointing at `app_user`. Accounts, classes and plan prices are kept. Staff then start memberships again for the people who need one. To use Supabase locally as well, set `DATABASE_URL` in your terminal before `fastapi dev main.py`.
 

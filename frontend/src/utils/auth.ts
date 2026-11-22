@@ -10,6 +10,9 @@ export const ROLES: { value: Role; label: string; description: string }[] = [
   { value: "admin", label: "Admin", description: "Everything a Gym Manager can do, plus managing users and roles, and reading the activity log." },
 ]
 
+
+
+
 export const roleLabel = (role: Role) => ROLES.find((r) => r.value === role)?.label ?? role
 
 /** True when the logged-in person's role holds this permission. */
@@ -31,6 +34,8 @@ export type ProtectedPage =
   | "users"
   | "activity"
   | "security"
+  | "workouts"
+  | "groups"
 
 /** What each page needs: the permission of the API calls it makes. */
 const PAGE_ACCESS: Record<ProtectedPage, (user: Me) => boolean> = {
@@ -46,6 +51,10 @@ const PAGE_ACCESS: Record<ProtectedPage, (user: Me) => boolean> = {
   activity: (u) => can(u, "activity:read"),
   security: (u) => can(u, "activity:read"),
   account: () => true,
+  // Workouts and groups are about the caller's own data and groups: any login. Inside a group, the buttons follow
+  // the caller's group permissions (my_permissions), which the API checks again on every request.
+  workouts: () => true,
+  groups: () => true,
   // The member pages call only endpoints about the caller's own account, which any login may use, so no
   // permission is involved. They are laid out for gym members, so they are shown to the User role.
   membership: (u) => u.role === "user",
