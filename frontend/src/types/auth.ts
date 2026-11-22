@@ -1,4 +1,5 @@
 // Account types matching the FastAPI schemas (TDD 5.3).
+import type { ActivityEntry } from "./activity"
 import type { Plan } from "./member"
 
 export type Role = "user" | "trainer" | "gym_manager" | "admin"
@@ -20,6 +21,8 @@ export type Permission =
   | "users:change_role"
   | "users:ban"
   | "users:reset_password"
+  | "users:revoke_sessions"
+  | "users:export"
   | "plans:edit"
   | "activity:read"
 
@@ -100,7 +103,54 @@ export interface AdminUserPage {
 
 export interface AdminStats {
   members: { total: number; active: number; expired: number; frozen: number; new_last_7_days: number; expiring_soon: number }
-  users: { total: number; users: number; trainers: number; gym_managers: number; admins: number; banned: number }
+  users: { total: number; users: number; trainers: number; gym_managers: number; admins: number; banned: number; new_last_7_days: number }
   check_ins: { today: number; last_7_days: number }
   classes: { total: number; upcoming: number }
+  workouts: { total: number; last_7_days: number }
+  groups: { total: number }
+}
+
+/** The admin user list's filters; the CSV export uses the same ones. Empty means any. */
+export interface UserFilters {
+  q: string
+  role: Role | ""
+  status: "active" | "banned" | ""
+}
+
+/** An id a bulk ban or unban left alone, and why. name is null when no account has the id. */
+export interface SkippedUser {
+  id: number
+  name: string | null
+  reason: string
+}
+
+export interface BulkBanResult {
+  banned: number[]
+  skipped: SkippedUser[]
+}
+
+export interface BulkUnbanResult {
+  unbanned: number[]
+  skipped: SkippedUser[]
+}
+
+/** One of a user's active logins, as an admin sees it. */
+export interface AdminSession {
+  id: number
+  created_at: string
+  last_used_at: string
+  expires_at: string
+  ip: string | null
+  user_agent: string | null
+}
+
+/** GET /admin/users/{id}: the account and membership, logins, workout counts (not their content), groups, activity. */
+export interface AdminUserDetail extends AdminUser {
+  joined_on: string | null
+  /** Set while too many wrong passwords block the account's logins. */
+  locked_until: string | null
+  sessions: AdminSession[]
+  workouts: { personal: number; in_groups: number; assigned: number }
+  groups: { id: number; name: string; is_owner: boolean; member_count: number }[]
+  recent_activity: ActivityEntry[]
 }

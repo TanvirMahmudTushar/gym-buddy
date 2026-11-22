@@ -88,10 +88,20 @@ export default function DashboardPage() {
               <Stat label="Gym Managers" value={stats.users.gym_managers} />
               <Stat label="Admins" value={stats.users.admins} />
               <Stat label="Banned" value={stats.users.banned} alert />
+              <Stat label="New in the last 7 days" value={stats.users.new_last_7_days} />
             </dl>
             <p className="hint">
               <a href="#/users">Manage users and roles</a>
             </p>
+          </section>
+          <section className="card" aria-labelledby="stats-workouts">
+            <h2 id="stats-workouts">Workouts and groups</h2>
+            <dl className="stats">
+              <Stat label="Workouts" value={stats.workouts.total} />
+              <Stat label="Added in the last 7 days" value={stats.workouts.last_7_days} />
+              <Stat label="Training groups" value={stats.groups.total} />
+            </dl>
+            <p className="hint">Counts only: workouts stay private to their owners and groups.</p>
           </section>
         </>
       )}

@@ -1,23 +1,31 @@
-# Admin endpoints under /api/v1/admin: stats, revenue, user list, roles, ban / unban, plan prices (TDD 6.2).
+# Admin endpoints under /api/v1/admin: stats, revenue, users (list, details, CSV, roles, ban / unban one or many,
+# password reset, ending their sessions), plan prices (TDD 6.2).
 # Each route names its permission (app/rbac.py); only the Admin role holds them, so everyone else gets 403.
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, Response
+from fastapi import APIRouter, Depends, Path, Query, Response
 
 from app.database import SessionDep
 from app.models import (
     AdminStats,
+    AdminUserDetail,
     AdminUserPage,
     AdminUserRead,
     BanRequest,
+    BulkBanResult,
+    BulkUnbanResult,
+    BulkUserAction,
     PasswordResetResult,
     Plan,
     PlanPrice,
     PlanRead,
     PlanUpdate,
     RevenueStats,
+    SessionsRevoked,
     User,
+    UserFilter,
     UserRoleUpdate,
+    utc_today,
 )
 from app.rbac import Permission, require_permission
 from app.request_info import ClientDep
@@ -33,6 +41,11 @@ EDIT_PLANS = Depends(require_permission(Permission.PLANS_EDIT))
 RoleChanger = Annotated[User, Depends(require_permission(Permission.USERS_CHANGE_ROLE))]
 Banner = Annotated[User, Depends(require_permission(Permission.USERS_BAN))]
 PasswordResetter = Annotated[User, Depends(require_permission(Permission.USERS_RESET_PASSWORD))]
+SessionRevoker = Annotated[User, Depends(require_permission(Permission.USERS_REVOKE_SESSIONS))]
+Exporter = Annotated[User, Depends(require_permission(Permission.USERS_EXPORT))]
+UserFilters = Annotated[UserFilter, Query()]
+# The id column is a 32-bit integer, so a larger id is refused as invalid instead of reaching the database.
+UserId = Annotated[int, Path(ge=1, le=2_147_483_647)]
 
 
 @router.get("/stats", response_model=AdminStats, dependencies=[READ_DASHBOARD])
@@ -50,13 +63,59 @@ def get_revenue(session: SessionDep) -> dict:
 @router.get("/users", response_model=AdminUserPage, dependencies=[READ_USERS])
 def list_users(
     session: SessionDep,
+    filters: UserFilters,
     offset: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
-    q: Annotated[str | None, Query(max_length=100)] = None,
 ) -> dict:
-    """Newest first, each with their membership. q finds users by part of the name or email."""
-    items, total = user_service.list_users(session, offset, limit, (q or "").strip() or None)
+    """Newest first, each with their membership. q (part of the name or email), role and status (active or banned)
+    combine with each other and with paging."""
+    items, total = user_service.list_users(session, filters, offset, limit)
     return {"items": items, "total": total, "offset": offset, "limit": limit}
+
+
+# The fixed paths below are declared before /users/{user_id}, so "export.csv" is never read as an id.
+@router.get(
+    "/users/export.csv",
+    response_class=Response,
+    responses={200: {"content": {"text/csv": {}}, "description": "The matching users as CSV"}},
+)
+def export_users(session: SessionDep, filters: UserFilters, admin: Exporter, client: ClientDep) -> Response:
+    """Needs users:export. The same filters and order as the list, every matching user. The download is logged."""
+    filename = f"users-{utc_today().isoformat()}.csv"
+    return Response(
+        content=user_service.export_csv(session, filters, admin, client),
+        media_type="text/csv; charset=utf-8",
+        # Names and emails: no cache on the way may keep a copy.
+        headers={"Content-Disposition": f'attachment; filename="{filename}"', "Cache-Control": "no-store"},
+    )
+
+
+@router.post("/users/bulk-ban", response_model=BulkBanResult)
+def bulk_ban(body: BulkUserAction, session: SessionDep, admin: Banner, client: ClientDep) -> dict:
+    """Bans up to 100 accounts in one transaction, each with the reason, and ends their sessions. Yourself, admins,
+    accounts already banned and unknown ids are skipped and listed with why; the rest are still banned."""
+    return user_service.bulk_ban(session, admin, body.ids, body.reason, client)
+
+
+@router.post("/users/bulk-unban", response_model=BulkUnbanResult)
+def bulk_unban(body: BulkUserAction, session: SessionDep, admin: Banner, client: ClientDep) -> dict:
+    """Unbans up to 100 accounts in one transaction. Accounts that are not banned and unknown ids are skipped and
+    listed. The reason is written to the activity log."""
+    return user_service.bulk_unban(session, admin, body.ids, body.reason, client)
+
+
+@router.get("/users/{user_id}", response_model=AdminUserDetail, dependencies=[READ_USERS])
+def get_user_detail(user_id: UserId, session: SessionDep) -> dict:
+    """The account and membership, its active sessions, how many workouts it has (not their content), its groups
+    and its 10 newest activity rows."""
+    return user_service.user_detail(session, user_id)
+
+
+@router.post("/users/{user_id}/revoke-sessions", response_model=SessionsRevoked)
+def revoke_sessions(user_id: UserId, session: SessionDep, admin: SessionRevoker, client: ClientDep) -> dict:
+    """Ends every active session of the account: its next request gets 401, so the app shows Log in. Not for your
+    own account (400; use My account)."""
+    return {"revoked": user_service.revoke_sessions(session, admin, user_id, client)}
 
 
 @router.patch("/users/{user_id}/role", response_model=AdminUserRead)

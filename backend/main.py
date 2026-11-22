@@ -67,6 +67,7 @@ from app.services.user_service import (
     CannotBanError,
     CannotChangeOwnRoleError,
     CannotResetPasswordError,
+    CannotRevokeOwnSessionsError,
     UserNotFoundError,
 )
 from app.services.workout_service import AssigneeNotInGroupError, NotGroupWorkoutError, WorkoutNotFoundError
@@ -154,6 +155,7 @@ _plain_error(NotYourClassError, 403, "You can only see the bookings of the class
 _plain_error(PaymentNotFoundError, 404, "Payment not found")
 _plain_error(AnnouncementNotFoundError, 404, "Announcement not found")
 _plain_error(SessionNotFoundError, 404, "Session not found")
+_plain_error(CannotRevokeOwnSessionsError, 400, "Log out your own sessions on My account")
 _plain_error(WorkoutNotFoundError, 404, "Workout not found")
 _plain_error(NotGroupWorkoutError, 400, "Only a group workout can be assigned")
 _plain_error(AssigneeNotInGroupError, 422, "user_id: pick someone in this workout's group")

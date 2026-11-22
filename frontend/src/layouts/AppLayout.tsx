@@ -16,6 +16,8 @@ const LINKS: { page: ProtectedPage; label: string }[] = [
   { page: "membership", label: "My membership" },
   { page: "timetable", label: "Classes" },
   { page: "my-classes", label: "My classes" },
+  { page: "workouts", label: "Workouts" },
+  { page: "groups", label: "Groups" },
   { page: "account", label: "My account" },
 ]
 

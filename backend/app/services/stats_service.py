@@ -4,8 +4,11 @@ from datetime import timedelta
 from sqlmodel import Session, col, func, select
 
 from app.models import User, utc_now, utc_today
-from app.services import checkin_service, class_service, payment_service
+from app.services import checkin_service, class_service, group_service, payment_service, workout_service
 from app.services.member_service import IS_MEMBER, WAITING, status_filters
+
+# "New" and "last 7 days" on the dashboard: a rolling week back from now.
+WEEK = timedelta(days=7)
 
 # How many of the next classes the overview shows.
 NEXT_CLASSES = 5
@@ -32,6 +35,7 @@ def member_stats(session: Session) -> dict:
 def user_stats(session: Session) -> dict:
     by_role = dict(session.exec(select(User.role, func.count()).group_by(User.role)).all())
     banned = session.exec(select(func.count()).select_from(User).where(col(User.is_banned).is_(True))).one()
+    new = session.exec(select(func.count()).select_from(User).where(col(User.created_at) >= utc_now() - WEEK)).one()
     return {
         "total": sum(by_role.values()),
         "users": by_role.get("user", 0),
@@ -39,6 +43,7 @@ def user_stats(session: Session) -> dict:
         "gym_managers": by_role.get("gym_manager", 0),
         "admins": by_role.get("admin", 0),
         "banned": banned,
+        "new_last_7_days": new,
     }
 
 
@@ -55,6 +60,8 @@ def admin_stats(session: Session) -> dict:
         "users": user_stats(session),
         "check_ins": check_in_stats(session),
         "classes": class_service.class_stats(session),
+        "workouts": workout_service.workout_stats(session, utc_now() - WEEK),
+        "groups": {"total": group_service.count_groups(session)},
     }
 
 

@@ -1041,3 +1041,15 @@ input.search {
   color: var(--muted);
   border: 1px solid var(--line);
 }
+
+/* Workouts: the Assign to list next to a workout's buttons. */
+.inline-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.inline-select select {
+  width: auto;
+  padding: 5px 8px;
+}

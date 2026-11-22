@@ -232,8 +232,14 @@ Every Admin is also a logged-in user, so they can log out, edit their profile an
 | FR-37 | A banned user shall get `403` ("Account banned") on login and on every authenticated request, even with an access token that has not expired yet. | Beta | US-21 |
 | FR-38 | An admin shall be able to unban a user; the user can then log in again. The user's linked membership and bookings are kept while banned. | Beta | US-22 |
 | FR-39 | The admin user list shall show each user's status (`active` / `banned`), ban date and ban reason. | Beta | US-21 |
+| FR-98 | An admin shall be able to filter the user list by `role` and by `status` (`active` / `banned`) together with the search (`q`) and pagination, and download the users matching the same filters as CSV (newest first, the FR-51 format). The download is recorded in the activity log. An unknown role or status gives `422`. | Beta | US-12 |
+| FR-99 | An admin shall be able to open one user's details: the account, membership and login lockout, their active sessions, how many workouts they have (personal, added to groups, assigned to them; counts only, never the content, FR-90), their groups (name, owner or member, size) and their 10 newest activity rows. | Beta | US-12 |
+| FR-100 | An admin shall be able to end every active session of another user; the user's next request gets `401` and their refresh cookie stops working. Their own account is refused (`400`). | Beta | US-21 |
+| FR-101 | An admin shall be able to ban or unban up to 100 users at once with one optional reason, in one transaction. The admin themself, other admins, accounts that are already banned (or, for an unban, not banned) and unknown ids are skipped and listed in the response with the reason; the others are banned or unbanned. | Beta | US-21, US-22 |
+| FR-102 | The dashboard shall also show the accounts created in the last 7 days, the number of workouts (in all and added in the last 7 days) and the number of training groups. | Beta | US-20 |
+| FR-103 | Every admin action on users that changes something (role change, ban and unban, one or many, password reset, ending sessions) and every users CSV download shall be written to the activity log (FR-85). | Beta | US-29 |
 
-> **Built so far (admin):** FR-35 with the member, check-in and user numbers (class numbers are `total` and `upcoming`), and FR-36 to FR-39; a ban revokes every session in the same transaction. An admin lands on the dashboard after logging in.
+> **Built so far (admin):** FR-35 with the member, check-in and user numbers (class numbers are `total` and `upcoming`), and FR-36 to FR-39; a ban revokes every session in the same transaction. An admin lands on the dashboard after logging in. FR-98 to FR-103 are built: the Users page filters, ticks users for a bulk ban or unban, exports CSV and opens a user's details (`#/users?user=ID`) with Log out everywhere.
 
 ### 3.6 Classes and bookings — Beta
 
@@ -375,6 +381,23 @@ Story US-29: as an admin, I want to see who did what to which account, from wher
 
 > **Built so far (activity log):** FR-84 to FR-89 and NFR-23, with the Activity and Security pages for admins (`activity:read`). Deleting old rows and email alerts are out of scope.
 
+### 3.7j Workouts and training groups — Beta
+
+Story US-30: as a member, I want to log my own workouts and share workouts in a training group where the owner decides what each person may do, so we can plan sessions together without anyone changing what they should not.
+
+| ID | Requirement | Release | Story |
+|---|---|---|---|
+| FR-90 | A logged-in user of any role shall be able to add, list, view, edit and delete their own personal workouts: `title` (1–100 characters after trimming), `workout_date` (from 2000-01-01 to a year from today, UTC) and optional `notes` (up to 1,000). Only the owner can read or change a personal workout; anyone else, whatever their role, gets `404`. | Beta | US-30 |
+| FR-91 | A logged-in user shall be able to start a training group (`name`, 1–100 characters) and becomes its owner, and list the groups they own or belong to, each with their own permissions in it (`my_permissions`). | Beta | US-30 |
+| FR-92 | The owner shall be able to add an existing account to the group by its email, with `can_create`, `can_update` and `can_assign` (`422` if no account has the email, `409` if it is already in the group), change those permissions, and remove a member. A member may leave the group. The owner cannot leave or lose a permission (`400`). Only the owner sees the members' emails. | Beta | US-30 |
+| FR-93 | Everyone in a group shall be able to read the group, its people and its workouts. `can_create` allows adding a workout to the group, `can_update` editing or deleting one, and `can_assign` assigning one to someone in the group or unassigning it (`422` for someone outside the group). The owner holds all three. A member without the permission gets `403`. | Beta | US-30 |
+| FR-94 | Only the owner shall be able to rename or delete the group and add, remove or change the permissions of members: other members get `403`. Anyone outside the group gets `404` for the group, its people, its workouts and each of its workouts. Deleting a group deletes its workouts and memberships. | Beta | US-30 |
+| FR-95 | The per-group permissions shall be worked out in the RBAC module (`rbac.group_permissions()`) and checked on the server on every request; a changed permission applies on the member's next request. The app shall show only the buttons the caller's `my_permissions` allow. | Beta | US-30 |
+| FR-96 | A user shall be able to list the group workouts assigned to them. Leaving or being removed from a group unassigns that group's workouts from them. | Beta | US-30 |
+| FR-97 | Deleting an account shall delete the groups it owns (with their workouts and memberships), its memberships in other groups and its personal workouts; the group workouts it added stay without an owner, and the ones assigned to it become unassigned. | Beta | US-30 |
+
+> **Built so far (workouts and groups):** FR-90 to FR-97, with the Workouts and Groups pages for every role. Admins have no special access to other people's workouts or groups yet (moderation is a separate issue). Group chat and invitations by email are out of scope.
+
 ### 3.8 Account security — Beta
 
 | ID | Requirement | Release | Story |
@@ -452,6 +475,7 @@ A new member always starts as `Active` if `expires_on` is today or later. "Expir
 | View today's overview | No | No (`403`) | No (`403`) | Yes | Yes |
 | Reset someone's password | No | No (`403`) | No (`403`) | No (`403`) | Yes (not self, not other admins) |
 | List users, change roles | No | No (`403`) | No (`403`) | No (`403`) | Yes |
+| View a user's details, export users, log a user out everywhere, ban or unban many at once | No | No (`403`) | No (`403`) | No (`403`) | Yes (not self; bans also not other admins) |
 | View dashboard stats and revenue, ban / unban users | No | No (`403`) | No (`403`) | No (`403`) | Yes (not self, not other admins) |
 | List members expiring soon | No | No (`403`) | No (`403`) | Yes | Yes |
 | Search members, list accounts waiting for a membership | No | No (`403`) | No (`403`) | Yes | Yes |
@@ -463,6 +487,9 @@ A new member always starts as `Active` if `expires_on` is today or later. "Expir
 | Read the current announcements | No | Yes | Yes | Yes | Yes |
 | Post, edit, delete announcements; list ended ones | No | No (`403`) | No (`403`) | Yes | Yes |
 | Read the activity log and the security view, export the log as CSV | No | No (`403`) | No (`403`) | No (`403`) | Yes |
+| Add, view, edit, delete own personal workouts; see workouts assigned to me | No | Yes | Yes | Yes | Yes |
+| Start a training group, list my groups; in a group, what the group permissions below allow | No | Yes | Yes | Yes | Yes |
+| Read another person's personal workout, or a group one is not in | No | No (`404`) | No (`404`) | No (`404`) | No (`404`) |
 
 Every endpoint except sign up, log in, refresh, health and the docs returns `401` when no valid token is sent.
 
@@ -485,8 +512,20 @@ Every endpoint except sign up, log in, refresh, health and the docs returns `401
 | `users:change_role` | Change a role (not one's own) | No | No | No | Yes |
 | `users:ban` | Ban and unban (not oneself, not another admin) | No | No | No | Yes |
 | `users:reset_password` | Reset a password (not one's own, not another admin's) | No | No | No | Yes |
+| `users:revoke_sessions` | End every session of another user | No | No | No | Yes |
+| `users:export` | Download the users CSV | No | No | No | Yes |
 | `plans:edit` | Plan prices and lengths | No | No | No | Yes |
 | `activity:read` | The activity log, its CSV export and the security view | No | No | No | Yes |
+
+**Group permissions.** Inside a training group, what someone may do depends on the group, not on their role. `rbac.group_permissions()` gives the owner all five, a member `read` plus the flags the owner ticked, and anyone else none (`404`).
+
+| Group permission | Allows | Owner | Member | Not in the group |
+|---|---|---|---|---|
+| `read` | See the group, its people and its workouts | Yes | Yes | No (`404`) |
+| `create` | Add a workout to the group | Yes | If `can_create` (else `403`) | No (`404`) |
+| `update` | Edit or delete the group's workouts | Yes | If `can_update` (else `403`) | No (`404`) |
+| `assign` | Assign a group workout to someone in the group | Yes | If `can_assign` (else `403`) | No (`404`) |
+| `manage` | Rename or delete the group; add, remove and set the permissions of members | Yes | No (`403`); a member may only remove themself (leave) | No (`404`) |
 
 Actions on one's own account and data (profile, password, sessions, own membership, bookings and payments, reading classes, plans and current announcements) need only a login: the server takes the user id from the token, never from the request.
 
@@ -504,7 +543,7 @@ Actions on one's own account and data (profile, password, sessions, own membersh
 | Unexpected server error | `500 Internal Server Error` | MVP |
 | Bad request (e.g. membership not valid, class already started, admin changing own role) | `400 Bad Request` | Beta |
 | Missing, invalid or expired token; wrong login | `401 Unauthorized` | Beta |
-| Logged in but role not allowed (including a trainer and another class's bookings), or account banned | `403 Forbidden` | Beta |
+| Logged in but role not allowed (including a trainer and another class's bookings, and a group member without the group permission), or account banned | `403 Forbidden` | Beta |
 | Duplicate or full (email taken, already booked, class full, account already linked) | `409 Conflict` | Beta |
 | Too many failed logins | `429 Too Many Requests` | Beta |
 
@@ -775,7 +814,7 @@ Actions on one's own account and data (profile, password, sessions, own membersh
 - When browser 2 sends `POST /api/v1/auth/logout`, the response is `204`, the cookie is cleared, browser 2's access token gets `401`, and refresh without a cookie returns `204`.
 
 **AC-43 Permissions (FR-24, FR-83, NFR-17)**
-- When each role logs in, `user.permissions` is `[]` for a User, `["classes:teach"]` for a Trainer, the 7 staff permissions for a Gym Manager, and those plus the 9 admin permissions for an Admin; `GET /api/v1/users/me` returns the same list.
+- When each role logs in, `user.permissions` is `[]` for a User, `["classes:teach"]` for a Trainer, the 7 staff permissions for a Gym Manager, and those plus the 11 admin permissions for an Admin; `GET /api/v1/users/me` returns the same list.
 - A Gym Manager's `GET /api/v1/admin/stats` is `403` and `GET /api/v1/members` is `200`; a User's `GET /api/v1/members` is `403`.
 - Trainer A's `GET /api/v1/classes/{id}/bookings` is `200` for a class A teaches and `403` for trainer B's class.
 - When an admin changes trainer A's role to `user`, A's next `GET /api/v1/trainers/me/classes` is `403` with the same access token, and A's `permissions` become `[]`.
@@ -788,6 +827,24 @@ Actions on one's own account and data (profile, password, sessions, own membersh
 - For the same filters, every page of `GET /api/v1/admin/activity` and `GET /api/v1/admin/activity/export.csv` return the same rows in the same order, and the export adds an `export` row.
 - The gym manager, a trainer and a user get `403` on all three endpoints; no login gets `401`.
 - No row holds any password, the temporary password from a reset, a token or a hash.
+
+**AC-45 Workouts and training groups (FR-90 – FR-97)**
+- Given owner O of group G, member A with no permissions ticked, member B with all three, and user X outside G
+- A's `POST /api/v1/workouts` with `group_id` G is `403`; B's is `201`, and B can assign it to A; assigning it to X is `422`.
+- A's `PATCH /api/v1/workouts/{id}` on a G workout is `403` and B's is `200`; X's is `404`.
+- A's `PATCH /api/v1/groups/{G}` and `DELETE /api/v1/groups/{G}` are `403`, X's are `404`, and O's are `200` and `204`.
+- When O ticks `can_update` for A, A's next `PATCH` on the workout is `200`.
+- X's `GET /api/v1/workouts/{id}` for O's personal workout is `404`.
+- When A leaves G, A's `GET /api/v1/groups/{G}` is `404` and the G workouts assigned to A become unassigned.
+
+**AC-46 Admin user management (FR-98 – FR-103)**
+- Given an admin, a second admin B, users C and D, and a trainer
+- `GET /api/v1/admin/users?q=…&role=user&status=active&offset=0&limit=1` returns one matching user and `total` counts all of them; the next offset returns the next one; `GET /api/v1/admin/users/export.csv` with the same filters returns the same users in the same order and adds an `export` row.
+- `POST /api/v1/admin/users/bulk-ban` with C, D, B and the admin's own id bans C and D, and lists B (an admin) and the admin themself in `skipped` with the reasons; C's next request gets `403 Account banned`.
+- `POST /api/v1/admin/users/bulk-unban` with C and an active user unbans C and lists the active user as skipped.
+- `GET /api/v1/admin/users/{D}` shows D's active sessions, workout counts and groups without any workout's text, and no password hash.
+- `POST /api/v1/admin/users/{D}/revoke-sessions` returns the number ended, and D's next request with the old access token gets `401`; the admin's own id gets `400`.
+- A gym manager gets `403` on every one of these endpoints.
 
 ## 6. Traceability
 
@@ -813,6 +870,7 @@ Actions on one's own account and data (profile, password, sessions, own membersh
 | US-19 | FR-34, NFR-11 – NFR-14 | `POST /api/v1/auth/login` | Beta |
 | US-20 | FR-35, FR-52 | `GET /api/v1/admin/stats`, `GET /api/v1/admin/revenue` | Beta |
 | US-21 | FR-36, FR-37, FR-39 | `POST /api/v1/admin/users/{id}/ban`, `GET /api/v1/admin/users` | Beta |
+| US-12, US-20, US-21, US-22 | FR-98 – FR-103 | `GET /api/v1/admin/users?role=&status=`, `GET /api/v1/admin/users/export.csv`, `GET /api/v1/admin/users/{id}`, `POST /api/v1/admin/users/{id}/revoke-sessions`, `POST /api/v1/admin/users/bulk-ban`, `POST /api/v1/admin/users/bulk-unban`, `GET /api/v1/admin/stats` | Beta |
 | US-22 | FR-38 | `POST /api/v1/admin/users/{id}/unban` | Beta |
 | US-23, US-24 | FR-16, FR-40, FR-41 | `GET` / `PATCH /api/v1/users/me`, `POST /api/v1/users/me/password` | Beta |
 | US-12, US-14, US-15, US-17 | FR-67 – FR-71 | `GET /api/v1/trainers`, `GET /api/v1/trainers/me/classes`, `POST` / `PATCH /api/v1/classes`, `GET /api/v1/classes/{id}/bookings`, `PATCH /api/v1/admin/users/{id}/role` | Beta |
@@ -822,5 +880,6 @@ Actions on one's own account and data (profile, password, sessions, own membersh
 | US-20 | FR-62, FR-63 | `GET /api/v1/overview` | Beta |
 | US-11, US-16, US-17 | FR-58 – FR-61 | `GET /api/v1/members/{id}/bookings`, `DELETE /api/v1/members/{id}/bookings/{class_id}`, `GET /api/v1/users/me/bookings` | Beta |
 | US-12, US-13 | FR-54 – FR-57 | `GET /api/v1/members?q=`, `GET /api/v1/members/waiting`, `GET /api/v1/admin/users?q=` | Beta |
+| US-30 | FR-90 – FR-97 | `/api/v1/workouts`, `/api/v1/workouts/assigned`, `/api/v1/workouts/{id}`, `PUT /api/v1/workouts/{id}/assignee`, `/api/v1/groups`, `/api/v1/groups/{id}`, `/api/v1/groups/{id}/workouts`, `/api/v1/groups/{id}/members`, `/api/v1/groups/{id}/members/{user_id}` | Beta |
 | US-29 | FR-84 – FR-89, NFR-23 | `GET /api/v1/admin/activity`, `GET /api/v1/admin/activity/export.csv`, `GET /api/v1/admin/activity/security` | Beta |
 | US-25, US-26 | FR-43 – FR-51, FR-53 | `GET /api/v1/members?status=expiring_soon`, `/api/v1/plans`, `/api/v1/members/{id}/payments`, `/api/v1/payments`, `/api/v1/payments/{id}/void`, `/api/v1/payments/export.csv`, `/api/v1/users/me/payments`, `PUT /api/v1/admin/plans/{plan}` | Beta |

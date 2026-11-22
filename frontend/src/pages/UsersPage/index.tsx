@@ -1,11 +1,14 @@
 import { type FormEvent, Fragment, useEffect, useState } from "react"
 import StatusPill from "../../components/StatusPill"
+import UserBulkBar from "../../components/UserBulkBar"
+import UserDetail from "../../components/UserDetail"
 import { useAuth } from "../../context/AuthContext"
 import { useDebouncedValue } from "../../hooks/useDebouncedValue"
-import { banUser, changeRole, listUsers, resetPassword, unbanUser } from "../../services/adminService"
-import type { AdminUser, Role } from "../../types/auth"
-import { ROLES } from "../../utils/auth"
-import { errorText, formatDate, membersLink, planLabel, todayUtc } from "../../utils/member"
+import { banUser, changeRole, exportUsersCsv, listUsers, resetPassword, unbanUser } from "../../services/adminService"
+import type { AdminUser, Role, UserFilters } from "../../types/auth"
+import { ROLES, can, usersLink } from "../../utils/auth"
+import { errorText, formatDate, hashParams, membersLink, planLabel, todayUtc } from "../../utils/member"
+import { saveFile } from "../../utils/payment"
 
 // Members and users are the same accounts: this shows the membership and links to it on the Members page.
 function MembershipCell({ user: u }: { user: AdminUser }) {
@@ -31,12 +34,24 @@ function MembershipCell({ user: u }: { user: AdminUser }) {
   return <span className="hint">—</span>
 }
 
-// Admins only: see everyone who has signed up, change their role, and ban or unban them.
-export default function UsersPage() {
+/** The user named in the address (#/users?user=5), or null for the list. */
+function userFromHash(): number | null {
+  const id = Number(hashParams().get("user"))
+  return Number.isInteger(id) && id > 0 ? id : null
+}
+
+// Admins only: see everyone who has signed up, filter them, change their role, ban or unban one or many, and export.
+function UserList() {
   const { user: me } = useAuth()
   const [users, setUsers] = useState<AdminUser[]>([])
   const [search, setSearch] = useState("")
   const query = useDebouncedValue(search)
+  const [role, setRole] = useState<UserFilters["role"]>("")
+  const [status, setStatus] = useState<UserFilters["status"]>("")
+  // Ticked rows for the bulk ban and unban; cleared whenever the filters change.
+  const [checkedIds, setCheckedIds] = useState<number[]>([])
+  const [reloadKey, setReloadKey] = useState(0)
+  const [exporting, setExporting] = useState(false)
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
@@ -55,7 +70,8 @@ export default function UsersPage() {
   useEffect(() => {
     let ignore = false
     setLoading(true)
-    listUsers(0, query)
+    setCheckedIds([])
+    listUsers({ q: query, role, status }, 0)
       .then((page) => {
         if (ignore) return
         setUsers(page.items)
@@ -66,12 +82,12 @@ export default function UsersPage() {
     return () => {
       ignore = true
     }
-  }, [query])
+  }, [query, role, status, reloadKey])
 
   async function loadMore() {
     setLoadingMore(true)
     try {
-      const page = await listUsers(users.length, query)
+      const page = await listUsers({ q: query, role, status }, users.length)
       setUsers((prev) => [...prev, ...page.items])
       setTotal(page.total)
     } catch (err) {
@@ -163,15 +179,43 @@ export default function UsersPage() {
     setNotice("")
   }
 
+  async function exportCsv() {
+    setExporting(true)
+    setError("")
+    try {
+      saveFile(await exportUsersCsv({ q: query, role, status }), `users-${todayUtc()}.csv`)
+    } catch (err) {
+      setError(errorText(err))
+    } finally {
+      setExporting(false)
+    }
+  }
+
+  const filtered = Boolean(query || role || status)
+  const allChecked = users.length > 0 && users.every((u) => checkedIds.includes(u.id))
+  const toggleChecked = (id: number) =>
+    setCheckedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
+
   let body
   if (loading && users.length === 0) body = <p className="empty">Loading users…</p>
-  else if (users.length === 0) body = <p className="empty">{query ? `No users match "${query}".` : "No users yet."}</p>
+  else if (users.length === 0) body = <p className="empty">{filtered ? "No users match these filters." : "No users yet."}</p>
   else
     body = (
       <div className="table-wrap">
         <table>
           <thead>
             <tr>
+              <th className="check">
+                <input
+                  type="checkbox"
+                  aria-label="Select all users shown"
+                  checked={allChecked}
+                  ref={(el) => {
+                    if (el) el.indeterminate = checkedIds.length > 0 && !allChecked
+                  }}
+                  onChange={() => setCheckedIds(allChecked ? [] : users.map((u) => u.id))}
+                />
+              </th>
               <th>Name</th>
               <th>Email</th>
               <th>Role</th>
@@ -188,8 +232,11 @@ export default function UsersPage() {
               return (
                 <Fragment key={u.id}>
                   <tr>
+                    <td className="check">
+                      <input type="checkbox" aria-label={`Select ${u.name}`} checked={checkedIds.includes(u.id)} onChange={() => toggleChecked(u.id)} />
+                    </td>
                     <td className="name">
-                      {u.name}
+                      <a href={usersLink(u.id)}>{u.name}</a>
                       {isMe && <span className="hint"> (you)</span>}
                     </td>
                     <td>{u.email}</td>
@@ -247,7 +294,7 @@ export default function UsersPage() {
                   </tr>
                   {resettingId === u.id && (
                     <tr className="ban-row">
-                      <td colSpan={7}>
+                      <td colSpan={8}>
                         <div className="ban-form">
                           <span>
                             Reset {u.name}'s password? Their current password and every login stop working, and they
@@ -265,7 +312,7 @@ export default function UsersPage() {
                   )}
                   {resetResult?.id === u.id && (
                     <tr className="reset-row">
-                      <td colSpan={7}>
+                      <td colSpan={8}>
                         <div className="reset-result" role="status">
                           <span>Temporary password for {resetResult.name}:</span>
                           <code className="temp-password">{resetResult.password}</code>
@@ -281,7 +328,7 @@ export default function UsersPage() {
                   )}
                   {banningId === u.id && (
                     <tr className="ban-row">
-                      <td colSpan={7}>
+                      <td colSpan={8}>
                         <form className="ban-form" onSubmit={(e) => handleBan(e, u)}>
                           <div className="field">
                             <label htmlFor={`ban-reason-${u.id}`}>Reason for banning {u.name} (optional)</label>
@@ -324,11 +371,31 @@ export default function UsersPage() {
           onChange={(e) => setSearch(e.target.value)}
           maxLength={100}
         />
+        <select className="role-select" aria-label="Filter by role" value={role} onChange={(e) => setRole(e.target.value as UserFilters["role"])}>
+          <option value="">Every role</option>
+          {ROLES.map((r) => (
+            <option key={r.value} value={r.value}>
+              {r.label}
+            </option>
+          ))}
+        </select>
+        <select className="role-select" aria-label="Filter by status" value={status} onChange={(e) => setStatus(e.target.value as UserFilters["status"])}>
+          <option value="">Active and banned</option>
+          <option value="active">Active</option>
+          <option value="banned">Banned</option>
+        </select>
+        {can(me, "users:export") && (
+          <button onClick={exportCsv} disabled={exporting || loading || total === 0}>
+            {exporting ? "Exporting…" : "Export CSV"}
+          </button>
+        )}
       </div>
       <p className="hint">
         Everyone starts as a User. Make someone a Trainer to let them be picked for classes and see who booked them,
         or a Gym Manager to let them manage members. A banned user is locked out
-        at once, and you can unban them later. Reset password gives someone who forgot theirs a temporary one.
+        at once, and you can unban them later. Reset password gives someone who forgot theirs a temporary one. Tick
+        several users to ban or unban them together, and click a name for their details, where you can also log them out
+        of every browser.
       </p>
       {error && (
         <p className="error" role="alert">
@@ -339,6 +406,18 @@ export default function UsersPage() {
         <p className="hint" role="status">
           {notice}
         </p>
+      )}
+      {checkedIds.length > 0 && (
+        <UserBulkBar
+          ids={checkedIds}
+          onClear={() => setCheckedIds([])}
+          onDone={(message) => {
+            setNotice(message)
+            setError("")
+            // Reload: banned users may leave the current status filter, and the ticks are cleared.
+            setReloadKey((k) => k + 1)
+          }}
+        />
       )}
       {body}
       {!loading && (
@@ -355,4 +434,18 @@ export default function UsersPage() {
       )}
     </section>
   )
+}
+
+// Admins only: the user list, or one user's details when the address names them (#/users?user=5).
+export default function UsersPage() {
+  const [userId, setUserId] = useState<number | null>(userFromHash)
+
+  // Links inside the page change only the part after ?, so the page follows the address itself.
+  useEffect(() => {
+    const onChange = () => setUserId(userFromHash())
+    window.addEventListener("hashchange", onChange)
+    return () => window.removeEventListener("hashchange", onChange)
+  }, [])
+
+  return userId === null ? <UserList /> : <UserDetail key={userId} userId={userId} />
 }
