@@ -161,24 +161,26 @@ def delete_workout(session: Session, user: User, workout_id: int) -> None:
     session.commit()
 
 
-def _count(session: Session, *filters) -> int:
-    return session.exec(select(func.count()).select_from(Workout).where(*filters)).one()
-
-
 def counts_for(session: Session, user_id: int) -> dict:
     """How many workouts an account added and was assigned, for the admin's user details."""
     assigned = col(Workout.assigned_to) == user_id
-    return {
-        "workouts_added": _count(session, col(Workout.owner_id) == user_id),
-        "workouts_assigned": _count(session, assigned),
-        "workouts_completed": _count(session, assigned, col(Workout.completed_at).is_not(None)),
-    }
+    added, given, completed = session.exec(
+        select(
+            func.count().filter(col(Workout.owner_id) == user_id),
+            func.count().filter(assigned),
+            func.count().filter(assigned, col(Workout.completed_at).is_not(None)),
+        ).select_from(Workout)
+    ).one()
+    return {"workouts_added": added, "workouts_assigned": given, "workouts_completed": completed}
 
 
 def workout_stats(session: Session, since) -> dict:
     """Every workout, the ones added since `since` and the ones marked done, for the admin dashboard."""
-    return {
-        "total": _count(session),
-        "last_7_days": _count(session, col(Workout.created_at) >= since),
-        "completed": _count(session, col(Workout.completed_at).is_not(None)),
-    }
+    total, recent, completed = session.exec(
+        select(
+            func.count(),
+            func.count().filter(col(Workout.created_at) >= since),
+            func.count().filter(col(Workout.completed_at).is_not(None)),
+        ).select_from(Workout)
+    ).one()
+    return {"total": total, "last_7_days": recent, "completed": completed}

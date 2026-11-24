@@ -65,6 +65,15 @@ def _check_birth_date(value: date | None) -> date | None:
     return value
 
 
+class SchemaState(SQLModel, table=True):
+    """One row: the schema version this database was last brought up to (app/database.py)."""
+
+    __tablename__ = "schema_state"
+
+    id: int | None = Field(default=None, primary_key=True)
+    version: str = Field(max_length=64)
+
+
 class User(SQLModel, table=True):
     """A login account. Once staff start a membership (set a plan) the user is also a gym member."""
 

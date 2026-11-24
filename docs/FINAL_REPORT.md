@@ -39,12 +39,12 @@ The mid-term MVP was a member CRUD API with a one-page front end. The final rele
 | In numbers | |
 |---|---|
 | API | 105 operations on 78 paths under `/api/v1`, all listed in `/api/docs` |
-| Database | 14 tables (PostgreSQL on Supabase; SQLite locally) |
+| Database | 15 tables (PostgreSQL on Supabase; SQLite locally) |
 | Roles and permissions | 4 roles, 25 permissions, plus 5 per-group permissions |
 | Requirements | 121 functional (FR-01 to FR-121) and 24 non-functional, traced to 37 user stories |
 | Front end | 21 pages, 45 components, 18 service modules |
-| Tests | 69 automated backend tests (pytest), all passing |
-| GitHub | 37 issues and 37 pull requests merged into `main` (this report's included), each from a `tanvir/<issue>-<name>` branch with `Closes #N` |
+| Tests | 74 automated backend tests (pytest), all passing |
+| GitHub | 39 issues and 38 pull requests merged into `main` (the latest, for #75, included), each from its own branch. The gym management rework (#76) was committed to `main` directly |
 | Code | about 7,100 lines of Python in the backend and 11,000 lines of TypeScript in the front end |
 
 ## 2. How to test the live system
@@ -108,7 +108,7 @@ The PRD planned the MVP and the Beta from the start, and the final release cover
 | Workout plans | **Added**: training groups run by trainers and staff, with per-member permissions, assigned workouts and marking them done. A private workout diary was built first (PR #70) and then removed: nobody at the gym could see it, so it did not help run the gym |
 | Equipment tracking | **Added**: the equipment list, reported faults, and services with the next due date |
 | Password reset | **Added** as an admin reset with a one-time temporary password (no email reset) |
-| Automated tests | **Added**: a pytest suite (69 tests). CI is still not set up |
+| Automated tests | **Added**: a pytest suite (74 tests). CI is still not set up |
 
 Still out of scope: online payments, email or SMS, email verification and self-service password reset, QR check-in, waiting lists for full classes, recurring classes, and diet plans.
 
@@ -186,7 +186,7 @@ The server never asks "is this an admin?". Every protected endpoint names a perm
 | Privacy | NFR-20 | Phone, date of birth, emergency contact and notes only for staff and the person themself |
 | Consistency | NFR-21 | Booking locks the class row, counts and inserts in one transaction |
 | Audit | NFR-23 | Activity log rows never hold a password, token or hash |
-| Maintainability | NFR-08, NFR-24 | Routers → services → database layers; 69 automated tests |
+| Maintainability | NFR-08, NFR-24 | Routers → services → database layers; 74 automated tests |
 | Secrets | NFR-05 | Only in Vercel environment variables; `backend/.env.example` holds placeholders only |
 
 Two NFRs were changed during the project and are recorded in the SRS: schema changes are applied by the app on start rather than by Alembic (NFR-19, see section 8), and production is deployed with `vercel --prod` rather than on every push (NFR-10).
@@ -269,6 +269,7 @@ erDiagram
 | `plan_price`, `payment`, `expense` | The plans (name, price, length, offered or retired); payments with method, renewal and void details (kept when the member's account is deleted); what the gym spends |
 | `equipment` | What the gym owns, whether it works, the reported fault and the next service |
 | `announcement`, `activity_log` | News for members; the audit log |
+| `schema_state` | One row: the schema version the database was last brought up to, so a normal start skips the checks |
 | `training_group`, `group_member`, `workout` | Training groups, each member's permission flags, and the group's workouts with who each is for and when it was done |
 
 `app_user` is named so because `user` is reserved in PostgreSQL, and `gym_class` because `class` is reserved in Python. Every column, rule and index is in [TDD section 5](03-tdd.md#5-data-model).
@@ -308,7 +309,7 @@ sequenceDiagram
 
 | Variable | Purpose |
 |---|---|
-| `DATABASE_URL` | Supabase transaction pooler (port 6543); the engine uses `NullPool` and no prepared statements, as the pooler requires |
+| `DATABASE_URL` | Supabase transaction pooler (port 6543); the engine keeps a small pool of connections and uses no prepared statements, as the pooler requires |
 | `JWT_SECRET`, `PASSWORD_PEPPER` | 32+ byte secrets, required on Vercel; the pepper must never change once set |
 | `FRONTEND_ORIGIN` | The one origin CORS answers (`https://2321648gymbuddy.vercel.app`) |
 
@@ -316,7 +317,7 @@ On start the backend creates any missing table, adds any missing column and give
 
 ## 6. Testing and quality
 
-**Automated tests.** `backend/tests/` has 69 pytest tests that run against a throwaway SQLite database, emptied before each test, with test-only secrets, so they never touch real data:
+**Automated tests.** `backend/tests/` has 74 pytest tests that run against a throwaway SQLite database, emptied before each test, with test-only secrets, so they never touch real data:
 
 | File | What it proves |
 |---|---|
@@ -325,6 +326,7 @@ On start the backend creates any missing table, adds any missing column and give
 | `test_refresh.py` | Rotation, the 30-second grace period, reuse ending the whole session, and refresh refused after logout or a ban |
 | `test_rbac.py` | Every admin route is `403` for the other three roles and `401` for a visitor; a role change applies with the same token; another person's session is `404` and member record `403`; members cannot start a group; a group and its workouts are `404` to outsiders, even an admin; group permissions; admins cannot ban each other |
 | `test_gym.py` | Plans (add, retire, delete rules), a membership paid in the same step, check-in and check-out, class attendance (own class only, not a day before), a trainer's own clients only, marking a workout done (assignee only), equipment services and faults, expenses and net income, a user's record counts |
+| `test_startup.py` | A normal start and the login check are one query each; an older schema is filled in again; a token does not open another account's session |
 | `test_cors.py` | Only `FRONTEND_ORIGIN` gets CORS headers; look-alike origins and `null` get none; `*` is never sent |
 | `test_config.py` | Settings loading and the `FRONTEND_ORIGIN` rules |
 
@@ -336,7 +338,7 @@ Run with `pip install -r requirements-dev.txt` and `pytest` in `backend/`.
 
 ## 7. Project management on GitHub
 
-All work went through GitHub issues and pull requests, one issue per feature:
+Work went through GitHub issues and pull requests, one issue per feature, with one exception: the gym management rework (#76) was committed to `main` directly, and its issue was written afterwards.
 
 - Branch `tanvir/<issue>-<short-name>`, for example `tanvir/62-workouts-groups`.
 - Each pull request says `Closes #N`, has a summary, the list of changes, the request flow, and a checklist of what was tested, and is merged into `main`.
@@ -351,7 +353,8 @@ All work went through GitHub issues and pull requests, one issue per feature:
 | Payments | 18 – 20 Nov | #37 – #42 | Payments, plan prices, members as users, payments list and void, revenue |
 | Gym operations | 20 – 21 Nov | #44 – #58 | Lockout and headers, connected pages, bookings and renewals, Overview, password reset, trainers, announcements, profile details |
 | Security and admin | 21 – 22 Nov | #67 – #74 | Refresh sessions, the RBAC module, activity log, workouts and groups, admin user tools, moderation, CORS allowlist and the test suite |
-| Gym management | 25 Nov | (this change) | Plans, attendance, class attendance, personal trainers and clients, equipment, expenses and net income, the sidebar; the private workout diary and the separate Overview and Moderation pages removed |
+| Gym management | 25 Nov | Issue #76, commit `f4554bb` | Plans, attendance, class attendance, personal trainers and clients, equipment, expenses and net income, the sidebar; the private workout diary and the separate Overview and Moderation pages removed |
+| Speed | 25 Nov | Issue #75 | Reused database connections, a one-query login check, combined Dashboard counts and a one-query start |
 
 The one point of mid-term feedback, on the backend's folder structure, was the first thing fixed in the final phase (PR #22).
 
@@ -363,7 +366,8 @@ The one point of mid-term feedback, on the backend's folder structure, was the f
 | **Permissions, not role checks** (PR #68) | With four roles, `if role == "admin"` checks were spreading across routers. One module now maps roles to permissions, every route names the permission it needs, and the app builds its menu from the same list. No status code changed for any role, which was confirmed by calling every route as each role before and after |
 | **Two people booking the last place** | Counting and inserting in two steps lets both succeed. Booking now locks the class row (`SELECT … FOR UPDATE` on PostgreSQL) before counting, and the composite primary key blocks a double booking |
 | **Short-lived tokens without logging people out** (PR #67) | A 15-minute access token in memory is safer than a long one in `localStorage`, but would log people out constantly. The rotating refresh cookie restores the token silently; a race between two tabs is allowed for 30 seconds, and a reuse after that ends the session |
-| **Serverless constraints** | Vercel functions share no memory and have no lasting disk, so the lockout counter and sessions live in the database, and the database connection goes through Supabase's transaction pooler without prepared statements |
+| **Serverless constraints** | Vercel functions share no memory and have no lasting disk, so the lockout counter and sessions live in the database, and the database connections go through Supabase's transaction pooler without prepared statements |
+| **Slow pages** | Every query crossed an ocean (the function ran in Washington DC, the database in Asia) and every request opened a new connection. The function was moved to the database's region, connections are reused, the Dashboard went from 63 queries to 22, the login check from 2 to 1, and a normal start from 26 statements to 1. The same request went from 1.6 s to 0.25 s after the move alone |
 | **No Alembic** | Apart from one planned, announced drop of the old member tables when members became accounts, the schema only grew (new tables, new nullable or defaulted columns), so the app adds what is missing on start instead. This kept deployment to one step, but a rename or removal would need a real migration tool (section 9) |
 | **Private by default** | A training group someone is not in answers `404`, not `403`, so ids do not reveal what exists. Admins moderate through separate lists that can delete but never edit |
 | **Gym management, not a fitness diary** | The first version let anyone keep a private workout diary and start a social group. Neither helped run a gym, so the diary was removed, groups became training groups that trainers and staff run for members, and the time went into what a gym needs: plans, attendance, trainers' clients, equipment and expenses. The per-group permissions stayed as they were |
@@ -383,4 +387,4 @@ The one point of mid-term feedback, on the backend's folder structure, was the f
 
 ## 10. Conclusion
 
-Gym Buddy grew from a single-table CRUD API into a complete gym system that a small gym could run day to day: members serve themselves, the front desk has one page per job, trainers run their classes and clients, and admins control plans, money, access and security. The work followed the plan in the PRD, SRS and TDD and went beyond it where the gym needed more, with every change made through an issue and a reviewed pull request. The main design choices (members as users, one permission module, a service layer, server-checked sessions) kept the code consistent as it grew to 105 endpoints, and the automated tests protect the parts that matter most: login, tokens, permissions and CORS.
+Gym Buddy grew from a single-table CRUD API into a complete gym system that a small gym could run day to day: members serve themselves, the front desk has one page per job, trainers run their classes and clients, and admins control plans, money, access and security. The work followed the plan in the PRD, SRS and TDD and went beyond it where the gym needed more, with almost every change made through an issue and a pull request. The main design choices (members as users, one permission module, a service layer, server-checked sessions) kept the code consistent as it grew to 105 endpoints, and the automated tests protect the parts that matter most: login, tokens, permissions and CORS.

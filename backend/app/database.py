@@ -1,4 +1,5 @@
 # Database engine and the per-request Session: Supabase PostgreSQL in production, SQLite locally.
+import hashlib
 import os
 from collections.abc import Iterator
 from pathlib import Path
@@ -7,8 +8,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from fastapi import Depends
 from sqlalchemy import inspect, text
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy.pool import NullPool
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlmodel import Session, SQLModel, create_engine, select
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
@@ -43,8 +43,20 @@ if DATABASE_URL.startswith("sqlite"):
     # check_same_thread=False: FastAPI runs sync routes in a thread pool.
     engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 else:
-    # Supabase's transaction pooler does the pooling and rejects prepared statements.
-    engine = create_engine(DATABASE_URL, poolclass=NullPool, connect_args={"prepare_threshold": None})
+    # Connections are kept and reused: opening one to Supabase takes many round trips, so doing it for every request
+    # was most of the waiting time. The pool is small because each serverless instance has its own, and Supabase's
+    # transaction pooler shares the real connections between them (it rejects prepared statements).
+    engine = create_engine(
+        DATABASE_URL,
+        pool_size=3,
+        max_overflow=7,
+        # An instance can be paused between requests and wake up with a connection Supabase has closed meanwhile:
+        # each one is checked before use and replaced when it is old. The last used one is taken first.
+        pool_pre_ping=True,
+        pool_recycle=240,
+        pool_use_lifo=True,
+        connect_args={"prepare_threshold": None},
+    )
 
 
 # create_all() never changes a table that already exists, so columns added later are listed here.
@@ -159,15 +171,51 @@ def _seed_plans() -> None:
             session.rollback()  # another serverless instance seeded at the same moment
 
 
+def _schema_version() -> str:
+    """A fingerprint of every table, column and index this code expects. It changes only when the schema does."""
+    parts = [f"{t.name}.{c.name} {c.type}" for t in SQLModel.metadata.sorted_tables for c in t.columns]
+    parts += [str(row) for row in (*_ADDED_COLUMNS, *_ADDED_INDEXES, *_PLAN_COLUMNS)]
+    return hashlib.sha256("\n".join(parts).encode()).hexdigest()
+
+
+def _is_up_to_date(version: str) -> bool:
+    """One query. The table does not exist yet on a new database, or on one from before it was added."""
+    from app.models import SchemaState
+
+    try:
+        with Session(engine) as session:
+            state = session.get(SchemaState, 1)
+            return state is not None and state.version == version
+    except DBAPIError:
+        return False
+
+
+def _save_version(version: str) -> None:
+    from app.models import SchemaState
+
+    with Session(engine) as session:
+        session.merge(SchemaState(id=1, version=version))
+        try:
+            session.commit()
+        except IntegrityError:
+            session.rollback()  # another serverless instance saved it at the same moment
+
+
 def create_db_and_tables() -> None:
-    """Create missing tables and columns; existing data is kept, except the old member data (see above)."""
+    """Create missing tables and columns; existing data is kept, except the old member data (see above). Every cold
+    start runs this, so when the saved version says the schema is already right, the checks are skipped. After
+    dropping a table by hand, delete the row in schema_state to have it made again."""
     from app import models  # noqa: F401  (registers the tables on SQLModel.metadata)
 
+    version = _schema_version()
+    if _is_up_to_date(version):
+        return
     _drop_old_member_tables()
     SQLModel.metadata.create_all(engine)
     _add_missing_columns()
     _widen_plan_columns()
     _seed_plans()
+    _save_version(version)
 
 
 def get_session() -> Iterator[Session]:

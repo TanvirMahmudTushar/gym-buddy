@@ -176,7 +176,7 @@ backend/
       group_service.py   # training groups: access() and require() on rbac.group_permissions(), list with counts, members, delete_for_accounts(); raises GroupNotFoundError / GroupPermissionError / GroupOwnerError
       moderation_service.py # admin lists, CSVs and deletes of anyone's workouts and groups (one activity row per delete)
       workout_service.py # workouts in groups: lists, add, edit, assign, mark done, delete; raises WorkoutNotFoundError / NotAssignedToYouError / AssigneeNotInGroupError
-  tests/               # pytest suite (section 14): conftest.py, test_login.py, test_tokens.py, test_refresh.py, test_rbac.py, test_gym.py, test_cors.py, test_config.py
+  tests/               # pytest suite (section 14): conftest.py, test_login.py, test_tokens.py, test_refresh.py, test_rbac.py, test_gym.py, test_startup.py, test_cors.py, test_config.py
   .env.example         # the four variables with placeholders only (copy to backend/.env)
   requirements-dev.txt # -r requirements.txt + pytest, httpx (not installed by Vercel)
   pytest.ini
@@ -982,7 +982,10 @@ A catch-all exception handler returns `500` with `{"detail": "Internal server er
 - `get_session()` is a FastAPI dependency that yields a `Session` per request.
 - On start, `create_db_and_tables()` runs `SQLModel.metadata.create_all(engine)` for new tables, adds the columns and indexes newer code needs to existing tables, and fills `plan_price` (section 12).
 - On Vercel, connect through Supabase's **transaction pooler** (Supavisor, port `6543`), because each serverless function opens its own connections.
-- The transaction pooler does not support prepared statements, so the engine is created with `poolclass=NullPool` (the pooler does the pooling) and `connect_args={"prepare_threshold": None}` for psycopg.
+- The transaction pooler does not support prepared statements, so the engine is created with `connect_args={"prepare_threshold": None}` for psycopg.
+- Connections are reused between requests (`pool_size=3`, `max_overflow=7`): opening one takes many round trips, which was most of a request's time with the first version's `NullPool`. Each is checked before use (`pool_pre_ping`) and replaced after 4 minutes (`pool_recycle`), because a paused function can wake up with a connection the pooler has closed.
+- The Vercel function region must be the database's region (Project → Settings → Functions). With the two in different continents, every query is a long trip: a request with one new connection and two lookups measured 1.6 s, and 0.25 s once they were in the same region.
+- Counts for one page are taken in one query with `FILTER (WHERE ...)` per count, and the login check is one query, so a request makes few round trips.
 - URL format: `postgresql+psycopg://postgres.<project-ref>:<password>@aws-0-<region>.pooler.supabase.com:6543/postgres`.
 - Only the Postgres database is used. Supabase Auth, Storage and the auto-generated REST API are not used; login is our own (section 10) and all access goes through our FastAPI backend.
 - Row Level Security (RLS) is not used because the browser never talks to Supabase directly; permissions are enforced in FastAPI. Keep the Supabase `anon` and `service_role` keys out of the frontend.
@@ -1032,7 +1035,7 @@ flowchart LR
 | Refresh token | Random 32 bytes (`secrets.token_urlsafe`) | 7 days from the last refresh | `refresh_token` cookie (`HttpOnly`, `Secure`, `SameSite=Strict`, `Path=/api/v1/auth`); `auth_session.token_hash` keeps only its SHA-256 hash |
 
 - **Create:** `POST /auth/login` checks the password, inserts an `auth_session` row, sets the cookie and returns an access token naming that row in `sid`.
-- **Verify (every protected request):** `deps.get_auth()` decodes the token with `JWT_SECRET` (a bad signature, an expired `exp` or a missing claim → `401`), loads the user (gone → `401`; banned → `403 Account banned`), then checks that session `sid` belongs to the user and is active (otherwise `401`). Every other dependency builds on it, and FastAPI runs it once per request.
+- **Verify (every protected request):** `deps.get_auth()` decodes the token with `JWT_SECRET` (a bad signature, an expired `exp` or a missing claim → `401`), loads the user together with session `sid` in one query (`session_service.get_login()`): user gone → `401`; banned → `403 Account banned`; the session not the user's or no longer active → `401`. Every other dependency builds on it, and FastAPI runs it once per request.
 - **Refresh rotation:** `session_service.rotate()` finds the session by the cookie's hash and replaces the hash with a new token's in one `UPDATE ... WHERE id = ? AND token_hash = <old hash>`. If that matches no row, another request rotated first: this one still gets an access token but no new cookie, so the browser keeps the winner's cookie. The session id stays the same, so `sid` in new access tokens does not change.
 - **Reuse detection:** the replaced hash is kept in `previous_token_hash`. Sent again within `ROTATION_GRACE` (30 s, for example two tabs refreshing at once), it gets an access token without a new cookie. Sent later, only a copy can hold it, so the whole session is revoked (`401`) and both holders must log in again. Only the last replaced hash is kept: a token two or more rotations old matches no row, so it is refused like an unknown token (`401`) but does not end the session.
 - **Revoke:** logout (`POST /auth/logout`, by the cookie), `DELETE /users/me/sessions/{id}`, a password change (every session but the caller's), an admin reset or a ban (every session) set `revoked_at`. The access tokens of a revoked session fail on their next request, because `get_auth()` checks the session; there is no wait for `exp`.
@@ -1263,6 +1266,9 @@ The plan was Alembic (revisions `0001_mvp` and `0002_beta`, run by hand against 
 3. `_add_missing_columns()`: for each `(table, column, definition)` in `_ADDED_COLUMNS` (the lockout, ban, password and membership columns on `app_user`, the void columns on `payment`, `trainer_id` on `gym_class`, …), `ALTER TABLE … ADD COLUMN` when the column is missing (`IF NOT EXISTS` on PostgreSQL, since two serverless instances may start together), then `CREATE INDEX IF NOT EXISTS` for `_ADDED_INDEXES`.
 4. `_widen_plan_columns()`: on PostgreSQL, the plan code columns go from varchar(10) to varchar(40), once (a widening keeps the data and does not rewrite the table; SQLite does not enforce the length).
 5. `_seed_plans()`: an empty plan table gets the three default plans; plans from before they had names get one. A plan an admin changed, retired or deleted stays that way.
+6. `_save_version()`: store `_schema_version()`, a fingerprint of every table, column and index the code expects, in `schema_state`.
+
+Every cold start first compares that fingerprint with the saved one, in one query, and skips all six steps when they match (about 26 statements saved). After dropping a table by hand, delete the `schema_state` row so it is made again.
 
 A change that renames or removes a column, or changes a type other than that one widening, cannot be made this way; that is the point to adopt Alembic (risks, section 13).
 
@@ -1273,7 +1279,7 @@ The first admin is promoted by hand in the Supabase table editor or SQL editor (
 | Risk | Mitigation |
 |---|---|
 | Serverless cold starts make the first request slow | Acceptable; measure NFR-01 excluding cold start |
-| Too many DB connections from serverless functions | Use Supabase transaction pooler (port `6543`) with `NullPool` |
+| Too many DB connections from serverless functions | Use Supabase transaction pooler (port `6543`) and a small pool (3, at most 10) in each function instance |
 | Free-tier project pauses when idle | Check the Supabase dashboard before demos; any API activity keeps it awake |
 | A schema change that is not additive | `create_db_and_tables()` only adds tables, columns and indexes (section 12). Adopt Alembic before the first rename, removal or type change |
 | JWT secret leaked | Only in Vercel env vars; rotating it logs everyone out (acceptable) |
@@ -1293,9 +1299,10 @@ The first admin is promoted by hand in the Supabase table editor or SQL editor (
 | `test_refresh.py` | No cookie `204`; rotation gives a new cookie and a working token; the replaced cookie within the grace period gets a token but no cookie; after the grace period it ends the whole session for both holders; a cookie two rotations old is refused; refresh after logout or a ban is refused |
 | `test_rbac.py` | Every admin `GET` route without a path parameter (found from the OpenAPI schema) is `403` for a user, trainer and gym manager, `200` for an admin, `401` for a visitor; staff routes; a role change applies with the same token; a user cannot start a group; another person's session is `404`; a group and its workouts are `404` to outsiders (an admin too); a group member without `can_update` gets `403`, then `200` once ticked; only the owner renames or deletes a group; an admin cannot ban another admin or themself, nor change their own role; a bulk ban skips the admin |
 | `test_gym.py` | Plans (add, retire, delete, in use), a membership with its first payment, check-in and check-out, class attendance, a trainer's own clients, marking a workout done, equipment services and faults, expenses and net income, a user's record counts |
+| `test_startup.py` | A start with nothing to change runs one query; an older schema version is checked and filled in again; a deleted plan stays deleted; the login check is one query; a token does not open another account's session |
 | `test_cors.py` | `FRONTEND_ORIGIN` gets `Access-Control-Allow-Origin` and credentials, and its preflight is allowed; other origins (including look-alikes and `null`) and their preflights get no `Access-Control-*` header; `*` is never sent |
 | `test_config.py` | `.env` fills in missing variables but never overrides, is never read on Vercel, may be absent; `FRONTEND_ORIGIN` lists, trailing slashes, `*` and scheme-less values refused, defaults locally and on Vercel |
 
-Run: `pip install -r requirements-dev.txt` (adds `pytest` and `httpx` to `requirements.txt`; Vercel installs only `requirements.txt`), then `pytest` in `backend/`. 69 tests, all passing. Not in CI (out of scope).
+Run: `pip install -r requirements-dev.txt` (adds `pytest` and `httpx` to `requirements.txt`; Vercel installs only `requirements.txt`), then `pytest` in `backend/`. 74 tests, all passing. Not in CI (out of scope).
 
 **Smoke test through the public API.** `scripts/seed_demo.py` (README, **Demo data**) signs accounts up, gives roles, starts memberships, takes payments, checks members in and out, creates classes, books them, posts announcements, adds equipment and expenses, and sets up a training group with mixed permissions, stopping at the first unexpected status code. Run against a fresh local backend and then again, it creates everything once and nothing the second time. Its results were checked by role: each account's role and landing page, `403` when a group member without `update` edits a group workout, `404` for someone outside the group, a class at capacity, and the Overview numbers (`check_ins_today`, `expiring_soon`, `waiting`, `payments_today`) matching the seeded data.

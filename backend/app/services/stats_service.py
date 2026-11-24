@@ -21,45 +21,57 @@ WEEK = timedelta(days=7)
 NEXT_CLASSES = 5
 
 
-def _count_members(session: Session, *filters) -> int:
-    return session.exec(select(func.count()).select_from(User).where(IS_MEMBER, *filters)).one()
-
-
 def member_stats(session: Session) -> dict:
-    """The member list's own filters, so each number matches the list with that filter chip."""
-    today = utc_today()
+    """The member list's own filters, so each number matches the list with that filter chip. One query: each count
+    takes only the rows its own FILTER allows."""
+
+    def count(*filters):
+        return func.count().filter(IS_MEMBER, *filters)
+
+    total, active, expired, frozen, new, expiring_soon = session.exec(
+        select(
+            count(),
+            count(*status_filters("active")),
+            count(*status_filters("expired")),
+            count(*status_filters("frozen")),
+            # Memberships started in the last 7 days (joined_on is a date, so today counts as day one).
+            count(col(User.joined_on) > utc_today() - timedelta(days=7)),
+            count(*status_filters("expiring_soon")),
+        ).select_from(User)
+    ).one()
     return {
-        "total": _count_members(session),
-        "active": _count_members(session, *status_filters("active")),
-        "expired": _count_members(session, *status_filters("expired")),
-        "frozen": _count_members(session, *status_filters("frozen")),
-        # Memberships started in the last 7 days (joined_on is a date, so today counts as day one).
-        "new_last_7_days": _count_members(session, col(User.joined_on) > today - timedelta(days=7)),
-        "expiring_soon": _count_members(session, *status_filters("expiring_soon")),
+        "total": total,
+        "active": active,
+        "expired": expired,
+        "frozen": frozen,
+        "new_last_7_days": new,
+        "expiring_soon": expiring_soon,
     }
 
 
 def user_stats(session: Session) -> dict:
-    by_role = dict(session.exec(select(User.role, func.count()).group_by(User.role)).all())
-    banned = session.exec(select(func.count()).select_from(User).where(col(User.is_banned).is_(True))).one()
-    new = session.exec(select(func.count()).select_from(User).where(col(User.created_at) >= utc_now() - WEEK)).one()
+    def role(name: str):
+        return func.count().filter(col(User.role) == name)
+
+    total, users, trainers, gym_managers, admins, banned, new = session.exec(
+        select(
+            func.count(),
+            role("user"),
+            role("trainer"),
+            role("gym_manager"),
+            role("admin"),
+            func.count().filter(col(User.is_banned).is_(True)),
+            func.count().filter(col(User.created_at) >= utc_now() - WEEK),
+        ).select_from(User)
+    ).one()
     return {
-        "total": sum(by_role.values()),
-        "users": by_role.get("user", 0),
-        "trainers": by_role.get("trainer", 0),
-        "gym_managers": by_role.get("gym_manager", 0),
-        "admins": by_role.get("admin", 0),
+        "total": total,
+        "users": users,
+        "trainers": trainers,
+        "gym_managers": gym_managers,
+        "admins": admins,
         "banned": banned,
         "new_last_7_days": new,
-    }
-
-
-def check_in_stats(session: Session) -> dict:
-    return {
-        "today": checkin_service.count_since(session, checkin_service.start_of_today()),
-        "last_7_days": checkin_service.count_since(session, utc_now() - timedelta(days=7)),
-        "inside_now": checkin_service.count_inside(session),
-        "by_day": checkin_service.count_by_day(session, 7),
     }
 
 
@@ -67,7 +79,7 @@ def admin_stats(session: Session) -> dict:
     return {
         "members": member_stats(session),
         "users": user_stats(session),
-        "check_ins": check_in_stats(session),
+        "check_ins": checkin_service.check_in_stats(session),
         "classes": class_service.class_stats(session),
         "workouts": workout_service.workout_stats(session, utc_now() - WEEK),
         "groups": {"total": group_service.count_groups(session)},
@@ -80,12 +92,18 @@ def staff_overview(session: Session) -> dict:
     Attendance, the Expiring soon filter, the waiting list, the payments list for today and the Equipment filters."""
     equipment = equipment_service.equipment_stats(session)
     count, amount = payment_service.totals_since(session, utc_today())
+    check_ins_today, inside_now = checkin_service.today_counts(session)
+    expiring_soon, waiting = session.exec(
+        select(
+            func.count().filter(IS_MEMBER, *status_filters("expiring_soon")), func.count().filter(*WAITING)
+        ).select_from(User)
+    ).one()
     next_classes, _ = class_service.list_classes(session, upcoming=True, offset=0, limit=NEXT_CLASSES)
     return {
-        "check_ins_today": checkin_service.count_since(session, checkin_service.start_of_today()),
-        "inside_now": checkin_service.count_inside(session),
-        "expiring_soon": _count_members(session, *status_filters("expiring_soon")),
-        "waiting": session.exec(select(func.count()).select_from(User).where(*WAITING)).one(),
+        "check_ins_today": check_ins_today,
+        "inside_now": inside_now,
+        "expiring_soon": expiring_soon,
+        "waiting": waiting,
         "payments_today": {"count": count, "amount": amount},
         "equipment_attention": equipment["needs_attention"],
         "equipment_service_due": equipment["service_due"],

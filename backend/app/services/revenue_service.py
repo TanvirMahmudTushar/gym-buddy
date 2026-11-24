@@ -21,8 +21,9 @@ def _counted(since: date, before: date | None = None) -> list:
     return conditions
 
 
-def _sum(session: Session, since: date, before: date | None = None) -> int:
-    return session.exec(select(func.coalesce(func.sum(Payment.amount), 0)).where(*_counted(since, before))).one()
+def _sum(since: date, before: date | None = None):
+    """The total of the payments in a period, as one column of a query."""
+    return func.coalesce(func.sum(Payment.amount).filter(*_counted(since, before)), 0)
 
 
 def _month_start(day: date, months_back: int = 0) -> date:
@@ -44,23 +45,27 @@ def revenue_stats(session: Session) -> dict:
     for method, amount, count in rows:
         by_method[method] = (amount, count)
 
-    # One small query per month keeps this the same on SQLite and PostgreSQL (no date functions in SQL).
-    months = []
-    for back in range(MONTHS - 1, -1, -1):
-        start = _month_start(today, back)
-        end = _month_start(start, -1)
-        amount, expenses = _sum(session, start, end), expense_service.total_between(session, start, end)
-        months.append(
-            {"month": start.strftime("%Y-%m"), "amount": amount, "expenses": expenses, "net": amount - expenses}
+    # Each month is a range of dates, which is the same on SQLite and PostgreSQL (no date functions in SQL).
+    starts = [_month_start(today, back) for back in range(MONTHS - 1, -1, -1)]
+    periods = [(start, _month_start(start, -1)) for start in starts]
+    taken_today, taken_30_days, *taken = session.exec(
+        select(_sum(today), _sum(since_30), *(_sum(start, end) for start, end in periods)).where(
+            *_counted(min(since_30, starts[0]))
         )
+    ).one()
+    spent = expense_service.totals_for(session, periods)
+    months = [
+        {"month": start.strftime("%Y-%m"), "amount": amount, "expenses": expenses, "net": amount - expenses}
+        for start, amount, expenses in zip(starts, taken, spent)
+    ]
 
     return {
-        "today": _sum(session, today),
+        "today": taken_today,
         # The last month in the list is this month so far.
         "this_month": months[-1]["amount"],
         "expenses_this_month": months[-1]["expenses"],
         "net_this_month": months[-1]["net"],
-        "last_30_days": _sum(session, since_30),
+        "last_30_days": taken_30_days,
         "last_30_days_from": since_30,
         "by_method": [{"method": m, "amount": a, "count": c} for m, (a, c) in by_method.items()],
         "months": months,

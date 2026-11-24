@@ -99,6 +99,20 @@ def rotate(session: Session, token: str, client: Client) -> tuple[AuthSession, U
     return current, user, new_token if swapped else None
 
 
+def get_login(session: Session, user_id: int, session_id: int) -> tuple[User | None, AuthSession | None]:
+    """The account an access token names, and the token's login session if it belongs to that account and is still
+    active. One query, because every request makes this check."""
+    row = session.exec(
+        select(User, AuthSession)
+        .outerjoin(AuthSession, (col(AuthSession.id) == session_id) & (col(AuthSession.user_id) == col(User.id)))
+        .where(col(User.id) == user_id)
+    ).first()
+    if row is None:
+        return None, None
+    user, auth_session = row
+    return user, auth_session if auth_session is not None and _is_active(auth_session) else None
+
+
 def get_active_session(session: Session, session_id: int, user_id: int) -> AuthSession | None:
     """The session an access token names, if it is still active and belongs to that user."""
     auth_session = session.get(AuthSession, session_id)

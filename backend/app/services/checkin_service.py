@@ -126,25 +126,41 @@ def list_day(
     return _page(session, filters, offset, limit)
 
 
-def count_inside(session: Session) -> int:
-    return session.exec(select(func.count()).select_from(CheckIn).where(*_inside())).one()
+def today_counts(session: Session) -> tuple[int, int]:
+    """How many check-ins today, and how many of those people are still inside."""
+    today, inside = session.exec(
+        select(func.count(), func.count().filter(*_inside()))
+        .select_from(CheckIn)
+        .where(col(CheckIn.checked_in_at) >= start_of_today())
+    ).one()
+    return today, inside
 
 
-def count_by_day(session: Session, days: int) -> list[dict]:
-    """Check-ins on each of the last `days` UTC days, oldest first. One small query per day keeps this the same on
-    SQLite and PostgreSQL (no date functions in SQL)."""
-    counts = []
-    for back in range(days - 1, -1, -1):
-        day = utc_today() - timedelta(days=back)
-        between = [
+def check_in_stats(session: Session) -> dict:
+    """Today, the last 7 days, who is inside, and each of the last 7 UTC days (oldest first), in one query. Each day
+    is a range of times, which is the same on SQLite and PostgreSQL (no date functions in SQL)."""
+    days = [utc_today() - timedelta(days=back) for back in range(6, -1, -1)]
+
+    def between(day: date):
+        return func.count().filter(
             col(CheckIn.checked_in_at) >= start_of_day(day),
             col(CheckIn.checked_in_at) < start_of_day(day + timedelta(days=1)),
-        ]
-        counts.append(
-            {"day": day, "count": session.exec(select(func.count()).select_from(CheckIn).where(*between)).one()}
         )
-    return counts
 
-
-def count_since(session: Session, since: datetime) -> int:
-    return session.exec(select(func.count()).select_from(CheckIn).where(col(CheckIn.checked_in_at) >= since)).one()
+    week_ago = utc_now() - timedelta(days=7)
+    last_7_days, inside, *by_day = session.exec(
+        select(
+            func.count().filter(col(CheckIn.checked_in_at) >= week_ago),
+            func.count().filter(*_inside()),
+            *(between(day) for day in days),
+        )
+        .select_from(CheckIn)
+        # The seven calendar days start after a rolling week does, so this is every row any count needs.
+        .where(col(CheckIn.checked_in_at) >= min(week_ago, start_of_day(days[0])))
+    ).one()
+    return {
+        "today": by_day[-1],
+        "last_7_days": last_7_days,
+        "inside_now": inside,
+        "by_day": [{"day": day, "count": count} for day, count in zip(days, by_day)],
+    }
