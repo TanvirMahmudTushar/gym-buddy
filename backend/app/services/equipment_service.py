@@ -141,7 +141,9 @@ def delete_equipment(session: Session, equipment_id: int) -> None:
 
 
 def equipment_stats(session: Session) -> dict:
-    def count(*filters) -> int:
-        return session.exec(select(func.count()).select_from(Equipment).where(*filters)).one()
-
-    return {"total": count(), "needs_attention": count(NEEDS_ATTENTION), "service_due": count(_service_due())}
+    total, needs_attention, service_due = session.exec(
+        select(
+            func.count(), func.count().filter(NEEDS_ATTENTION), func.count().filter(_service_due())
+        ).select_from(Equipment)
+    ).one()
+    return {"total": total, "needs_attention": needs_attention, "service_due": service_due}

@@ -37,14 +37,14 @@ def get_auth(
     except InvalidTokenError:
         raise _unauthorized() from None
     # Looked up on every request, so a deleted user or a changed role takes effect straight away.
-    user = session.get(User, user_id)
+    user, login = session_service.get_login(session, user_id, session_id)
     if user is None:
         raise _unauthorized()
     # Checked before the session (which a ban also revokes) so the app can say why the login ended.
     if user.is_banned:
         raise HTTPException(status_code=403, detail=ACCOUNT_BANNED_MESSAGE)
     # Logout, a revoked session, a password change or reset end the session, and every access token that names it.
-    if session_service.get_active_session(session, session_id, user_id) is None:
+    if login is None:
         raise _unauthorized()
     return Auth(user, session_id)
 

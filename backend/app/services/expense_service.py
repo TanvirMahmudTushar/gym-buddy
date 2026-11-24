@@ -110,10 +110,13 @@ def export_csv(session: Session, f: ExpenseFilter, admin: User, client: Client) 
     return text
 
 
-def total_between(session: Session, start: date, end: date) -> int:
-    """The expenses dated from `start` up to (not including) `end`."""
-    return session.exec(
-        select(func.coalesce(func.sum(Expense.amount), 0)).where(
-            col(Expense.spent_on) >= start, col(Expense.spent_on) < end
+def totals_for(session: Session, periods: list[tuple[date, date]]) -> list[int]:
+    """The expenses in each period, from its first day up to (not including) its second, in one query."""
+    columns = [
+        func.coalesce(
+            func.sum(Expense.amount).filter(col(Expense.spent_on) >= start, col(Expense.spent_on) < end), 0
         )
-    ).one()
+        for start, end in periods
+    ]
+    row = session.exec(select(*columns).where(col(Expense.spent_on) >= min(start for start, _ in periods))).one()
+    return list(row)

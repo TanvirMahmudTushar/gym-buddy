@@ -337,7 +337,7 @@ Example body for `POST`:
 
 ## Tests
 
-The backend has a pytest suite in `backend/tests/` (login, token rejection, refresh rotation and reuse, RBAC, the gym's day to day, CORS and the settings). It runs against a throwaway SQLite database that is emptied before every test, with test-only secrets, so it never touches `backend/gym_buddy.db`, Supabase or your `.env`.
+The backend has a pytest suite in `backend/tests/` (login, token rejection, refresh rotation and reuse, RBAC, the gym's day to day, start-up, CORS and the settings). It runs against a throwaway SQLite database that is emptied before every test, with test-only secrets, so it never touches `backend/gym_buddy.db`, Supabase or your `.env`.
 
 ```bash
 cd backend
@@ -396,7 +396,9 @@ vercel dev -L
 2. **Connect** → **Transaction pooler** → copy the URI (port `6543`).
 3. In Vercel → Project → **Settings** → **Environment Variables**, add it as `DATABASE_URL`, then redeploy.
 
-The backend accepts `postgres://` or `postgresql://` URLs and creates the `app_user`, `auth_session`, `check_in`, `gym_class`, `class_booking`, `plan_price`, `payment`, `announcement`, `activity_log`, `training_group`, `group_member`, `workout`, `equipment` and `expense` tables on start (and gives a new `plan_price` table monthly 1,500 / 30 days, quarterly 4,000 / 90 days and yearly 14,000 / 365 days), adds any columns an older table is missing, and widens the plan code columns, keeping existing data.
+The backend accepts `postgres://` or `postgresql://` URLs and creates the `app_user`, `auth_session`, `check_in`, `gym_class`, `class_booking`, `plan_price`, `payment`, `announcement`, `activity_log`, `training_group`, `group_member`, `workout`, `equipment`, `expense` and `schema_state` tables on start (and gives a new `plan_price` table monthly 1,500 / 30 days, quarterly 4,000 / 90 days and yearly 14,000 / 365 days), adds any columns an older table is missing, and widens the plan code columns, keeping existing data. When nothing changed since the last start, one query on `schema_state` skips all of this; delete its row after dropping a table by hand.
+
+**Same region.** In Vercel → Project → **Settings** → **Functions**, set the function region to the one the database in `DATABASE_URL` is in (for example `hnd1` for Tokyo, `cdg1` for Paris), then redeploy. With the two far apart, every query is a long trip and the app is slow.
 
 **Upgrading a database from before members became users:** on its first start the backend drops the old `member` table together with `check_in`, `class_booking` and `payment` (all of their rows are deleted) and creates the last three again, pointing at `app_user`. Accounts, classes and plan prices are kept. Staff then start memberships again for the people who need one. To use Supabase locally as well, set `DATABASE_URL` in your terminal before `fastapi dev main.py`.
 

@@ -138,13 +138,20 @@ def user_detail(session: Session, user_id: int) -> dict:
 
 
 def record_counts(session: Session, user_id: int) -> dict:
-    def count(table, column) -> int:
-        return session.exec(select(func.count()).select_from(table).where(column == user_id)).one()
+    def count(table, column):
+        return select(func.count()).select_from(table).where(column == user_id).scalar_subquery()
 
+    visits, bookings, payments = session.exec(
+        select(
+            count(CheckIn, col(CheckIn.member_id)),
+            count(ClassBooking, col(ClassBooking.member_id)),
+            count(Payment, col(Payment.member_id)),
+        )
+    ).one()
     return {
-        "visits": count(CheckIn, col(CheckIn.member_id)),
-        "bookings": count(ClassBooking, col(ClassBooking.member_id)),
-        "payments": count(Payment, col(Payment.member_id)),
+        "visits": visits,
+        "bookings": bookings,
+        "payments": payments,
         **workout_service.counts_for(session, user_id),
     }
 

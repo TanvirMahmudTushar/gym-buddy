@@ -242,8 +242,9 @@ def mark_attendance(
 
 
 def class_stats(session: Session) -> dict:
-    total = session.exec(select(func.count()).select_from(GymClass)).one()
-    upcoming = session.exec(select(func.count()).select_from(GymClass).where(col(GymClass.starts_at) >= utc_now())).one()
+    total, upcoming = session.exec(
+        select(func.count(), func.count().filter(_when_filter("upcoming"))).select_from(GymClass)
+    ).one()
     return {"total": total, "upcoming": upcoming}
 
 
