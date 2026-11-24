@@ -38,7 +38,7 @@ def _csv(content: str, name: str) -> Response:
     return Response(
         content=content,
         media_type="text/csv; charset=utf-8",
-        # People's own workouts and names: no cache on the way may keep a copy.
+        # People's names and emails: no cache on the way may keep a copy.
         headers={
             "Content-Disposition": f'attachment; filename="{name}-{utc_today().isoformat()}.csv"',
             "Cache-Control": "no-store",
@@ -48,8 +48,8 @@ def _csv(content: str, name: str) -> Response:
 
 @router.get("/workouts", response_model=ModerationWorkoutPage, dependencies=[READ])
 def list_workouts(session: SessionDep, filters: WorkoutFilters, offset: Offset = 0, limit: Limit = 20) -> dict:
-    """Every workout, personal or in a group, latest workout date first. owner_id, group_id, kind (personal or
-    group), date_from and date_to (the workout's date) and q (title, notes, owner's name or email) combine."""
+    """Every workout, latest workout date first. owner_id, group_id, date_from and date_to (the workout's date) and q
+    (title, notes, owner's name or email) combine."""
     items, total = moderation_service.list_workouts(session, filters, offset, limit)
     return {"items": items, "total": total, "offset": offset, "limit": limit}
 

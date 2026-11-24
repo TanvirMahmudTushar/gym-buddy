@@ -92,7 +92,7 @@ export default function ClassItem({ gymClass: c, trainers, onChanged, onDeleted 
           Delete
         </button>
       </div>
-      {showBookings && <ClassBookings classId={c.id} />}
+      {showBookings && <ClassBookings classId={c.id} startsAt={c.starts_at} />}
       {confirmingDelete && (
         <div className="confirm" role="alertdialog" aria-labelledby={`confirm-class-${c.id}`}>
           <span id={`confirm-class-${c.id}`}>

@@ -4,10 +4,21 @@ from datetime import date, datetime, time, timezone
 from enum import Enum
 from typing import Annotated, Literal
 
-from pydantic import BeforeValidator, EmailStr, PlainSerializer, StringConstraints, field_validator, model_validator
+from pydantic import (
+    AfterValidator,
+    BeforeValidator,
+    EmailStr,
+    PlainSerializer,
+    StringConstraints,
+    field_validator,
+    model_validator,
+)
 from sqlmodel import Field, SQLModel
 
-Plan = Literal["monthly", "quarterly", "yearly"]
+# The code of a membership plan, such as "monthly". Admins add plans, so the plan must exist in the plan table
+# (checked in app/services/plan_service.py), not in a fixed list here.
+PLAN_CODE_LENGTH = 40
+Plan = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=PLAN_CODE_LENGTH)]
 FullName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
 # The id column is a 32-bit integer, so anything larger cannot match an account (a member's id is their account's).
 AccountId = Annotated[int, Field(gt=0, le=2_147_483_647)]
@@ -77,9 +88,11 @@ class User(SQLModel, table=True):
     locked_until: datetime | None = None
     created_at: datetime = Field(default_factory=utc_now)
     # Membership. plan is None until staff start one; joined_on and expires_on are set together with it.
-    plan: str | None = Field(default=None, max_length=10)
+    plan: str | None = Field(default=None, max_length=PLAN_CODE_LENGTH)
     joined_on: date | None = None
     expires_on: date | None = None
+    # The member's personal trainer: an account with the Trainer role, or none.
+    trainer_id: int | None = Field(default=None, foreign_key="app_user.id", ondelete="SET NULL", index=True)
     # A frozen membership cannot check in or book, whatever its expiry date.
     is_frozen: bool = False
     phone: str | None = Field(default=None, max_length=20)
@@ -126,6 +139,11 @@ class CheckIn(SQLModel, table=True):
     member_id: int = Field(foreign_key="app_user.id", ondelete="CASCADE", index=True)
     checked_in_at: datetime = Field(default_factory=utc_now, index=True)
     recorded_by: int | None = Field(default=None, foreign_key="app_user.id")
+    # When they left. None while they are inside, or when the desk never checked them out that day.
+    checked_out_at: datetime | None = None
+
+
+PaymentMethod = Literal["cash", "card", "bank_transfer", "mobile_banking"]
 
 
 class MemberCreate(SQLModel):
@@ -135,12 +153,16 @@ class MemberCreate(SQLModel):
     phone: str | None = Field(default=None, max_length=20)
     plan: Plan
     joined_on: date | None = None
-    expires_on: date
+    # Left out, it is joined_on plus the plan's days.
+    expires_on: date | None = None
+    trainer_id: AccountId | None = None
     notes: str | None = Field(default=None, max_length=500)
+    # Set when the person pays now: the plan's price is recorded as their first payment in the same step.
+    payment_method: PaymentMethod | None = None
 
     @model_validator(mode="after")
     def check_dates(self) -> "MemberCreate":
-        if self.expires_on < (self.joined_on or utc_today()):
+        if self.expires_on is not None and self.expires_on < (self.joined_on or utc_today()):
             raise ValueError("expires_on must be on or after joined_on")
         return self
 
@@ -176,6 +198,8 @@ class MemberUpdate(ProfileUpdate):
     plan: Plan | None = None
     expires_on: date | None = None
     is_frozen: bool | None = None
+    # Sent: this personal trainer, or null for none. Left out: the trainer stays as it is.
+    trainer_id: AccountId | None = None
     notes: str | None = Field(default=None, max_length=500)
 
     @model_validator(mode="after")
@@ -201,6 +225,9 @@ class MemberRead(SQLModel):
     joined_on: date
     expires_on: date
     is_frozen: bool
+    trainer_id: int | None
+    # The personal trainer's current name.
+    trainer_name: str | None
     notes: str | None
 
 
@@ -253,6 +280,8 @@ class MeRead(UserRead):
     menus and page guards from them; the server checks the same permissions on every request."""
 
     permissions: list[str]
+    # The membership plan, or None while this account has no membership.
+    plan: Plan | None
 
 
 class AccountPage(SQLModel):
@@ -367,6 +396,8 @@ class CheckInRead(SQLModel):
     member_id: int
     member_name: str
     checked_in_at: UtcDateTime
+    # None while they are inside, or when the desk never checked them out.
+    checked_out_at: UtcDateTime | None
     recorded_by_name: str | None
 
 
@@ -377,9 +408,18 @@ class CheckInPage(SQLModel):
     limit: int
 
 
+class DayCount(SQLModel):
+    day: date
+    count: int
+
+
 class CheckInStats(SQLModel):
     today: int
     last_7_days: int
+    # Checked in today and not checked out yet.
+    inside_now: int
+    # Each of the last 7 UTC days, oldest first; the last one is today.
+    by_day: list[DayCount]
 
 
 class MemberStats(SQLModel):
@@ -409,14 +449,23 @@ class ClassStats(SQLModel):
 
 
 class WorkoutStats(SQLModel):
-    # Every workout, personal and in groups.
     total: int
     # Added in the last 7 days (rolling, from now).
     last_7_days: int
+    # Marked done by the member they are assigned to.
+    completed: int
 
 
 class GroupStats(SQLModel):
     total: int
+
+
+class EquipmentStats(SQLModel):
+    total: int
+    # Reported broken or being repaired.
+    needs_attention: int
+    # A service is due within the next 7 days, or overdue.
+    service_due: int
 
 
 class AdminStats(SQLModel):
@@ -426,6 +475,7 @@ class AdminStats(SQLModel):
     classes: ClassStats
     workouts: WorkoutStats
     groups: GroupStats
+    equipment: EquipmentStats
 
 
 class UserNameUpdate(SQLModel):
@@ -437,10 +487,30 @@ class UserRoleUpdate(SQLModel):
 
 
 class TrainerRead(SQLModel):
-    """An account with the Trainer role, as a choice for a class's trainer."""
+    """An account with the Trainer role, as a choice for a class's trainer or a member's personal trainer."""
 
     id: int
     name: str
+
+
+class ClientRead(SQLModel):
+    """A member as their personal trainer sees them: no date of birth, notes or payments."""
+
+    id: int
+    name: str
+    email: str
+    phone: str | None
+    plan: Plan
+    expires_on: date
+    is_frozen: bool
+    last_visit_at: UtcDateTime | None
+
+
+class ClientPage(SQLModel):
+    items: list[ClientRead]
+    total: int
+    offset: int
+    limit: int
 
 
 # --- Classes and bookings ---
@@ -475,6 +545,8 @@ class ClassBooking(SQLModel, table=True):
     # The member who booked: the user's id.
     member_id: int = Field(foreign_key="app_user.id", ondelete="CASCADE", primary_key=True, index=True)
     booked_at: datetime = Field(default_factory=utc_now)
+    # Marked by the trainer or the front desk: came, did not come, or not marked yet (None).
+    attended: bool | None = None
 
 
 class ClassCreate(SQLModel):
@@ -543,6 +615,12 @@ class BookingRead(SQLModel):
     member_id: int
     member_name: str
     booked_at: UtcDateTime
+    attended: bool | None
+
+
+class AttendanceUpdate(SQLModel):
+    # Required: came, did not come, or null to clear the mark.
+    attended: bool | None
 
 
 class BookingPage(SQLModel):
@@ -561,6 +639,7 @@ class BookedClassRead(SQLModel):
     duration_minutes: int
     trainer_name: str | None
     booked_at: UtcDateTime
+    attended: bool | None
 
 
 class BookedClassPage(SQLModel):
@@ -580,19 +659,30 @@ class PasswordChange(SQLModel):
 
 # --- Plans and payments ---
 
-PaymentMethod = Literal["cash", "card", "bank_transfer", "mobile_banking"]
 Amount = Annotated[int, Field(gt=0, le=10_000_000)]  # whole taka
 
-# Price (whole taka) and length in days of each plan. These fill a new database; an admin can change them later.
-DEFAULT_PLAN_PRICES: dict[str, tuple[int, int]] = {"monthly": (1500, 30), "quarterly": (4000, 90), "yearly": (14000, 365)}
+# The plans a new database starts with: name, price (whole taka) and length in days. An admin can change them, add
+# plans and retire them.
+DEFAULT_PLANS: dict[str, tuple[str, int, int]] = {
+    "monthly": ("Monthly", 1500, 30),
+    "quarterly": ("Quarterly", 4000, 90),
+    "yearly": ("Yearly", 14000, 365),
+}
 
 
-class PlanPrice(SQLModel, table=True):
+class MembershipPlan(SQLModel, table=True):
+    """A plan the gym sells. The table is still called plan_price, from when only the prices could change."""
+
     __tablename__ = "plan_price"
 
-    plan: str = Field(primary_key=True, max_length=10)
+    # A short code made from the first name ("student-monthly"). Members and payments hold it, so it never changes.
+    plan: str = Field(primary_key=True, max_length=PLAN_CODE_LENGTH)
+    name: str = Field(default="", max_length=60)
     price: int
     duration_days: int
+    description: str | None = Field(default=None, max_length=300)
+    # A retired plan stays on the members and payments that have it, but cannot be chosen again.
+    is_active: bool = True
     updated_at: datetime = Field(default_factory=utc_now)
 
 
@@ -605,7 +695,7 @@ class Payment(SQLModel, table=True):
     member_name: str = Field(max_length=100)
     amount: int
     method: str = Field(max_length=20)
-    plan: str | None = Field(default=None, max_length=10)
+    plan: str | None = Field(default=None, max_length=PLAN_CODE_LENGTH)
     note: str | None = Field(default=None, max_length=200)
     paid_at: datetime = Field(default_factory=utc_now, index=True)
     renewed_until: date | None = None
@@ -686,6 +776,9 @@ class MethodRevenue(SQLModel):
 class MonthRevenue(SQLModel):
     month: str  # YYYY-MM
     amount: int
+    expenses: int
+    # amount minus expenses; negative in a month that cost more than it earned.
+    net: int
 
 
 class RevenueStats(SQLModel):
@@ -693,6 +786,8 @@ class RevenueStats(SQLModel):
 
     today: int
     this_month: int
+    expenses_this_month: int
+    net_this_month: int
     # The last 30 days, today included: the same as the payments list from last_30_days_from to today.
     last_30_days: int
     last_30_days_from: date
@@ -704,18 +799,44 @@ class RevenueStats(SQLModel):
 
 class PlanRead(SQLModel):
     plan: Plan
+    name: str
     price: int
     duration_days: int
+    description: str | None
+    is_active: bool
+
+
+PlanName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=60)]
+PlanPriceAmount = Annotated[int, Field(ge=1, le=10_000_000)]
+PlanDays = Annotated[int, Field(ge=1, le=3_660)]
+PlanDescription = Annotated[Annotated[str, StringConstraints(max_length=300)] | None, BeforeValidator(_blank_to_none)]
+
+
+class PlanCreate(SQLModel):
+    name: PlanName
+    price: PlanPriceAmount
+    duration_days: PlanDays
+    description: PlanDescription = None
 
 
 class PlanUpdate(SQLModel):
-    """Both values are sent together, so a plan always has a price and a length."""
+    """Only the fields sent change. is_active false retires the plan, true offers it again."""
 
-    price: Annotated[int, Field(ge=1, le=10_000_000)]
-    duration_days: Annotated[int, Field(ge=1, le=3_660)]
+    name: PlanName | None = None
+    price: PlanPriceAmount | None = None
+    duration_days: PlanDays | None = None
+    description: PlanDescription = None
+    is_active: bool | None = None
+
+    @model_validator(mode="after")
+    def check_required_not_null(self) -> "PlanUpdate":
+        for name in ("name", "price", "duration_days", "is_active"):
+            if name in self.model_fields_set and getattr(self, name) is None:
+                raise ValueError(f"{name} cannot be null")
+        return self
 
 
-# --- Overview (the Gym Manager's start page) ---
+# --- Overview (the front desk part of the Dashboard) ---
 
 
 class PaymentsToday(SQLModel):
@@ -729,9 +850,13 @@ class Overview(SQLModel):
     """What needs attention today. Each number uses the same rule as the page it links to."""
 
     check_ins_today: int
+    inside_now: int
     expiring_soon: int
     waiting: int
     payments_today: PaymentsToday
+    # Equipment reported broken or being repaired, and services due within 7 days or overdue.
+    equipment_attention: int
+    equipment_service_due: int
     # The next classes that have not started yet, soonest first.
     next_classes: list[ClassRead]
 
@@ -836,8 +961,10 @@ class ActivityEvent(str, Enum):
     # One session ended: by its owner, or by the server when a replaced refresh token came back.
     SESSION_REVOKE = "session_revoke"
     ACCOUNT_DELETE = "account_delete"
-    # A CSV download (payments, activity, users, workouts or groups).
+    # A CSV download (payments, expenses, activity, users, workouts or groups).
     EXPORT = "export"
+    # An admin deleted an expense, so that month's total changed.
+    EXPENSE_DELETE = "expense_delete"
     # An admin removed someone's workout or training group (content moderation).
     WORKOUT_DELETE = "workout_delete"
     GROUP_DELETE = "group_delete"
@@ -939,7 +1066,7 @@ class SecuritySummary(SQLModel):
     last_7_days: FailedLoginWindow
 
 
-# --- Workouts and training groups (final spec 2.2) ---
+# --- Training groups and their workouts (final spec 2.2) ---
 
 WorkoutTitle = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
 # Optional free text: trimmed, and blank becomes null.
@@ -959,8 +1086,8 @@ def _check_workout_date(value: date | None) -> date | None:
 
 
 class TrainingGroup(SQLModel, table=True):
-    """A group that shares workouts. Its owner holds every group permission (app/rbac.py) and is not a row in
-    group_member; the other people in it are."""
+    """Members training under a trainer. Its owner (the trainer or staff member who started it) holds every group
+    permission (app/rbac.py) and is not a row in group_member; the other people in it are."""
 
     __tablename__ = "training_group"
 
@@ -985,20 +1112,22 @@ class GroupMember(SQLModel, table=True):
 
 
 class Workout(SQLModel, table=True):
-    """A workout. Without a group it is personal: only its owner can see it. In a group, the group's members see it
-    and their group permissions decide who may add, edit and assign it."""
+    """A workout in a training group. The group's members see it and their group permissions decide who may add, edit
+    and assign it. (Rows with no group are personal workouts from an earlier version: only moderation lists them.)"""
 
     __tablename__ = "workout"
 
     id: int | None = Field(default=None, primary_key=True)
-    # Who added it. A personal workout is deleted with its owner's account; a group workout stays, with no owner.
+    # Who added it. The workout stays, with no owner, when that account is deleted.
     owner_id: int | None = Field(default=None, foreign_key="app_user.id", ondelete="SET NULL", index=True)
     group_id: int | None = Field(default=None, foreign_key="training_group.id", ondelete="CASCADE", index=True)
     title: str = Field(max_length=100)
     workout_date: date
     notes: str | None = Field(default=None, max_length=1000)
-    # Only on a group workout: the group member (or the owner) it is for.
+    # The group member (or the owner) it is for.
     assigned_to: int | None = Field(default=None, foreign_key="app_user.id", ondelete="SET NULL", index=True)
+    # When the person it is assigned to marked it done; None until then, and again when it is reassigned.
+    completed_at: datetime | None = None
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
 
@@ -1007,8 +1136,8 @@ class WorkoutCreate(SQLModel):
     title: WorkoutTitle
     workout_date: date
     notes: WorkoutNotes = None
-    # Set to add it to that group (needs the create permission there); left out, the workout is personal.
-    group_id: AccountId | None = None
+    # The group it is added to (needs the create permission there).
+    group_id: AccountId
     # A member of that group to assign it to (needs the assign permission too).
     assigned_to: AccountId | None = None
 
@@ -1016,12 +1145,6 @@ class WorkoutCreate(SQLModel):
     @classmethod
     def date_in_range(cls, value: date) -> date:
         return _check_workout_date(value)
-
-    @model_validator(mode="after")
-    def assign_only_in_group(self) -> "WorkoutCreate":
-        if self.assigned_to is not None and self.group_id is None:
-            raise ValueError("assigned_to needs a group_id: only a group workout can be assigned")
-        return self
 
 
 class WorkoutUpdate(SQLModel):
@@ -1050,6 +1173,11 @@ class WorkoutAssign(SQLModel):
     user_id: AccountId | None
 
 
+class WorkoutCompletion(SQLModel):
+    # true marks it done, false clears the mark.
+    done: bool
+
+
 class WorkoutRead(SQLModel):
     id: int
     title: str
@@ -1062,6 +1190,7 @@ class WorkoutRead(SQLModel):
     owner_name: str | None
     assigned_to: int | None
     assigned_to_name: str | None
+    completed_at: UtcDateTime | None
     created_at: UtcDateTime
     updated_at: UtcDateTime
 
@@ -1148,14 +1277,17 @@ class AdminSessionRead(SQLModel):
     user_agent: str | None
 
 
-class UserWorkoutCounts(SQLModel):
-    """How many workouts the user has, without their content: a personal workout stays private (FR-90)."""
+class UserRecordCounts(SQLModel):
+    """How much the account has on record; the lists themselves are on the pages they belong to."""
 
-    personal: int
+    visits: int
+    bookings: int
+    payments: int
     # Workouts the user added to groups.
-    in_groups: int
-    # Group workouts assigned to the user.
-    assigned: int
+    workouts_added: int
+    # Workouts assigned to the user, and how many of those they marked done.
+    workouts_assigned: int
+    workouts_completed: int
 
 
 class UserGroupRead(SQLModel):
@@ -1167,13 +1299,13 @@ class UserGroupRead(SQLModel):
 
 
 class AdminUserDetail(AdminUserRead):
-    """GET /admin/users/{id}: the account and membership, plus its logins, workouts, groups and recent activity."""
+    """GET /admin/users/{id}: the account and membership, plus its logins, records, groups and recent activity."""
 
     joined_on: date | None
     # Set while too many wrong passwords block the account's logins.
     locked_until: UtcDateTime | None
     sessions: list[AdminSessionRead]
-    workouts: UserWorkoutCounts
+    records: UserRecordCounts
     groups: list[UserGroupRead]
     # The newest rows where the user acted or was acted on (the Activity page has the rest).
     recent_activity: list[ActivityRead]
@@ -1181,7 +1313,6 @@ class AdminUserDetail(AdminUserRead):
 
 # --- Content moderation (admin) ---
 
-WorkoutKind = Literal["personal", "group"]
 ModerationSearch = Annotated[str, StringConstraints(strip_whitespace=True, max_length=100)] | None
 
 
@@ -1201,8 +1332,6 @@ class ModerationWorkoutFilter(_DateRange):
 
     owner_id: AccountId | None = None
     group_id: AccountId | None = None
-    # personal: in no group; group: in a group.
-    kind: WorkoutKind | None = None
     # Part of the title, the notes, or the owner's name or email, any case.
     q: ModerationSearch = None
 
@@ -1254,3 +1383,186 @@ class ContentDeleted(SQLModel):
     """How many were deleted; ids that match nothing are skipped. A group's workouts are not counted here."""
 
     deleted: int
+
+
+# --- Equipment and its maintenance ---
+
+EquipmentCategory = Literal["cardio", "strength", "free_weights", "functional", "other"]
+EquipmentStatus = Literal["working", "maintenance", "out_of_order"]
+EquipmentNotes = Annotated[Annotated[str, StringConstraints(max_length=500)] | None, BeforeValidator(_blank_to_none)]
+Quantity = Annotated[int, Field(ge=1, le=1_000)]
+ServiceDays = Annotated[int, Field(ge=1, le=3_660)]
+# "Service due" counts overdue services and the ones due in the next 7 days.
+SERVICE_DUE_DAYS = 7
+
+
+def _past_day(value: date | None) -> date | None:
+    if value is not None and not date(1980, 1, 1) <= value <= utc_today():
+        raise ValueError("the date must be between 1980-01-01 and today (UTC)")
+    return value
+
+
+# A day in the past, or today: when something was bought, serviced or paid for.
+PastDay = Annotated[date, AfterValidator(_past_day)]
+
+
+class Equipment(SQLModel, table=True):
+    """A machine (or a set of the same item) the gym owns, and whether it works."""
+
+    __tablename__ = "equipment"
+
+    id: int | None = Field(default=None, primary_key=True)
+    name: str = Field(max_length=100)
+    category: str = Field(max_length=20)
+    quantity: int = 1
+    status: str = Field(default="working", max_length=20, index=True)
+    purchased_on: date | None = None
+    # How often it is serviced; None for something that needs no regular service.
+    service_every_days: int | None = None
+    last_serviced_on: date | None = None
+    # Worked out on every save from the fields above (equipment_service), so the list can filter on it.
+    next_service_on: date | None = Field(default=None, index=True)
+    # The fault someone reported; cleared when it works again.
+    issue: str | None = Field(default=None, max_length=500)
+    reported_by: int | None = Field(default=None, foreign_key="app_user.id", ondelete="SET NULL")
+    reported_at: datetime | None = None
+    notes: str | None = Field(default=None, max_length=500)
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+
+
+class EquipmentCreate(SQLModel):
+    name: FullName
+    category: EquipmentCategory
+    quantity: Quantity = 1
+    purchased_on: PastDay | None = None
+    service_every_days: ServiceDays | None = None
+    last_serviced_on: PastDay | None = None
+    notes: EquipmentNotes = None
+
+
+class EquipmentUpdate(SQLModel):
+    """Only the fields sent change. Setting status back to working clears a reported fault."""
+
+    name: FullName | None = None
+    category: EquipmentCategory | None = None
+    quantity: Quantity | None = None
+    status: EquipmentStatus | None = None
+    purchased_on: PastDay | None = None
+    service_every_days: ServiceDays | None = None
+    last_serviced_on: PastDay | None = None
+    notes: EquipmentNotes = None
+
+    @model_validator(mode="after")
+    def check_required_not_null(self) -> "EquipmentUpdate":
+        for name in ("name", "category", "quantity", "status"):
+            if name in self.model_fields_set and getattr(self, name) is None:
+                raise ValueError(f"{name} cannot be null")
+        return self
+
+
+class EquipmentReport(SQLModel):
+    issue: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]
+
+
+class EquipmentFilter(SQLModel):
+    status: EquipmentStatus | None = None
+    category: EquipmentCategory | None = None
+    # Only equipment that is broken or being repaired.
+    needs_attention: bool = False
+    # Only equipment whose service is overdue or due in the next 7 days.
+    service_due: bool = False
+    # Part of the name, any case.
+    q: Annotated[str, StringConstraints(strip_whitespace=True, max_length=100)] | None = None
+
+
+class EquipmentRead(SQLModel):
+    id: int
+    name: str
+    category: EquipmentCategory
+    quantity: int
+    status: EquipmentStatus
+    purchased_on: date | None
+    service_every_days: int | None
+    last_serviced_on: date | None
+    next_service_on: date | None
+    issue: str | None
+    reported_by_name: str | None
+    reported_at: UtcDateTime | None
+    notes: str | None
+
+
+class EquipmentPage(SQLModel):
+    items: list[EquipmentRead]
+    total: int
+    offset: int
+    limit: int
+
+
+# --- Expenses ---
+
+ExpenseCategory = Literal["rent", "salaries", "utilities", "equipment", "maintenance", "marketing", "other"]
+ExpenseText = Annotated[Annotated[str, StringConstraints(max_length=200)] | None, BeforeValidator(_blank_to_none)]
+
+
+class Expense(SQLModel, table=True):
+    """Money the gym spent. Payments minus expenses is the month's net income."""
+
+    __tablename__ = "expense"
+
+    id: int | None = Field(default=None, primary_key=True)
+    category: str = Field(max_length=20)
+    amount: int
+    spent_on: date = Field(index=True)
+    description: str | None = Field(default=None, max_length=200)
+    recorded_by: int | None = Field(default=None, foreign_key="app_user.id", ondelete="SET NULL")
+    created_at: datetime = Field(default_factory=utc_now)
+
+
+class ExpenseCreate(SQLModel):
+    category: ExpenseCategory
+    amount: Amount
+    spent_on: PastDay
+    description: ExpenseText = None
+
+
+class ExpenseUpdate(SQLModel):
+    """Only the fields sent change."""
+
+    category: ExpenseCategory | None = None
+    amount: Amount | None = None
+    spent_on: PastDay | None = None
+    description: ExpenseText = None
+
+    @model_validator(mode="after")
+    def check_required_not_null(self) -> "ExpenseUpdate":
+        for name in ("category", "amount", "spent_on"):
+            if name in self.model_fields_set and getattr(self, name) is None:
+                raise ValueError(f"{name} cannot be null")
+        return self
+
+
+class ExpenseFilter(_DateRange):
+    """Filters for the expense list and its CSV. The dates are spent_on, both included."""
+
+    category: ExpenseCategory | None = None
+    # Part of the description, any case.
+    q: Annotated[str, StringConstraints(strip_whitespace=True, max_length=100)] | None = None
+
+
+class ExpenseRead(SQLModel):
+    id: int
+    category: ExpenseCategory
+    amount: int
+    spent_on: date
+    description: str | None
+    recorded_by_name: str | None
+
+
+class ExpensePage(SQLModel):
+    items: list[ExpenseRead]
+    total: int
+    offset: int
+    limit: int
+    # The sum of every matching expense, not just this page.
+    total_amount: int

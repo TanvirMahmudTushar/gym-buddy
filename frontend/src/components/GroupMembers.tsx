@@ -1,6 +1,10 @@
-import { type FormEvent, useState } from "react"
+import { type FormEvent, useEffect, useState } from "react"
+import { useAuth } from "../context/AuthContext"
 import { addMember, removeMember, updateMember } from "../services/groupService"
+import { listMyClients } from "../services/trainerService"
+import type { Client } from "../types/gymClass"
 import type { Group, GroupMember, MemberFlag } from "../types/workout"
+import { can } from "../utils/auth"
 import { errorText } from "../utils/member"
 import { MEMBER_FLAGS, canInGroup } from "../utils/workout"
 
@@ -21,6 +25,10 @@ const ordered = (list: GroupMember[]) =>
 // them; everyone else sees the same table read-only.
 export default function GroupMembers({ group, members, meId, onMembersChange }: Props) {
   const isOwner = canInGroup(group, "manage")
+  const { user } = useAuth()
+  // A trainer's own clients are suggested in the email box.
+  const suggestClients = isOwner && can(user, "clients:read")
+  const [clients, setClients] = useState<Client[]>([])
   const [busyId, setBusyId] = useState<number | null>(null)
   const [removingId, setRemovingId] = useState<number | null>(null)
   const [error, setError] = useState("")
@@ -29,6 +37,17 @@ export default function GroupMembers({ group, members, meId, onMembersChange }: 
   const [flags, setFlags] = useState(NO_FLAGS)
   const [adding, setAdding] = useState(false)
   const [addError, setAddError] = useState("")
+
+  useEffect(() => {
+    if (!suggestClients) return
+    let ignore = false
+    listMyClients(0, 100)
+      .then((page) => !ignore && setClients(page.items))
+      .catch(() => undefined) // the email can still be typed
+    return () => {
+      ignore = true
+    }
+  }, [suggestClients])
 
   async function toggle(m: GroupMember, flag: MemberFlag, value: boolean) {
     setBusyId(m.user_id)
@@ -172,6 +191,7 @@ export default function GroupMembers({ group, members, meId, onMembersChange }: 
             <label htmlFor="group-add-email">Add someone by email</label>
             <input
               id="group-add-email"
+              list="my-clients"
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
@@ -179,6 +199,15 @@ export default function GroupMembers({ group, members, meId, onMembersChange }: 
               placeholder="rafi@example.com"
               autoComplete="off"
             />
+            <datalist id="my-clients">
+              {clients
+                .filter((c) => !members.some((m) => m.user_id === c.id))
+                .map((c) => (
+                  <option key={c.id} value={c.email}>
+                    {c.name}
+                  </option>
+                ))}
+            </datalist>
           </div>
           {MEMBER_FLAGS.map((f) => (
             <label key={f.flag} className="checkbox-row" htmlFor={`group-add-${f.flag}`}>
@@ -198,7 +227,7 @@ export default function GroupMembers({ group, members, meId, onMembersChange }: 
           </div>
         </form>
       )}
-      {isOwner && <p className="hint">The person must have signed up already. There are no invitations: they see the group straight away.</p>}
+      {isOwner && <p className="hint">The person must have an account already. There are no invitations: they see the group straight away.</p>}
       {addError && (
         <p className="error" role="alert">
           {addError}

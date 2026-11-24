@@ -1,4 +1,4 @@
-/* One page, two columns: add form + member list on the left, sticky detail panel on the right. */
+/* Logged in: a sidebar with the menu beside the page. Logged out: one centred page. */
 :root {
   --bg: #f3f6f5;
   --surface: #ffffff;
@@ -248,7 +248,19 @@ button.danger.solid {
   border-radius: 999px;
 }
 
-.chip[aria-pressed="true"] {
+a.chip {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  text-decoration: none;
+}
+
+a.chip:hover {
+  border-color: var(--accent);
+}
+
+.chip[aria-pressed="true"],
+a.chip[aria-current="true"] {
   background: var(--accent);
   color: var(--accent-ink);
   border-color: var(--accent);
@@ -417,11 +429,65 @@ dd {
   gap: 8px;
 }
 
-/* Login, accounts and roles */
-.topbar {
+/* The frame: sidebar and content */
+.shell {
+  display: grid;
+  grid-template-columns: 224px minmax(0, 1fr);
+  min-height: 100vh;
+}
+
+.sidebar {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  flex-wrap: nowrap;
+  gap: 16px;
+  padding: 20px 12px 16px;
+  background: var(--surface);
+  border-right: 1px solid var(--line);
+}
+
+.sidebar-head {
+  display: flex;
   justify-content: space-between;
   align-items: center;
-  row-gap: 8px;
+  gap: 8px;
+  padding: 0 8px;
+}
+
+.sidebar .brand {
+  flex-direction: column;
+  gap: 0;
+}
+
+.sidebar h1 {
+  font-size: 22px;
+}
+
+.menu-button {
+  display: none;
+}
+
+.sidebar-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.content {
+  width: 100%;
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 24px 24px 48px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
 
 .brand {
@@ -433,12 +499,26 @@ dd {
 
 nav {
   display: flex;
-  gap: 4px;
-  flex-wrap: wrap;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.nav-section {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.nav-title {
+  padding: 0 8px 4px;
+  font-family: var(--body);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
 }
 
 nav a {
-  padding: 6px 12px;
+  padding: 6px 8px;
   border-radius: 6px;
   color: var(--ink);
   text-decoration: none;
@@ -447,7 +527,7 @@ nav a {
 }
 
 nav a:hover {
-  background: var(--surface);
+  background: var(--bg);
 }
 
 nav a[aria-current="page"] {
@@ -455,6 +535,7 @@ nav a[aria-current="page"] {
   color: var(--accent-ink);
 }
 
+/* Login, accounts and roles */
 a {
   color: var(--accent);
 }
@@ -467,8 +548,11 @@ a:focus-visible {
 .who {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 10px;
   flex-wrap: wrap;
+  padding: 12px 8px 0;
+  border-top: 1px solid var(--line);
   font-size: 14px;
 }
 
@@ -536,7 +620,7 @@ a:focus-visible {
 /* Admin dashboard and ban / unban */
 .stats {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
   gap: 12px;
   margin: 0;
 }
@@ -971,6 +1055,35 @@ input.search {
 }
 
 @media (max-width: 860px) {
+  .shell {
+    grid-template-columns: minmax(0, 1fr);
+    align-content: start;
+  }
+
+  .sidebar {
+    position: static;
+    height: auto;
+    padding: 12px;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .menu-button {
+    display: block;
+  }
+
+  .sidebar-body {
+    display: none;
+  }
+
+  .sidebar.open .sidebar-body {
+    display: flex;
+  }
+
+  .content {
+    padding: 16px 16px 48px;
+  }
+
   .layout {
     grid-template-columns: 1fr;
   }

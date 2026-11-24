@@ -1,4 +1,4 @@
-# Role and resource permissions (app/rbac.py, SRS 3.11): roles on admin and staff routes, private workouts, group
+# Role and resource permissions (app/rbac.py, SRS 3.11): roles on admin and staff routes, private groups, group
 # permissions, and the admin safety rules.
 import pytest
 
@@ -50,21 +50,42 @@ def test_role_change_applies_on_the_next_request(account):
     assert trainer.client.get("/api/v1/trainers/me/classes").status_code == 403
 
 
-def test_another_users_personal_workout_is_404(account):
-    owner = account("rafi")
-    other = account("sara")
+def test_members_cannot_start_a_group_but_trainers_and_staff_can(account):
+    assert account("rafi").client.post("/api/v1/groups", json={"name": "Mine"}).status_code == 403
+    for role in ("trainer", "gym_manager", "admin"):
+        caller = account(role.replace("_", ""), role=role)
+        assert caller.client.post("/api/v1/groups", json={"name": "Strength"}).status_code == 201
+
+
+def test_a_group_and_its_workouts_are_404_for_an_outsider(account):
+    trainer = account("karim", role="trainer")
+    outsider = account("sara")
     admin = account("ada", role="admin")
-    workout = owner.client.post("/api/v1/workouts", json={"title": "Leg day", "workout_date": "2026-11-20"}).json()
+    group = trainer.client.post("/api/v1/groups", json={"name": "Strength"}).json()["id"]
+    workout = trainer.client.post(
+        "/api/v1/workouts", json={"title": "Leg day", "workout_date": "2026-11-20", "group_id": group}
+    ).json()
     path = f"/api/v1/workouts/{workout['id']}"
-    assert owner.client.get(path).status_code == 200
-    for client in (other.client, admin.client):  # an admin too: only moderation reaches other people's content
+    assert trainer.client.get(path).status_code == 200
+    for client in (outsider.client, admin.client):  # an admin too: only moderation reaches other people's groups
+        assert client.get(f"/api/v1/groups/{group}").status_code == 404
         assert client.get(path).status_code == 404
         assert client.patch(path, json={"title": "Changed"}).status_code == 404
         assert client.delete(path).status_code == 404
 
 
+def test_a_user_cannot_reach_another_users_records(account):
+    rafi = account("rafi")
+    sara = account("sara")
+    session_id = sara.client.get("/api/v1/users/me/sessions").json()[0]["id"]
+    # Another person's login session answers 404, as if it did not exist; their membership record needs staff (403).
+    assert rafi.client.delete(f"/api/v1/users/me/sessions/{session_id}").status_code == 404
+    assert rafi.client.get(f"/api/v1/members/{sara.id}").status_code == 403
+    assert rafi.client.get(f"/api/v1/members/{sara.id}/payments").status_code == 403
+
+
 def test_group_member_without_can_update_gets_403_and_with_it_200(account):
-    owner = account("rafi")
+    owner = account("karim", role="trainer")
     member = account("sara")
     outsider = account("nadia")
     group = owner.client.post("/api/v1/groups", json={"name": "Morning crew"}).json()["id"]
@@ -83,7 +104,7 @@ def test_group_member_without_can_update_gets_403_and_with_it_200(account):
 
 
 def test_only_the_owner_renames_or_deletes_a_group(account):
-    owner = account("rafi")
+    owner = account("karim", role="trainer")
     member = account("sara")
     group = owner.client.post("/api/v1/groups", json={"name": "Morning crew"}).json()["id"]
     owner.client.post(

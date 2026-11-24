@@ -9,7 +9,7 @@ from fastapi import Depends
 from sqlalchemy import inspect, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.pool import NullPool
-from sqlmodel import Session, SQLModel, create_engine
+from sqlmodel import Session, SQLModel, create_engine, select
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 
@@ -74,10 +74,26 @@ _ADDED_COLUMNS = [
     ("payment", "voided_by", "INTEGER REFERENCES app_user (id)"),
     # A class's trainer is an account with the Trainer role.
     ("gym_class", "trainer_id", "INTEGER REFERENCES app_user (id) ON DELETE SET NULL"),
+    # A member's personal trainer.
+    ("app_user", "trainer_id", "INTEGER REFERENCES app_user (id) ON DELETE SET NULL"),
+    # Plans an admin can add, rename and retire.
+    ("plan_price", "name", "VARCHAR(60) NOT NULL DEFAULT ''"),
+    ("plan_price", "description", "VARCHAR(300)"),
+    ("plan_price", "is_active", "BOOLEAN NOT NULL DEFAULT TRUE"),
+    # Checking out, class attendance, and workouts marked done.
+    ("check_in", "checked_out_at", "TIMESTAMP"),
+    ("class_booking", "attended", "BOOLEAN"),
+    ("workout", "completed_at", "TIMESTAMP"),
 ]
 
 # Indexes on the columns above, which create_all() also leaves out on an existing table (names as SQLModel gives them).
-_ADDED_INDEXES = [("ix_gym_class_trainer_id", "gym_class", "trainer_id")]
+_ADDED_INDEXES = [
+    ("ix_gym_class_trainer_id", "gym_class", "trainer_id"),
+    ("ix_app_user_trainer_id", "app_user", "trainer_id"),
+]
+
+# Plan codes were at most 10 characters ("quarterly"); a code made from a plan's name can be longer.
+_PLAN_COLUMNS = [("plan_price", "plan"), ("app_user", "plan"), ("payment", "plan")]
 
 # Before members became users, these tables pointed at member.id. They are dropped (data and all) and
 # create_all() makes them again pointing at app_user.id. Dependent tables first, member last.
@@ -109,14 +125,34 @@ def _add_missing_columns() -> None:
             conn.execute(text(f"CREATE INDEX IF NOT EXISTS {index} ON {table} ({column})"))
 
 
-def _seed_plan_prices() -> None:
-    """Give a new database the default plan prices. Existing prices are never changed."""
-    from app.models import DEFAULT_PLAN_PRICES, PlanPrice
+def _widen_plan_columns() -> None:
+    """PostgreSQL only, and only once: SQLite does not enforce a VARCHAR's length."""
+    from app.models import PLAN_CODE_LENGTH
+
+    if engine.dialect.name != "postgresql":
+        return
+    with engine.begin() as conn:
+        found = inspect(conn)
+        for table, column in _PLAN_COLUMNS:
+            length = next(c["type"].length for c in found.get_columns(table) if c["name"] == column)
+            if length is not None and length < PLAN_CODE_LENGTH:
+                conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {column} TYPE VARCHAR({PLAN_CODE_LENGTH})"))
+
+
+def _seed_plans() -> None:
+    """Give a new database the default plans, and plans from before they had names their name. A plan an admin
+    changed, retired or deleted stays that way."""
+    from app.models import DEFAULT_PLANS, MembershipPlan
 
     with Session(engine) as session:
-        for plan, (price, days) in DEFAULT_PLAN_PRICES.items():
-            if session.get(PlanPrice, plan) is None:
-                session.add(PlanPrice(plan=plan, price=price, duration_days=days))
+        plans = session.exec(select(MembershipPlan)).all()
+        if not plans:
+            for code, (name, price, days) in DEFAULT_PLANS.items():
+                session.add(MembershipPlan(plan=code, name=name, price=price, duration_days=days))
+        for plan in plans:
+            if not plan.name:
+                plan.name = plan.plan.replace("-", " ").capitalize()
+                session.add(plan)
         try:
             session.commit()
         except IntegrityError:
@@ -130,7 +166,8 @@ def create_db_and_tables() -> None:
     _drop_old_member_tables()
     SQLModel.metadata.create_all(engine)
     _add_missing_columns()
-    _seed_plan_prices()
+    _widen_plan_columns()
+    _seed_plans()
 
 
 def get_session() -> Iterator[Session]:

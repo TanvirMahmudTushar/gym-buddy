@@ -1,15 +1,10 @@
 import { type FormEvent, useEffect, useState } from "react"
-import GroupDetail from "../../components/GroupDetail"
-import { createGroup, listGroups } from "../../services/groupService"
-import type { Group } from "../../types/workout"
-import { errorText, hashParams } from "../../utils/member"
-import { canInGroup, groupLink } from "../../utils/workout"
-
-/** The group named in the address (#/groups?group=5), or null for the list. */
-function groupFromHash(): number | null {
-  const id = Number(hashParams().get("group"))
-  return Number.isInteger(id) && id > 0 ? id : null
-}
+import { useAuth } from "../context/AuthContext"
+import { createGroup, listGroups } from "../services/groupService"
+import type { Group } from "../types/workout"
+import { can } from "../utils/auth"
+import { errorText } from "../utils/member"
+import { canInGroup, groupLink } from "../utils/workout"
 
 /** What I may do in a group, in a few words for the list. */
 function myRole(group: Group): string {
@@ -18,8 +13,10 @@ function myRole(group: Group): string {
   return can.length ? `Member: ${can.join(", ")}` : "Member: view only"
 }
 
-// The groups I own or am in, and a form to start one. I become the owner of a group I start.
-function GroupList() {
+// The training groups I own or am in. Trainers and staff can start one, and own the ones they start.
+export default function GroupList() {
+  const { user } = useAuth()
+  const canStart = can(user, "groups:create")
   const [groups, setGroups] = useState<Group[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -79,25 +76,28 @@ function GroupList() {
     <section className="card" aria-labelledby="groups-heading">
       <h2 id="groups-heading">Training groups</h2>
       <p className="hint">
-        Share workouts with a group. The person who starts a group owns it: they add people by email and tick what each
-        one may do. Everyone in the group sees its workouts.
+        {canStart
+          ? "Members train together under a trainer. You own the groups you start: add members by email and tick what each one may do. Everyone in a group sees its workouts."
+          : "The training groups your trainer added you to."}
       </p>
-      <form className="inline" onSubmit={create} noValidate aria-label="Start a group">
-        <div className="field">
-          <label htmlFor="new-group-name">New group</label>
-          <input
-            id="new-group-name"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            maxLength={100}
-            placeholder="Morning strength crew"
-            autoComplete="off"
-          />
-        </div>
-        <button className="primary" type="submit" disabled={creating}>
-          {creating ? "Starting…" : "Start group"}
-        </button>
-      </form>
+      {canStart && (
+        <form className="inline" onSubmit={create} noValidate aria-label="Start a group">
+          <div className="field">
+            <label htmlFor="new-group-name">New group</label>
+            <input
+              id="new-group-name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              maxLength={100}
+              placeholder="Morning strength crew"
+              autoComplete="off"
+            />
+          </div>
+          <button className="primary" type="submit" disabled={creating}>
+            {creating ? "Starting…" : "Start group"}
+          </button>
+        </form>
+      )}
       {createError && (
         <p className="error" role="alert">
           {createError}
@@ -111,7 +111,7 @@ function GroupList() {
       {loading ? (
         <p className="empty">Loading your groups…</p>
       ) : groups.length === 0 ? (
-        <p className="empty">You are not in any group yet. Start one above, or ask a group's owner to add you.</p>
+        <p className="empty">{canStart ? "You have no groups yet. Start one above." : "You are not in a training group yet. Ask your trainer to add you."}</p>
       ) : (
         <div className="table-wrap">
           <table>
@@ -154,18 +154,4 @@ function GroupList() {
       )}
     </section>
   )
-}
-
-// Everyone: my training groups, or one group when the address names it (#/groups?group=5).
-export default function GroupsPage() {
-  const [groupId, setGroupId] = useState<number | null>(groupFromHash)
-
-  // Links inside the page change only the part after ?, so the page follows the address itself.
-  useEffect(() => {
-    const onChange = () => setGroupId(groupFromHash())
-    window.addEventListener("hashchange", onChange)
-    return () => window.removeEventListener("hashchange", onChange)
-  }, [])
-
-  return groupId === null ? <GroupList /> : <GroupDetail key={groupId} groupId={groupId} />
 }

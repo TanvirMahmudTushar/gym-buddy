@@ -35,10 +35,22 @@ export interface ClassBody {
   capacity: number
 }
 
-/** An account with the Trainer role, as a choice in the class form. */
+/** An account with the Trainer role, as a choice in the class and member forms. */
 export interface Trainer {
   id: number
   name: string
+}
+
+/** A member as their personal trainer sees them. */
+export interface Client {
+  id: number
+  name: string
+  email: string
+  phone: string | null
+  plan: string
+  expires_on: string
+  is_frozen: boolean
+  last_visit_at: string | null
 }
 
 export interface Booking {
@@ -46,6 +58,8 @@ export interface Booking {
   member_id: number
   member_name: string
   booked_at: string
+  /** Marked by the trainer or the front desk; null when not marked. */
+  attended: boolean | null
 }
 
 /** Which of a member's bookings, or a trainer's classes, to list: classes still to come, or ones that have started. */
@@ -59,6 +73,7 @@ export interface BookedClass {
   duration_minutes: number
   trainer_name: string | null
   booked_at: string
+  attended: boolean | null
 }
 
 export interface BookedClassPage {

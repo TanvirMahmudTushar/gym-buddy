@@ -13,8 +13,17 @@ export const MEMBER_FLAGS: { flag: MemberFlag; label: string; description: strin
   { flag: "can_assign", label: "Assign", description: "Assign workouts to people in the group" },
 ]
 
-/** The address of the Groups page, opened on one group: #/groups?group=5. */
-export const groupLink = (id: number | null) => (id === null ? "#/groups" : `#/groups?group=${id}`)
+export type TrainingTab = "assigned" | "groups" | "all-groups" | "all-workouts"
+
+/** The address of the Training page, on one of its tabs: #/training?tab=groups. */
+export function trainingLink(tab: TrainingTab, owner: number | null = null): string {
+  const params = new URLSearchParams({ tab })
+  if (owner) params.set("owner", String(owner))
+  return `#/training?${params}`
+}
+
+/** The address of the Training page, opened on one group: #/training?group=5. */
+export const groupLink = (id: number | null) => (id === null ? trainingLink("groups") : `#/training?group=${id}`)
 
 /** The furthest ahead a workout can be planned (the API allows a year from today). */
 export function latestWorkoutDate(): string {

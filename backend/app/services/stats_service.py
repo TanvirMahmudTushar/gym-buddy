@@ -1,10 +1,17 @@
-# The numbers on the admin dashboard.
+# The numbers on the Dashboard: the front desk part (gym managers and admins) and the admin part.
 from datetime import timedelta
 
 from sqlmodel import Session, col, func, select
 
 from app.models import User, utc_now, utc_today
-from app.services import checkin_service, class_service, group_service, payment_service, workout_service
+from app.services import (
+    checkin_service,
+    class_service,
+    equipment_service,
+    group_service,
+    payment_service,
+    workout_service,
+)
 from app.services.member_service import IS_MEMBER, WAITING, status_filters
 
 # "New" and "last 7 days" on the dashboard: a rolling week back from now.
@@ -51,6 +58,8 @@ def check_in_stats(session: Session) -> dict:
     return {
         "today": checkin_service.count_since(session, checkin_service.start_of_today()),
         "last_7_days": checkin_service.count_since(session, utc_now() - timedelta(days=7)),
+        "inside_now": checkin_service.count_inside(session),
+        "by_day": checkin_service.count_by_day(session, 7),
     }
 
 
@@ -62,18 +71,23 @@ def admin_stats(session: Session) -> dict:
         "classes": class_service.class_stats(session),
         "workouts": workout_service.workout_stats(session, utc_now() - WEEK),
         "groups": {"total": group_service.count_groups(session)},
+        "equipment": equipment_service.equipment_stats(session),
     }
 
 
 def staff_overview(session: Session) -> dict:
-    """The Gym Manager's start page. Each number is computed the way the page it links to computes its list:
-    Checked in today, the Expiring soon filter, the waiting list and the payments list for today."""
+    """The front desk part of the Dashboard. Each number is computed the way the page it links to computes its list:
+    Attendance, the Expiring soon filter, the waiting list, the payments list for today and the Equipment filters."""
+    equipment = equipment_service.equipment_stats(session)
     count, amount = payment_service.totals_since(session, utc_today())
     next_classes, _ = class_service.list_classes(session, upcoming=True, offset=0, limit=NEXT_CLASSES)
     return {
         "check_ins_today": checkin_service.count_since(session, checkin_service.start_of_today()),
+        "inside_now": checkin_service.count_inside(session),
         "expiring_soon": _count_members(session, *status_filters("expiring_soon")),
         "waiting": session.exec(select(func.count()).select_from(User).where(*WAITING)).one(),
         "payments_today": {"count": count, "amount": amount},
+        "equipment_attention": equipment["needs_attention"],
+        "equipment_service_due": equipment["service_due"],
         "next_classes": next_classes,
     }

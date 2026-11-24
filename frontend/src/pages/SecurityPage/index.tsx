@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react"
+import SecurityTabs from "../../components/SecurityTabs"
 import Stat from "../../components/Stat"
 import { getSecuritySummary } from "../../services/activityService"
 import type { FailedLoginWindow, SecuritySummary } from "../../types/activity"
@@ -140,7 +141,7 @@ export default function SecurityPage() {
       <div className="toolbar">
         <h2>Security</h2>
         <div className="actions">
-          <a href="#/activity">All activity</a>
+          <SecurityTabs current="security" />
           <button onClick={load} disabled={loading}>
             {loading ? "Refreshing…" : "Refresh"}
           </button>

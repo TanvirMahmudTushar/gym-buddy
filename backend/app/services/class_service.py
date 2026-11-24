@@ -1,15 +1,19 @@
-# Classes and their bookings: what a gym manager runs (SRS FR-25 to FR-28),
+# Classes, their bookings and who attended: what a gym manager runs (SRS FR-25 to FR-28),
 # and the classes a trainer teaches (FR-69 to FR-71).
+from datetime import timedelta
 from typing import Literal
 
 from sqlalchemy import exists, false
 from sqlalchemy.exc import IntegrityError
-from sqlmodel import Session, col, delete, func, select, update
+from sqlmodel import Session, col, delete, func, select
 
 from app import rbac
 from app.models import ClassBooking, ClassCreate, GymClass, User, as_utc, utc_now
 from app.rbac import Permission
-from app.services import checkin_service
+from app.services import checkin_service, trainer_service
+
+# Attendance can be marked from this long before the class starts (people arrive early), and any time after.
+ATTENDANCE_OPENS = timedelta(hours=1)
 
 
 class ClassNotFoundError(Exception):
@@ -36,8 +40,12 @@ class BookingNotFoundError(Exception):
     """This member has no booking for this class."""
 
 
-class TrainerNotFoundError(Exception):
-    """The trainer_id sent is not an account with the Trainer role."""
+class AttendanceNotOpenError(Exception):
+    """The class is still more than an hour away, so nobody can have attended it."""
+
+
+class MemberNotBookedError(Exception):
+    """That member has no booking for this class."""
 
 
 class NotYourClassError(Exception):
@@ -102,13 +110,6 @@ def _trainer_name(session: Session, gym_class: GymClass) -> str | None:
     return trainer.name if trainer else None
 
 
-def _check_trainer(session: Session, trainer_id: int) -> None:
-    # A class's trainer must be an account that can teach (the Trainer role).
-    trainer = session.get(User, trainer_id)
-    if trainer is None or not rbac.has_permission(trainer, Permission.CLASSES_TEACH):
-        raise TrainerNotFoundError(trainer_id)
-
-
 def _get(session: Session, class_id: int) -> GymClass:
     gym_class = session.get(GymClass, class_id)
     if gym_class is None:
@@ -122,7 +123,7 @@ def _count_bookings(session: Session, class_id: int) -> int:
 
 def create_class(session: Session, data: ClassCreate, created_by: User) -> dict:
     if data.trainer_id is not None:
-        _check_trainer(session, data.trainer_id)
+        trainer_service.check_trainer(session, data.trainer_id)
     gym_class = GymClass(**data.model_dump(), created_by=created_by.id)
     session.add(gym_class)
     session.commit()
@@ -176,7 +177,7 @@ def update_class(session: Session, class_id: int, changes: dict) -> dict:
         raise CapacityBelowBookingsError(f"Capacity cannot be lower than the {booked} booking(s) already made")
     if "trainer_id" in changes:
         if changes["trainer_id"] is not None:
-            _check_trainer(session, changes["trainer_id"])
+            trainer_service.check_trainer(session, changes["trainer_id"])
         # Choosing a trainer, or none, replaces the old text name.
         changes = {**changes, "trainer_name": None}
     gym_class.sqlmodel_update(changes)
@@ -187,16 +188,6 @@ def update_class(session: Session, class_id: int, changes: dict) -> dict:
     return _read(gym_class, _trainer_name(session, gym_class), booked)
 
 
-def release_trainer(session: Session, trainer: User) -> None:
-    """When someone stops being a trainer, their classes keep their name as text and no longer point at them.
-    The caller commits."""
-    session.exec(
-        update(GymClass)
-        .where(col(GymClass.trainer_id) == trainer.id)
-        .values(trainer_id=None, trainer_name=trainer.name)
-    )
-
-
 def delete_class(session: Session, class_id: int) -> None:
     gym_class = _get(session, class_id)
     # Bookings go first: the database cascades too, but SQLite does not enforce that by default.
@@ -205,13 +196,22 @@ def delete_class(session: Session, class_id: int) -> None:
     session.commit()
 
 
-def list_bookings(session: Session, class_id: int, offset: int, limit: int, viewer: User) -> tuple[list[dict], int]:
-    """Who booked this class: member name and booking time, in the order they booked.
-    Whoever manages classes sees every class's bookings; a trainer only those of the classes they teach."""
+def _get_for_staff(session: Session, class_id: int, viewer: User) -> GymClass:
+    """Whoever manages classes may open every class's bookings; a trainer only those of the classes they teach."""
     gym_class = _get(session, class_id)
     # The class itself is public, so another trainer's class is a 403, not a 404.
     if not rbac.has_permission(viewer, Permission.CLASSES_MANAGE) and not rbac.is_owner(viewer, gym_class.trainer_id):
         raise NotYourClassError(class_id)
+    return gym_class
+
+
+def _booking_read(booking: ClassBooking, member_name: str) -> dict:
+    return {**booking.model_dump(), "member_name": member_name}
+
+
+def list_bookings(session: Session, class_id: int, offset: int, limit: int, viewer: User) -> tuple[list[dict], int]:
+    """Who booked this class, in the order they booked, and who attended."""
+    _get_for_staff(session, class_id, viewer)
     total = _count_bookings(session, class_id)
     query = (
         select(ClassBooking, User.name)
@@ -221,11 +221,24 @@ def list_bookings(session: Session, class_id: int, offset: int, limit: int, view
         .offset(offset)
         .limit(limit)
     )
-    items = [
-        {"class_id": b.class_id, "member_id": b.member_id, "member_name": name, "booked_at": b.booked_at}
-        for b, name in session.exec(query).all()
-    ]
-    return items, total
+    return [_booking_read(b, name) for b, name in session.exec(query).all()], total
+
+
+def mark_attendance(
+    session: Session, class_id: int, member_id: int, attended: bool | None, viewer: User
+) -> dict:
+    """Mark whether someone who booked came. Marking again changes the mark; null clears it."""
+    gym_class = _get_for_staff(session, class_id, viewer)
+    if as_utc(gym_class.starts_at) - ATTENDANCE_OPENS > utc_now():
+        raise AttendanceNotOpenError
+    booking = session.get(ClassBooking, (class_id, member_id))
+    if booking is None:
+        raise MemberNotBookedError(member_id)
+    booking.attended = attended
+    session.add(booking)
+    session.commit()
+    session.refresh(booking)
+    return _booking_read(booking, session.get(User, member_id).name)
 
 
 def class_stats(session: Session) -> dict:
@@ -256,12 +269,7 @@ def book_class(session: Session, class_id: int, member: User) -> dict:
         session.rollback()
         raise AlreadyBookedError from exc
     session.refresh(booking)
-    return {
-        "class_id": booking.class_id,
-        "member_id": booking.member_id,
-        "member_name": member.name,
-        "booked_at": booking.booked_at,
-    }
+    return _booking_read(booking, member.name)
 
 
 def list_member_bookings(
@@ -288,6 +296,7 @@ def list_member_bookings(
             "duration_minutes": c.duration_minutes,
             "trainer_name": trainer,
             "booked_at": b.booked_at,
+            "attended": b.attended,
         }
         for b, c, trainer in rows
     ]

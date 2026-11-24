@@ -1,4 +1,5 @@
 import { type FormEvent, useEffect, useState } from "react"
+import SecurityTabs from "../../components/SecurityTabs"
 import { exportActivityCsv, listActivity } from "../../services/activityService"
 import type { ActivityEntry, ActivityEvent, ActivityFilters } from "../../types/activity"
 import { EVENTS, NO_ACTIVITY_FILTERS, activityLink, eventLabel, eventPill } from "../../utils/activity"
@@ -183,17 +184,17 @@ export default function ActivityPage() {
   return (
     <section className="card" aria-labelledby="activity-heading">
       <div className="toolbar">
-        <h2 id="activity-heading">Activity</h2>
+        <h2 id="activity-heading">Security</h2>
         <div className="actions">
-          <a href="#/security">Security view</a>
+          <SecurityTabs current="activity" />
           <button onClick={exportCsv} disabled={exporting || loading || total === 0}>
             {exporting ? "Exporting…" : "Export CSV"}
           </button>
         </div>
       </div>
       <p className="hint">
-        Logins, failed logins, password and role changes, bans, ended sessions, deleted accounts, removed workouts and
-        groups, and exports, with who did them, from which address and browser, and when. Passwords and tokens are never recorded.
+        Logins, failed logins, password and role changes, bans, ended sessions, deleted accounts and expenses, removed
+        workouts and groups, and exports, with who did them, from which address and browser, and when. Passwords and tokens are never recorded.
       </p>
       <form className="filters" onSubmit={apply} noValidate aria-label="Filter activity">
         <div className="field">

@@ -6,22 +6,18 @@ from sqlalchemy.orm import aliased
 from sqlmodel import Session, col, func, select, update
 
 from app.models import (
-    DEFAULT_PLAN_PRICES,
     ActivityEvent,
     Payment,
     PaymentCreate,
     PaymentFilter,
-    PlanPrice,
     User,
     start_of_day,
     utc_now,
     utc_today,
 )
 from app.request_info import Client
-from app.services import activity_service, member_service
+from app.services import activity_service, member_service, plan_service
 from app.services.csv_export import describe_filters, to_csv, utc_text
-
-PLAN_ORDER = ["monthly", "quarterly", "yearly"]
 
 # The staff who recorded and voided a payment: two joins on the same table, so each needs its own name.
 Recorder = aliased(User)
@@ -46,34 +42,6 @@ CSV_HEADER = [
 
 class PaymentNotFoundError(Exception):
     """No payment has the given ID."""
-
-
-def get_plan_price(session: Session, plan: str) -> PlanPrice:
-    """The price and length of a plan. The rows are filled in on first start; this covers a missing one."""
-    row = session.get(PlanPrice, plan)
-    if row is None:
-        price, days = DEFAULT_PLAN_PRICES[plan]
-        row = PlanPrice(plan=plan, price=price, duration_days=days)
-        session.add(row)
-        session.commit()
-        session.refresh(row)
-    return row
-
-
-def list_plan_prices(session: Session) -> list[PlanPrice]:
-    return [get_plan_price(session, plan) for plan in PLAN_ORDER]
-
-
-def update_plan_price(session: Session, plan: str, price: int, duration_days: int) -> PlanPrice:
-    """An admin sets a plan's price and length. Payments already recorded are not changed."""
-    row = get_plan_price(session, plan)
-    row.price = price
-    row.duration_days = duration_days
-    row.updated_at = utc_now()
-    session.add(row)
-    session.commit()
-    session.refresh(row)
-    return row
 
 
 def _read(payment: Payment, recorded_by_name: str | None, voided_by_name: str | None) -> dict:
@@ -144,7 +112,7 @@ def record_payment(session: Session, member_id: int, data: PaymentCreate, record
     member = member_service.get_member(session, member_id)
     renewed_until = None
     if data.renew_plan:
-        days = get_plan_price(session, data.renew_plan).duration_days
+        days = plan_service.get_offered(session, data.renew_plan).duration_days
         # An active member renews from their current expiry, so no paid days are lost; an expired one from today.
         renewed_until = max(utc_today(), member.expires_on) + timedelta(days=days)
         member.expires_on = renewed_until

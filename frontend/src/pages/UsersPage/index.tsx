@@ -3,15 +3,17 @@ import StatusPill from "../../components/StatusPill"
 import UserBulkBar from "../../components/UserBulkBar"
 import UserDetail from "../../components/UserDetail"
 import { useAuth } from "../../context/AuthContext"
+import { usePlans } from "../../context/PlansContext"
 import { useDebouncedValue } from "../../hooks/useDebouncedValue"
 import { banUser, changeRole, exportUsersCsv, listUsers, resetPassword, unbanUser } from "../../services/adminService"
 import type { AdminUser, Role, UserFilters } from "../../types/auth"
 import { ROLES, can, usersLink } from "../../utils/auth"
-import { errorText, formatDate, hashParams, membersLink, planLabel, todayUtc } from "../../utils/member"
+import { errorText, formatDate, hashParams, membersLink, todayUtc } from "../../utils/member"
 import { saveFile } from "../../utils/payment"
 
 // Members and users are the same accounts: this shows the membership and links to it on the Members page.
 function MembershipCell({ user: u }: { user: AdminUser }) {
+  const { planLabel } = usePlans()
   if (u.plan && u.expires_on) {
     const status = u.is_frozen ? "frozen" : u.expires_on < todayUtc() ? "expired" : "active"
     return (

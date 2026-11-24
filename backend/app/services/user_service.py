@@ -5,11 +5,11 @@ import secrets
 from sqlmodel import Session, col, func, select
 
 from app import rbac
-from app.models import ActivityEvent, ActivityFilter, Role, User, UserFilter, utc_now
+from app.models import ActivityEvent, ActivityFilter, CheckIn, ClassBooking, Payment, Role, User, UserFilter, utc_now
 from app.rbac import Permission
 from app.request_info import Client
 from app.security import hash_password
-from app.services import activity_service, class_service, group_service, session_service, workout_service
+from app.services import activity_service, group_service, session_service, trainer_service, workout_service
 from app.services.csv_export import describe_filters, to_csv, utc_text
 from app.services.search import contains_any
 
@@ -123,17 +123,29 @@ def export_csv(session: Session, f: UserFilter, exported_by: User, client: Clien
 
 
 def user_detail(session: Session, user_id: int) -> dict:
-    """One account for the admin: the account and membership, active logins, workout counts (not their content),
-    groups and the newest activity rows about it."""
+    """One account for the admin: the account and membership, active logins, how much it has on record, groups and
+    the newest activity rows about it."""
     user = get_user(session, user_id)
     recent, _ = activity_service.list_activity(session, ActivityFilter(user_id=user_id), 0, RECENT_ACTIVITY)
     return {
         # Never the password hash: the response schema leaves it out, and it is not even passed on.
         **user.model_dump(exclude={"password_hash"}),
         "sessions": session_service.list_active_sessions(session, user_id),
-        "workouts": workout_service.counts_for(session, user_id),
+        "records": record_counts(session, user_id),
         "groups": group_service.groups_of(session, user_id),
         "recent_activity": recent,
+    }
+
+
+def record_counts(session: Session, user_id: int) -> dict:
+    def count(table, column) -> int:
+        return session.exec(select(func.count()).select_from(table).where(column == user_id)).one()
+
+    return {
+        "visits": count(CheckIn, col(CheckIn.member_id)),
+        "bookings": count(ClassBooking, col(ClassBooking.member_id)),
+        "payments": count(Payment, col(Payment.member_id)),
+        **workout_service.counts_for(session, user_id),
     }
 
 
@@ -158,23 +170,16 @@ def revoke_sessions(session: Session, acting_admin: User, user_id: int, client: 
     return ended
 
 
-def list_trainers(session: Session) -> list[User]:
-    """Every account with the Trainer role, by name: the choices for a class's trainer. A gym has only a few."""
-    teachers = rbac.roles_with(Permission.CLASSES_TEACH)
-    query = select(User).where(col(User.role).in_(teachers)).order_by(col(User.name), col(User.id))
-    return list(session.exec(query).all())
-
-
 def change_role(session: Session, acting_admin: User, user_id: int, role: Role, client: Client) -> User:
     if acting_admin.id == user_id:
         raise CannotChangeOwnRoleError
     user = get_user(session, user_id)
     if user.role == role:
         return user
-    # A class's trainer is always an account that can teach, so classes keep only the name of an ex-trainer.
+    # A class's or a member's trainer is always an account that can teach, so an ex-trainer lets go of both.
     teach = Permission.CLASSES_TEACH
     if teach in rbac.permissions_for(user.role) and teach not in rbac.permissions_for(role):
-        class_service.release_trainer(session, user)
+        trainer_service.release_trainer(session, user)
     activity_service.record(
         session, ActivityEvent.ROLE_CHANGE, client, actor=acting_admin, target=user, details=f"{user.role} → {role}"
     )

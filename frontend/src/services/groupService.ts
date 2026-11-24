@@ -1,4 +1,4 @@
-// fetch helpers for training groups: /api/v1/groups. Anyone logged in can start one; the rest follows group permissions.
+// fetch helpers for training groups: /api/v1/groups. Trainers and staff start them; the rest follows group permissions.
 import type { Group, GroupMember, GroupPage, MemberFlag } from "../types/workout"
 import { request } from "./api"
 

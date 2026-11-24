@@ -1,22 +1,26 @@
 import { type FormEvent, useCallback, useEffect, useState } from "react"
 import { useAuth } from "../context/AuthContext"
+import { usePlans } from "../context/PlansContext"
 import { banUser, getUserDetail, revokeSessions, unbanUser } from "../services/adminService"
 import { ApiError } from "../services/api"
 import type { AdminUserDetail } from "../types/auth"
 import { activityLink, eventLabel, eventPill } from "../utils/activity"
 import { can, roleLabel, usersLink } from "../utils/auth"
-import { errorText, formatDate, formatDateTime, membersLink, planLabel, todayUtc } from "../utils/member"
+import { errorText, formatDate, formatDateTime, membersLink, todayUtc } from "../utils/member"
 import { describeBrowser } from "../utils/session"
+import { trainingLink } from "../utils/workout"
+import Stat from "./Stat"
 import StatusPill from "./StatusPill"
 
 interface Props {
   userId: number
 }
 
-// Admins only: one account in full. Its membership, the browsers it is logged in on (with Log out everywhere), how
-// many workouts it has and its groups (counts and names only: workouts stay private), and its newest activity.
+// Admins only: one account in full. Its membership, the browsers it is logged in on (with Log out everywhere), how much
+// it has on record, its training groups, and its newest activity.
 export default function UserDetail({ userId }: Props) {
   const { user: me } = useAuth()
+  const { planLabel } = usePlans()
   const [detail, setDetail] = useState<AdminUserDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [notFound, setNotFound] = useState(false)
@@ -241,29 +245,20 @@ export default function UserDetail({ userId }: Props) {
         )}
       </section>
 
-      <section className="card" aria-labelledby="user-workouts-heading">
-        <h2 id="user-workouts-heading">Workouts and groups</h2>
+      <section className="card" aria-labelledby="user-records-heading">
+        <h2 id="user-records-heading">Records and training groups</h2>
         <dl className="stats">
-          <div className="stat">
-            <dt>Personal workouts</dt>
-            <dd>{d.workouts.personal}</dd>
-          </div>
-          <div className="stat">
-            <dt>Added to groups</dt>
-            <dd>{d.workouts.in_groups}</dd>
-          </div>
-          <div className="stat">
-            <dt>Assigned to them</dt>
-            <dd>{d.workouts.assigned}</dd>
-          </div>
+          <Stat label="Visits" value={d.records.visits} />
+          <Stat label="Class bookings" value={d.records.bookings} />
+          <Stat label="Payments" value={d.records.payments} />
+          <Stat label="Workouts added" value={d.records.workouts_added} />
+          <Stat label="Workouts assigned" value={d.records.workouts_assigned} note={`${d.records.workouts_completed} done`} />
         </dl>
         <p className="hint">
-          Counts only here.
+          {d.plan && <a href={membersLink({ member: d.id })}>Open their visits, bookings and payments</a>}
+          {d.plan && can(me, "content:moderate") && " · "}
           {can(me, "content:moderate") && (
-            <>
-              {" "}
-              <a href={`#/moderation?owner=${d.id}`}>See and moderate their workouts and groups</a>
-            </>
+            <a href={trainingLink("all-workouts", d.id)}>See the workouts and groups they added</a>
           )}
         </p>
         {d.groups.length === 0 ? (

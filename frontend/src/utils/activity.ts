@@ -17,6 +17,7 @@ export const EVENTS: { value: ActivityEvent; label: string }[] = [
   { value: "unban", label: "Unban" },
   { value: "account_delete", label: "Account deleted" },
   { value: "export", label: "Export" },
+  { value: "expense_delete", label: "Expense deleted" },
   { value: "workout_delete", label: "Workout removed" },
   { value: "group_delete", label: "Group removed" },
 ]
@@ -32,6 +33,7 @@ const ADMIN_ACTION: ActivityEvent[] = [
   "password_reset",
   "account_delete",
   "export",
+  "expense_delete",
   "workout_delete",
   "group_delete",
 ]

@@ -16,6 +16,7 @@ export type ActivityEvent =
   | "session_revoke"
   | "account_delete"
   | "export"
+  | "expense_delete"
   | "workout_delete"
   | "group_delete"
 

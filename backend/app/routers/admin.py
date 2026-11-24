@@ -1,5 +1,5 @@
 # Admin endpoints under /api/v1/admin: stats, revenue, users (list, details, CSV, roles, ban / unban one or many,
-# password reset, ending their sessions), plan prices (TDD 6.2).
+# password reset, ending their sessions) (TDD 6.2).
 # Each route names its permission (app/rbac.py); only the Admin role holds them, so everyone else gets 403.
 from typing import Annotated
 
@@ -16,10 +16,6 @@ from app.models import (
     BulkUnbanResult,
     BulkUserAction,
     PasswordResetResult,
-    Plan,
-    PlanPrice,
-    PlanRead,
-    PlanUpdate,
     RevenueStats,
     SessionsRevoked,
     User,
@@ -29,13 +25,12 @@ from app.models import (
 )
 from app.rbac import Permission, require_permission
 from app.request_info import ClientDep
-from app.services import payment_service, revenue_service, stats_service, user_service
+from app.services import revenue_service, stats_service, user_service
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
 
 READ_DASHBOARD = Depends(require_permission(Permission.DASHBOARD_READ))
 READ_USERS = Depends(require_permission(Permission.USERS_READ))
-EDIT_PLANS = Depends(require_permission(Permission.PLANS_EDIT))
 # These routes also need to know who is acting, for the safety rules (not yourself, not another admin) and for
 # the activity log, which records who made each change and from where (ClientDep).
 RoleChanger = Annotated[User, Depends(require_permission(Permission.USERS_CHANGE_ROLE))]
@@ -55,8 +50,8 @@ def get_stats(session: SessionDep) -> dict:
 
 @router.get("/revenue", response_model=RevenueStats, dependencies=[READ_DASHBOARD])
 def get_revenue(session: SessionDep) -> dict:
-    """Money taken today, this month and in the last 30 days (also split by method), and in each of the last 6
-    months. UTC calendar days, like the payments list; voided payments are left out."""
+    """Money taken today, this month and in the last 30 days (also split by method), and revenue, expenses and net
+    income in each of the last 6 months. UTC calendar days, like the payments list; voided payments are left out."""
     return revenue_service.revenue_stats(session)
 
 
@@ -106,8 +101,8 @@ def bulk_unban(body: BulkUserAction, session: SessionDep, admin: Banner, client:
 
 @router.get("/users/{user_id}", response_model=AdminUserDetail, dependencies=[READ_USERS])
 def get_user_detail(user_id: UserId, session: SessionDep) -> dict:
-    """The account and membership, its active sessions, how many workouts it has (not their content), its groups
-    and its 10 newest activity rows."""
+    """The account and membership, its active sessions, how many visits, bookings, payments and workouts it has, its
+    groups and its 10 newest activity rows."""
     return user_service.user_detail(session, user_id)
 
 
@@ -147,9 +142,3 @@ def reset_password(
     # The temporary password must not be kept by the browser or any cache on the way.
     response.headers["Cache-Control"] = "no-store"
     return {"user": user, "temporary_password": temporary}
-
-
-@router.put("/plans/{plan}", response_model=PlanRead, dependencies=[EDIT_PLANS])
-def update_plan(plan: Plan, body: PlanUpdate, session: SessionDep) -> PlanPrice:
-    """Sets the price (whole taka) and the number of days a renewal adds. The three plans cannot be added to or removed."""
-    return payment_service.update_plan_price(session, plan, body.price, body.duration_days)

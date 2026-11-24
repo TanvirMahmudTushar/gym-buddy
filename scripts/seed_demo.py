@@ -56,12 +56,12 @@ ACCOUNTS = [
 BY_KEY = {account.key: account for account in ACCOUNTS}
 FIRST_ADMIN = BY_KEY["admin.ayesha"]
 
-GROUP_NAME = "Morning Crew"
-GROUP_OWNER = "rafi"
-# Mixed permissions: one member may add, one may add, edit and assign, one may only read.
+GROUP_NAME = "Strength Program"
+GROUP_OWNER = "trainer.karim"
+# Mixed permissions: one member may add, edit and assign (Karim's assistant), one may only add, one may only read.
 GROUP_MEMBERS = {
+    "rafi": {"can_create": True, "can_update": True, "can_assign": True},
     "sadia": {"can_create": True, "can_update": False, "can_assign": False},
-    "trainer.karim": {"can_create": True, "can_update": True, "can_assign": True},
     "tanim": {"can_create": False, "can_update": False, "can_assign": False},
 }
 
@@ -134,40 +134,58 @@ def set_roles(api: Api, sessions: dict[str, dict]) -> None:
             user["role"] = account.role  # The server reads the role on every request, so the token still works.
 
 
+def seed_plans(api: Api, sessions: dict[str, dict]) -> None:
+    admin = sessions[FIRST_ADMIN.key]["token"]
+    _, plans = api.call("GET", "/plans", admin)
+    names = {plan["name"] for plan in plans}
+    extra = [
+        {"name": "Student monthly", "price": 1000, "duration_days": 30, "description": "With a valid student ID card."},
+    ]
+    for body in extra:
+        if body["name"] not in names:
+            api.call("POST", "/plans", admin, body)
+            print(f"  plan {body['name']}")
+
+
 def seed_memberships(api: Api, sessions: dict[str, dict], today: date) -> None:
     staff = sessions["manager.nadia"]["token"]
-    _, plans = api.call("GET", "/plans", staff)
-    price = {plan["plan"]: plan["price"] for plan in plans}
+    trainer_id = sessions["trainer.karim"]["user"]["id"]
     memberships = [
-        # key, plan, joined, expires, phone, notes, payment method, frozen
+        # key, plan, joined, expires, phone, notes, payment method, frozen, has Karim as personal trainer
         ("rafi", "monthly", today - timedelta(days=25), today + timedelta(days=5), "01711000001",
-         "Prefers morning sessions", "cash", False),
+         "Prefers morning sessions", "cash", False, True),
         ("sadia", "quarterly", today - timedelta(days=20), today + timedelta(days=70), "01711000002",
-         None, "mobile_banking", False),
+         None, "mobile_banking", False, True),
         ("tanim", "yearly", today - timedelta(days=100), today + timedelta(days=265), "01711000003",
-         "Frozen while travelling", "card", True),
+         "Frozen while travelling", "card", True, False),
     ]
-    for key, plan, joined, expires, phone, notes, method, frozen in memberships:
+    for key, plan, joined, expires, phone, notes, method, frozen, has_trainer in memberships:
         member_id = sessions[key]["user"]["id"]
-        status, _ = api.call("GET", f"/members/{member_id}", staff, expect=(200, 404))
+        wanted = trainer_id if has_trainer else None
+        status, member = api.call("GET", f"/members/{member_id}", staff, expect=(200, 404))
         if status == 200:
             print(f"  {key}: already a member")
+            if wanted and member["trainer_id"] is None:
+                api.call("PATCH", f"/members/{member_id}", staff, {"trainer_id": wanted})
+                print(f"  {key}: Karim is now the personal trainer")
             continue
         api.call("POST", "/members", staff, {"email": BY_KEY[key].email, "plan": plan, "joined_on": joined.isoformat(),
-                                             "expires_on": expires.isoformat(), "phone": phone, "notes": notes})
-        api.call("POST", f"/members/{member_id}/payments", staff,
-                 {"amount": price[plan], "method": method, "note": f"{plan.capitalize()} plan"})
+                                             "expires_on": expires.isoformat(), "phone": phone, "notes": notes,
+                                             "trainer_id": wanted, "payment_method": method})
         if frozen:
             api.call("PATCH", f"/members/{member_id}", staff, {"is_frozen": True})
-        print(f"  {key}: {plan} membership{' (frozen)' if frozen else ''}, payment of {price[plan]} taka")
+        print(f"  {key}: {plan} membership{' (frozen)' if frozen else ''}, paid by {method}")
 
-    _, today_list = api.call("GET", "/check-ins/today?limit=100", staff)
+    _, today_list = api.call("GET", "/check-ins?limit=100", staff)
     checked_in = {row["member_id"] for row in today_list["items"]}
-    for key in ("rafi", "sadia"):
+    # Rafi came and left; Sadia is still inside.
+    for key, left in (("rafi", True), ("sadia", False)):
         member_id = sessions[key]["user"]["id"]
         if member_id not in checked_in:
-            api.call("POST", f"/members/{member_id}/check-ins", staff)
-            print(f"  {key}: checked in today")
+            _, visit = api.call("POST", f"/members/{member_id}/check-ins", staff)
+            if left:
+                api.call("POST", f"/check-ins/{visit['id']}/check-out", staff)
+            print(f"  {key}: checked in{' and out' if left else ''} today")
 
 
 def seed_classes(api: Api, sessions: dict[str, dict], today: date) -> dict[str, int]:
@@ -208,8 +226,8 @@ def seed_bookings(api: Api, sessions: dict[str, dict], class_ids: dict[str, int]
 def seed_announcements(api: Api, sessions: dict[str, dict], today: date) -> None:
     staff = sessions["manager.nadia"]["token"]
     announcements = [
-        {"title": "Welcome to Gym Buddy", "message": "Book classes, see your visits and payments, and log your "
-         "workouts in the app.\nAsk at the front desk if you need help."},
+        {"title": "Welcome to Gym Buddy", "message": "Book classes, see your visits and payments, and follow the "
+         "workouts your trainer gives you.\nAsk at the front desk if you need help."},
         {"title": "New Evening Yoga Flow class", "message": "Karim now runs a 60-minute yoga class in the evenings. "
          "Places are limited, so book in the app.", "ends_on": (today + timedelta(days=30)).isoformat()},
     ]
@@ -221,22 +239,42 @@ def seed_announcements(api: Api, sessions: dict[str, dict], today: date) -> None
             print(f"  announcement {body['title']}")
 
 
-def seed_workouts(api: Api, sessions: dict[str, dict], today: date) -> None:
-    personal = {
-        "rafi": [("Leg day", -1, "Squats 5x5 at 80 kg, lunges, calf raises."), ("Upper body", 1, None)],
-        "sadia": [("5 km run", -2, "28 minutes. Felt good."), ("Mobility and stretching", 0, None)],
-        "tanim": [("Swimming", -3, "30 laps.")],
-        "trainer.karim": [("Plan next week's HIIT", 2, "Six stations, 40 s on and 20 s off.")],
-    }
-    for key, rows in personal.items():
-        token = sessions[key]["token"]
-        _, existing = api.call("GET", "/workouts?limit=100", token)
-        titles = {row["title"] for row in existing["items"]}
-        for title, offset, notes in rows:
-            if title not in titles:
-                api.call("POST", "/workouts", token, {"title": title, "notes": notes,
-                                                      "workout_date": (today + timedelta(days=offset)).isoformat()})
-                print(f"  {key}: workout {title}")
+def seed_equipment(api: Api, sessions: dict[str, dict], today: date) -> None:
+    staff = sessions["manager.nadia"]["token"]
+    equipment = [
+        {"name": "Treadmill 1", "category": "cardio", "service_every_days": 90,
+         "purchased_on": (today - timedelta(days=400)).isoformat(),
+         "last_serviced_on": (today - timedelta(days=86)).isoformat()},  # Service due within 7 days.
+        {"name": "Rowing machine", "category": "cardio", "service_every_days": 180,
+         "last_serviced_on": (today - timedelta(days=30)).isoformat()},
+        {"name": "Leg press", "category": "strength", "service_every_days": 180,
+         "last_serviced_on": (today - timedelta(days=60)).isoformat()},
+        {"name": "Dumbbell set", "category": "free_weights", "quantity": 10},
+    ]
+    _, existing = api.call("GET", "/equipment?limit=100", staff)
+    ids = {row["name"]: row["id"] for row in existing["items"]}
+    for body in equipment:
+        if body["name"] not in ids:
+            _, created = api.call("POST", "/equipment", staff, body)
+            print(f"  equipment {body['name']}")
+            if body["name"] == "Leg press":
+                api.call("POST", f"/equipment/{created['id']}/report", sessions["trainer.karim"]["token"],
+                         {"issue": "The seat does not lock."})
+                print("  Karim reported a fault on the Leg press")
+
+
+def seed_expenses(api: Api, sessions: dict[str, dict], today: date) -> None:
+    admin = sessions[FIRST_ADMIN.key]["token"]
+    expenses = [
+        {"category": "utilities", "amount": 1800, "spent_on": today.isoformat(), "description": "Electricity"},
+        {"category": "maintenance", "amount": 900, "spent_on": today.isoformat(), "description": "Treadmill belt"},
+    ]
+    _, existing = api.call("GET", "/expenses?limit=100", admin)
+    known = {row["description"] for row in existing["items"]}
+    for body in expenses:
+        if body["description"] not in known:
+            api.call("POST", "/expenses", admin, body)
+            print(f"  expense {body['description']}: {body['amount']} taka")
 
 
 def seed_group(api: Api, sessions: dict[str, dict], today: date) -> None:
@@ -262,9 +300,10 @@ def seed_group(api: Api, sessions: dict[str, dict], today: date) -> None:
 
     workouts = [
         # added by, title, days from today, notes, assigned to
-        (GROUP_OWNER, "Saturday long run", 4, "8 km easy pace. Meet at the gym at 6:30.", "sadia"),
-        ("trainer.karim", "Week 1 circuit", 1, "Burpees, kettlebell swings, rows: 4 rounds.", "tanim"),
-        ("sadia", "Core finisher", 2, "Plank 3 x 60 s, dead bugs, side planks.", None),
+        ("trainer.karim", "Squat day", 1, "Back squat 5x5, lunges 3x10, calf raises.", "rafi"),
+        ("trainer.karim", "Week 1 circuit", 0, "Kettlebell swings, rows, push-ups: 4 rounds.", "sadia"),
+        ("rafi", "Upper body", 2, "Bench press 5x5, pull-ups, shoulder press.", "tanim"),
+        ("sadia", "Core finisher", 3, "Plank 3 x 60 s, dead bugs, side planks.", None),
     ]
     _, existing = api.call("GET", f"/groups/{group_id}/workouts?limit=100", owner)
     titles = {row["title"] for row in existing["items"]}
@@ -275,7 +314,9 @@ def seed_group(api: Api, sessions: dict[str, dict], today: date) -> None:
                 "workout_date": (today + timedelta(days=offset)).isoformat()}
         if assignee:
             body["assigned_to"] = sessions[assignee]["user"]["id"]
-        api.call("POST", "/workouts", sessions[key]["token"], body)
+        _, workout = api.call("POST", "/workouts", sessions[key]["token"], body)
+        if title == "Week 1 circuit":
+            api.call("PUT", f"/workouts/{workout['id']}/completion", sessions["sadia"]["token"], {"done": True})
         print(f"  {key} added {title} to {GROUP_NAME}" + (f", assigned to {assignee}" if assignee else ""))
 
 
@@ -301,6 +342,8 @@ def main() -> int:
             return 2
         print("Roles")
         set_roles(api, sessions)
+        print("Plans")
+        seed_plans(api, sessions)
         print("Memberships, payments and check-ins")
         seed_memberships(api, sessions, today)
         print("Classes and bookings")
@@ -308,8 +351,10 @@ def main() -> int:
         seed_bookings(api, sessions, class_ids)
         print("Announcements")
         seed_announcements(api, sessions, today)
-        print("Workouts and the shared group")
-        seed_workouts(api, sessions, today)
+        print("Equipment and expenses")
+        seed_equipment(api, sessions, today)
+        seed_expenses(api, sessions, today)
+        print("The shared training group")
         seed_group(api, sessions, today)
     except (ApiError, urllib.error.URLError) as error:
         print(f"\nStopped: {error}", file=sys.stderr)

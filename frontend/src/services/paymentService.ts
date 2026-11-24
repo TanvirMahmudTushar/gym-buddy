@@ -1,11 +1,9 @@
-// fetch helpers for plans and payments. Recording and reading payments is for gym managers and admins;
+// fetch helpers for payments. Recording and reading payments is for gym managers and admins;
 // voiding and the CSV export are for admins; a member reads only their own payments.
-import type { Payment, PaymentBody, PaymentFilters, PaymentListPage, PaymentPage, PlanPrice } from "../types/payment"
+import type { Payment, PaymentBody, PaymentFilters, PaymentListPage, PaymentPage } from "../types/payment"
 import { request, requestBlob } from "./api"
 
 const PAGE_SIZE = 20
-
-export const listPlans = () => request<PlanPrice[]>("/api/v1/plans")
 
 export const recordPayment = (memberId: number, body: PaymentBody) =>
   request<Payment>(`/api/v1/members/${memberId}/payments`, { method: "POST", body: JSON.stringify(body) })

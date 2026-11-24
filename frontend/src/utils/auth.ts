@@ -4,14 +4,11 @@
 import type { Me, Permission, Role } from "../types/auth"
 
 export const ROLES: { value: Role; label: string; description: string }[] = [
-  { value: "user", label: "User", description: "A gym member: sees their own membership and books classes." },
-  { value: "trainer", label: "Trainer", description: "Teaches classes: sees the classes they teach and who booked each one." },
-  { value: "gym_manager", label: "Gym Manager", description: "Manages memberships: start, edit, renew and freeze them, and delete member accounts." },
-  { value: "admin", label: "Admin", description: "Everything a Gym Manager can do, plus managing users and roles, and reading the activity log." },
+  { value: "user", label: "User", description: "A gym member: sees their own membership, books classes and follows the workouts assigned to them." },
+  { value: "trainer", label: "Trainer", description: "Teaches classes and marks who came, sees their own clients, and runs training groups." },
+  { value: "gym_manager", label: "Gym Manager", description: "Runs the gym day to day: members, attendance, payments, classes, equipment and announcements." },
+  { value: "admin", label: "Admin", description: "Everything a Gym Manager can do, plus plans, expenses, reports, users and roles, and the security log." },
 ]
-
-
-
 
 export const roleLabel = (role: Role) => ROLES.find((r) => r.value === role)?.label ?? role
 
@@ -24,42 +21,45 @@ export const can = (user: Me | null, permission: Permission) => user?.permission
 export type Page = "login" | "signup" | ProtectedPage
 export type ProtectedPage =
   | "dashboard"
-  | "overview"
   | "members"
-  | "classes"
+  | "attendance"
   | "payments"
+  | "classes"
+  | "training"
+  | "equipment"
   | "announcements"
-  | "membership"
-  | "timetable"
-  | "my-classes"
   | "plans"
-  | "account"
+  | "expenses"
   | "users"
   | "activity"
   | "security"
-  | "workouts"
-  | "groups"
-  | "moderation"
+  | "my-classes"
+  | "clients"
+  | "membership"
+  | "timetable"
+  | "account"
 
 /** What each page needs: the permission of the API calls it makes. */
 const PAGE_ACCESS: Record<ProtectedPage, (user: Me) => boolean> = {
-  dashboard: (u) => can(u, "dashboard:read"),
-  overview: (u) => can(u, "overview:read"),
+  // The Dashboard shows its front desk part with overview:read and its admin part with dashboard:read.
+  dashboard: (u) => can(u, "overview:read"),
   members: (u) => can(u, "members:read"),
-  classes: (u) => can(u, "classes:manage"),
+  attendance: (u) => can(u, "check_ins:record"),
   payments: (u) => can(u, "payments:manage"),
+  classes: (u) => can(u, "classes:manage"),
+  equipment: (u) => can(u, "equipment:read"),
   announcements: (u) => can(u, "announcements:manage"),
-  "my-classes": (u) => can(u, "classes:teach"),
   plans: (u) => can(u, "plans:edit"),
+  expenses: (u) => can(u, "expenses:manage"),
   users: (u) => can(u, "users:read"),
   activity: (u) => can(u, "activity:read"),
   security: (u) => can(u, "activity:read"),
-  moderation: (u) => can(u, "content:moderate"),
+  "my-classes": (u) => can(u, "classes:teach"),
+  clients: (u) => can(u, "clients:read"),
   account: () => true,
-  // Workouts and groups are about the caller's own data and groups: any login. Inside a group, the buttons follow
-  // the caller's group permissions (my_permissions), which the API checks again on every request.
-  workouts: () => true,
-  groups: () => true,
+  // Training shows the groups the caller is in: any login. Inside a group, the buttons follow the caller's group
+  // permissions (my_permissions), which the API checks again on every request.
+  training: () => true,
   // The member pages call only endpoints about the caller's own account, which any login may use, so no
   // permission is involved. They are laid out for gym members, so they are shown to the User role.
   membership: (u) => u.role === "user",
@@ -69,5 +69,5 @@ const PAGE_ACCESS: Record<ProtectedPage, (user: Me) => boolean> = {
 export const canOpen = (user: Me, page: ProtectedPage) => PAGE_ACCESS[page](user)
 
 /** Where a person lands after logging in: the first of these pages they may open. */
-const HOME_ORDER: ProtectedPage[] = ["dashboard", "overview", "my-classes", "membership", "account"]
+const HOME_ORDER: ProtectedPage[] = ["dashboard", "my-classes", "membership", "account"]
 export const homePage = (user: Me): ProtectedPage => HOME_ORDER.find((page) => canOpen(user, page)) ?? "account"

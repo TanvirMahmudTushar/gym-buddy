@@ -1,4 +1,4 @@
-# The Gym Manager's start page under /api/v1/overview (TDD 6.2). The numbers come from app/services/stats_service.py.
+# The front desk part of the Dashboard under /api/v1/overview (TDD 6.2). The numbers come from app/services/stats_service.py.
 from fastapi import APIRouter, Depends
 
 from app.database import SessionDep
@@ -16,6 +16,7 @@ router = APIRouter(
 
 @router.get("", response_model=Overview)
 def get_overview(session: SessionDep) -> dict:
-    """Check-ins today, memberships expiring soon, accounts waiting for a membership, payments taken today
-    (not voided) and the next 5 classes. No revenue history or account numbers: those are on the admin dashboard."""
+    """Check-ins today and who is inside now, memberships expiring soon, accounts waiting for a membership, payments
+    taken today (not voided), equipment to look at and the next 5 classes. No revenue history or account numbers:
+    those are in /admin/stats and /admin/revenue."""
     return stats_service.staff_overview(session)

@@ -1,33 +1,24 @@
-import { type FormEvent, useEffect, useState } from "react"
-import { updatePlan } from "../../services/adminService"
-import { listPlans } from "../../services/paymentService"
-import type { PlanPrice } from "../../types/payment"
-import { errorText, planLabel } from "../../utils/member"
+import { useState } from "react"
+import PlanForm from "../../components/PlanForm"
+import { usePlans } from "../../context/PlansContext"
+import { createPlan, deletePlan, updatePlan } from "../../services/planService"
+import type { MembershipPlan, PlanBody } from "../../types/payment"
+import { errorText } from "../../utils/member"
 import { formatMoney } from "../../utils/payment"
 
-// One plan: its price and the number of days a renewal adds, with its own Save.
-function PlanRow({ plan, onSaved }: { plan: PlanPrice; onSaved: (saved: PlanPrice) => void }) {
-  const [price, setPrice] = useState(String(plan.price))
-  const [days, setDays] = useState(String(plan.duration_days))
+// One plan: its price and length, with Edit, Retire (or Offer again) and Delete.
+function PlanItem({ plan, onSaved }: { plan: MembershipPlan; onSaved: () => Promise<void> }) {
+  const [editing, setEditing] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState("")
-  const [saved, setSaved] = useState(false)
 
-  const changed = price !== String(plan.price) || days !== String(plan.duration_days)
-  const id = `plan-${plan.plan}`
-
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault()
-    setSaved(false)
-    const p = Number(price)
-    const d = Number(days)
-    if (!Number.isInteger(p) || p < 1 || p > 10_000_000) return setError("The price must be a whole number from 1 to 10,000,000.")
-    if (!Number.isInteger(d) || d < 1 || d > 3660) return setError("The length must be a whole number of days from 1 to 3,660.")
+  async function run(action: () => Promise<unknown>) {
     setBusy(true)
     setError("")
     try {
-      onSaved(await updatePlan(plan.plan, { price: p, duration_days: d }))
-      setSaved(true)
+      await action()
+      setEditing(false)
+      await onSaved()
     } catch (err) {
       setError(errorText(err))
     } finally {
@@ -35,27 +26,44 @@ function PlanRow({ plan, onSaved }: { plan: PlanPrice; onSaved: (saved: PlanPric
     }
   }
 
+  if (editing)
+    return (
+      <li className="class-item">
+        <PlanForm
+          plan={plan}
+          saving={busy}
+          error={error}
+          onSave={(body) => run(() => updatePlan(plan.plan, body))}
+          onCancel={() => {
+            setEditing(false)
+            setError("")
+          }}
+        />
+      </li>
+    )
+
   return (
     <li className="class-item">
-      <form className="inline" onSubmit={handleSubmit} noValidate>
-        <h3 className="plan-name">{planLabel(plan.plan)}</h3>
-        <div className="field">
-          <label htmlFor={`${id}-price`}>Price (৳)</label>
-          <input id={`${id}-price`} type="number" min={1} step={1} inputMode="numeric" value={price} onChange={(e) => { setPrice(e.target.value); setSaved(false) }} />
-        </div>
-        <div className="field">
-          <label htmlFor={`${id}-days`}>Days a renewal adds</label>
-          <input id={`${id}-days`} type="number" min={1} step={1} inputMode="numeric" value={days} onChange={(e) => { setDays(e.target.value); setSaved(false) }} />
-        </div>
-        <button type="submit" className="primary" disabled={busy || !changed}>
-          {busy ? "Saving…" : "Save"}
+      <div className="toolbar">
+        <h3 className="wrap-text">
+          {plan.name} {!plan.is_active && <span className="pill neutral">Retired</span>}
+        </h3>
+        <strong>
+          {formatMoney(plan.price)} <span className="hint">for {plan.duration_days} days</span>
+        </strong>
+      </div>
+      {plan.description && <p className="wrap-text">{plan.description}</p>}
+      <div className="actions">
+        <button type="button" onClick={() => setEditing(true)} disabled={busy}>
+          Edit
         </button>
-      </form>
-      {saved && (
-        <p className="hint" role="status">
-          Saved: {formatMoney(plan.price)} for {plan.duration_days} days.
-        </p>
-      )}
+        <button type="button" onClick={() => run(() => updatePlan(plan.plan, { is_active: !plan.is_active }))} disabled={busy}>
+          {plan.is_active ? "Retire" : "Offer again"}
+        </button>
+        <button type="button" className="danger" onClick={() => run(() => deletePlan(plan.plan))} disabled={busy}>
+          Delete
+        </button>
+      </div>
       {error && (
         <p className="error" role="alert">
           {error}
@@ -65,44 +73,50 @@ function PlanRow({ plan, onSaved }: { plan: PlanPrice; onSaved: (saved: PlanPric
   )
 }
 
-// Admins only: the price and length of the three membership plans. They fill in the amount when taking a payment
-// and decide how far a renewal extends the expiry.
+// Admins only: the membership plans the gym sells.
 export default function PlansPage() {
-  const [plans, setPlans] = useState<PlanPrice[]>([])
-  const [loading, setLoading] = useState(true)
+  const { plans, reload } = usePlans()
+  const [saving, setSaving] = useState(false)
   const [error, setError] = useState("")
+  // Changing this remounts the add form, which clears it after a plan is added.
+  const [formKey, setFormKey] = useState(0)
 
-  useEffect(() => {
-    let ignore = false
-    listPlans()
-      .then((p) => !ignore && setPlans(p))
-      .catch((err) => !ignore && setError(errorText(err)))
-      .finally(() => !ignore && setLoading(false))
-    return () => {
-      ignore = true
+  async function add(body: PlanBody) {
+    setSaving(true)
+    setError("")
+    try {
+      await createPlan(body)
+      setFormKey((k) => k + 1)
+      await reload()
+    } catch (err) {
+      setError(errorText(err))
+    } finally {
+      setSaving(false)
     }
-  }, [])
-
-  const handleSaved = (saved: PlanPrice) => setPlans((prev) => prev.map((p) => (p.plan === saved.plan ? saved : p)))
+  }
 
   return (
-    <section className="card narrow-wide" aria-labelledby="plans-heading">
-      <h2 id="plans-heading">Plans and prices</h2>
-      <p className="hint">
-        The price fills in the amount when staff take a payment. The days decide how far a renewal extends a
-        membership. Payments already taken are not changed.
-      </p>
-      {loading && <p className="empty">Loading plans…</p>}
-      {error && (
-        <p className="error" role="alert">
-          {error}
+    <div className="column narrow-wide">
+      <section className="card" aria-labelledby="plans-heading">
+        <h2 id="plans-heading">Membership plans</h2>
+        <p className="hint">
+          The price fills in the amount when staff take a payment; the days decide how far a new membership or a renewal
+          runs. Payments already taken are not changed. Retire a plan to stop selling it: members who have it keep it. Only a plan nobody ever had can be deleted.
         </p>
-      )}
-      <ul className="class-list">
-        {plans.map((p) => (
-          <PlanRow key={p.plan} plan={p} onSaved={handleSaved} />
-        ))}
-      </ul>
-    </section>
+        {plans.length === 0 ? (
+          <p className="empty">No plans yet. Add the first one below.</p>
+        ) : (
+          <ul className="class-list">
+            {plans.map((p) => (
+              <PlanItem key={p.plan} plan={p} onSaved={reload} />
+            ))}
+          </ul>
+        )}
+      </section>
+      <section className="card" aria-labelledby="add-plan-heading">
+        <h2 id="add-plan-heading">Add a plan</h2>
+        <PlanForm key={formKey} saving={saving} error={error} onSave={add} />
+      </section>
+    </div>
   )
 }

@@ -241,6 +241,7 @@ export default function GroupDetail({ groupId }: Props) {
               <WorkoutItem
                 key={w.id}
                 workout={w}
+                meId={user?.id ?? 0}
                 canEdit={canInGroup(group, "update")}
                 canAssign={canAssign}
                 members={members}

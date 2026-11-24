@@ -8,6 +8,7 @@
 # caller's id from the token, never an id from the request, so nobody can reach another person's records there.
 #
 # Training groups add a second, per-group layer (GroupPermission, at the end): what one person may do in one group.
+# Who may start a group is a role permission (groups:create); what happens inside it is the group layer.
 #
 # Import note: this module imports app.deps (who is logged in). Nothing that app.deps imports may import this
 # module back, or Python would hit a circular import.
@@ -23,24 +24,29 @@ from app.models import GroupMember, User
 class Permission(str, Enum):
     MEMBERS_READ = "members:read"  # member list and details, waiting list, a member's visits and bookings
     MEMBERS_MANAGE = "members:manage"  # start, edit and delete memberships; cancel a booking for a member
-    CHECK_INS_RECORD = "check_ins:record"  # check a member in; today's check-ins
+    CHECK_INS_RECORD = "check_ins:record"  # check members in and out; the attendance list of any day
     PAYMENTS_MANAGE = "payments:manage"  # take a payment; a member's payments and the list of all payments
     PAYMENTS_VOID = "payments:void"
     PAYMENTS_EXPORT = "payments:export"
     CLASSES_MANAGE = "classes:manage"  # add, edit and delete classes; list trainers; see any class's bookings
     CLASSES_TEACH = "classes:teach"  # my classes as a trainer, and who booked them
-    OVERVIEW_READ = "overview:read"  # the Gym Manager's start page
+    CLIENTS_READ = "clients:read"  # a trainer's own clients (the members they are the personal trainer of)
+    GROUPS_CREATE = "groups:create"  # start a training group (its owner then holds every permission in it)
+    EQUIPMENT_READ = "equipment:read"  # the equipment list; report a fault
+    EQUIPMENT_MANAGE = "equipment:manage"  # add, edit, service and delete equipment
+    EXPENSES_MANAGE = "expenses:manage"  # list, add, edit, delete and export expenses
+    OVERVIEW_READ = "overview:read"  # the front desk part of the Dashboard
     ANNOUNCEMENTS_MANAGE = "announcements:manage"  # post, edit and delete announcements; see ended ones
-    DASHBOARD_READ = "dashboard:read"  # admin stats and revenue
+    DASHBOARD_READ = "dashboard:read"  # the admin part of the Dashboard: all stats, revenue and net income
     USERS_READ = "users:read"  # the list of all accounts
     USERS_CHANGE_ROLE = "users:change_role"
     USERS_BAN = "users:ban"  # ban and unban
     USERS_RESET_PASSWORD = "users:reset_password"
     USERS_REVOKE_SESSIONS = "users:revoke_sessions"  # log a user out of every browser
     USERS_EXPORT = "users:export"  # the users CSV
-    PLANS_EDIT = "plans:edit"  # plan prices and lengths
+    PLANS_EDIT = "plans:edit"  # add, edit, retire and delete membership plans
     ACTIVITY_READ = "activity:read"  # the activity log, its CSV export and the security view
-    CONTENT_MODERATE = "content:moderate"  # list, delete and export anyone's workouts and groups
+    CONTENT_MODERATE = "content:moderate"  # list, delete and export any training group and its workouts
 
 
 _GYM_MANAGER = frozenset(
@@ -50,6 +56,9 @@ _GYM_MANAGER = frozenset(
         Permission.CHECK_INS_RECORD,
         Permission.PAYMENTS_MANAGE,
         Permission.CLASSES_MANAGE,
+        Permission.GROUPS_CREATE,
+        Permission.EQUIPMENT_READ,
+        Permission.EQUIPMENT_MANAGE,
         Permission.OVERVIEW_READ,
         Permission.ANNOUNCEMENTS_MANAGE,
     }
@@ -58,12 +67,20 @@ _GYM_MANAGER = frozenset(
 # The whole permission matrix (SRS 3.11). A User has no extra permissions: only their own account and data.
 ROLE_PERMISSIONS: dict[str, frozenset[Permission]] = {
     "user": frozenset(),
-    "trainer": frozenset({Permission.CLASSES_TEACH}),
+    "trainer": frozenset(
+        {
+            Permission.CLASSES_TEACH,
+            Permission.CLIENTS_READ,
+            Permission.GROUPS_CREATE,
+            Permission.EQUIPMENT_READ,
+        }
+    ),
     "gym_manager": _GYM_MANAGER,
     "admin": _GYM_MANAGER
     | {
         Permission.PAYMENTS_VOID,
         Permission.PAYMENTS_EXPORT,
+        Permission.EXPENSES_MANAGE,
         Permission.DASHBOARD_READ,
         Permission.USERS_READ,
         Permission.USERS_CHANGE_ROLE,

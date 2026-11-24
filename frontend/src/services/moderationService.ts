@@ -9,7 +9,6 @@ const PAGE_SIZE = 20
 function params(filters: WorkoutFilters | GroupFilters): URLSearchParams {
   const query = new URLSearchParams()
   if (filters.owner_id) query.set("owner_id", String(filters.owner_id))
-  if ("kind" in filters && filters.kind) query.set("kind", filters.kind)
   if (filters.date_from) query.set("date_from", filters.date_from)
   if (filters.date_to) query.set("date_to", filters.date_to)
   if (filters.q.trim()) query.set("q", filters.q.trim())

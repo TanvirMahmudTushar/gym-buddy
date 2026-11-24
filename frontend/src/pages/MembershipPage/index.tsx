@@ -5,12 +5,13 @@ import MyPayments from "../../components/MyPayments"
 import PlansCard from "../../components/PlansCard"
 import StatusPill from "../../components/StatusPill"
 import { useAuth } from "../../context/AuthContext"
-import { ApiError } from "../../services/api"
+import { usePlans } from "../../context/PlansContext"
+import { getMe } from "../../services/authService"
 import { cancelBooking } from "../../services/classService"
 import { getMyMembership, listMyBookings, listMyCheckIns } from "../../services/meService"
 import type { CheckIn } from "../../types/checkIn"
 import type { Member } from "../../types/member"
-import { errorText, formatDate, formatDateTime, memberStatus, planLabel, todayUtc } from "../../utils/member"
+import { errorText, formatDate, formatDateTime, formatTime, memberStatus, todayUtc } from "../../utils/member"
 
 const PAGE_SIZE = 10
 
@@ -28,6 +29,7 @@ function expiryNote(expiresOn: string): string {
 // A User's own membership and visits. They can only ever see their own record.
 export default function MembershipPage() {
   const { user } = useAuth()
+  const { planLabel } = usePlans()
   const [member, setMember] = useState<Member | null>(null)
   const [noMembership, setNoMembership] = useState(false)
   const [visits, setVisits] = useState<CheckIn[]>([])
@@ -38,18 +40,21 @@ export default function MembershipPage() {
 
   useEffect(() => {
     let ignore = false
-    Promise.all([getMyMembership(), listMyCheckIns(0, PAGE_SIZE)])
-      .then(([m, page]) => {
+    // Asked fresh, not taken from the login: staff may have started the membership since.
+    getMe()
+      .then((me) => (me.plan === null ? null : Promise.all([getMyMembership(), listMyCheckIns(0, PAGE_SIZE)])))
+      .then((loaded) => {
         if (ignore) return
+        if (loaded === null) {
+          setNoMembership(true)
+          return
+        }
+        const [m, page] = loaded
         setMember(m)
         setVisits(page.items)
         setTotal(page.total)
       })
-      .catch((err) => {
-        if (ignore) return
-        if (err instanceof ApiError && err.status === 404) setNoMembership(true)
-        else setError(errorText(err))
-      })
+      .catch((err) => !ignore && setError(errorText(err)))
       .finally(() => !ignore && setLoading(false))
     return () => {
       ignore = true
@@ -83,6 +88,7 @@ export default function MembershipPage() {
           </p>
         </section>
         <AnnouncementsCard hideWhenEmpty />
+        <PlansCard />
       </div>
     )
 
@@ -110,6 +116,12 @@ export default function MembershipPage() {
           <dd>{formatDate(member.joined_on)}</dd>
           <dt>Expires</dt>
           <dd>{formatDate(member.expires_on)}</dd>
+          {member.trainer_name && (
+            <>
+              <dt>Trainer</dt>
+              <dd>{member.trainer_name}</dd>
+            </>
+          )}
           {member.phone && (
             <>
               <dt>Phone</dt>
@@ -133,7 +145,10 @@ export default function MembershipPage() {
           <ul className="visit-list">
             {visits.map((v) => (
               <li key={v.id}>
-                <span>{formatDateTime(v.checked_in_at)}</span>
+                <span>
+                  {formatDateTime(v.checked_in_at)}
+                  {v.checked_out_at && ` to ${formatTime(v.checked_out_at)}`}
+                </span>
               </li>
             ))}
           </ul>

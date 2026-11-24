@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react"
+import { usePlans } from "../context/PlansContext"
 import { cancelMemberBooking, deleteMember, getMember, listMemberBookings, updateMember } from "../services/memberService"
 import type { Member, MemberUpdate } from "../types/member"
-import { errorText, formatDate, memberStatus, planLabel } from "../utils/member"
+import { errorText, formatDate, memberStatus } from "../utils/member"
 import { birthDateText, emergencyContactText } from "../utils/profile"
 import BookingsSection from "./BookingsSection"
 import CheckInSection from "./CheckInSection"
@@ -13,11 +14,10 @@ interface Props {
   memberId: number | null
   onChanged: (member: Member) => void
   onDeleted: () => void
-  /** A check-in was recorded for this member. */
-  onCheckedIn: () => void
 }
 
-export default function MemberDetail({ memberId, onChanged, onDeleted, onCheckedIn }: Props) {
+export default function MemberDetail({ memberId, onChanged, onDeleted }: Props) {
+  const { planLabel } = usePlans()
   const [member, setMember] = useState<Member | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
@@ -163,11 +163,13 @@ export default function MemberDetail({ memberId, onChanged, onDeleted, onChecked
         <dd>{formatDate(member.joined_on)}</dd>
         <dt>Expires</dt>
         <dd>{formatDate(member.expires_on)}</dd>
+        <dt>Trainer</dt>
+        <dd>{member.trainer_name ?? "None"}</dd>
         <dt>Notes</dt>
         <dd>{member.notes || "None"}</dd>
       </dl>
       <hr className="separator" />
-      <CheckInSection key={member.id} member={member} onCheckedIn={onCheckedIn} />
+      <CheckInSection key={member.id} member={member} />
       <hr className="separator" />
       <BookingsSection
         key={`bookings-${member.id}`}

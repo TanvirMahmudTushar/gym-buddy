@@ -11,7 +11,7 @@ interface Props {
   refreshKey: number
   /** Fill the Add member form with this account's email. */
   onStart: (email: string) => void
-  /** Scroll this card into view when the page opens (the overview's Waiting number links here). */
+  /** Scroll this card into view when the page opens (the Dashboard's Waiting number links here). */
   scrollOnOpen?: boolean
 }
 

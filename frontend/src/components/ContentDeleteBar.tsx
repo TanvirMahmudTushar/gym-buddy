@@ -16,7 +16,7 @@ interface Props {
   onClear: () => void
 }
 
-// Moderation: delete everything ticked, after a confirm step. A delete cannot be undone (there is no soft delete).
+// Training, All groups and All workouts: delete everything ticked, after a confirm step. A delete cannot be undone (there is no soft delete).
 export default function ContentDeleteBar({ ids, noun, warning, onDelete, onDone, onClear }: Props) {
   const [confirming, setConfirming] = useState(false)
   const [busy, setBusy] = useState(false)

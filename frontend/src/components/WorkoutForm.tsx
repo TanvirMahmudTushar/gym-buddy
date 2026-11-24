@@ -14,7 +14,7 @@ export interface WorkoutFormValues {
 interface Props {
   /** The workout being edited; leave out to add a new one. */
   workout?: Workout
-  /** The people in the group a new workout can be assigned to. Leave out when I may not assign, or it is personal. */
+  /** The people in the group a new workout can be assigned to. Leave out when I may not assign. */
   assignees?: GroupMember[]
   saving: boolean
   error: string

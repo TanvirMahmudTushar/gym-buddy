@@ -62,9 +62,9 @@ def update_my_profile(body: ProfileUpdate, user: CurrentUser, session: SessionDe
 
 
 @router.get("/me/membership", response_model=MemberRead)
-def get_my_membership(user: CurrentUser) -> User:
+def get_my_membership(user: CurrentUser, session: SessionDep) -> dict:
     """This account's own membership. 404 until staff start one."""
-    return member_service.get_own_membership(user)
+    return member_service.read(session, member_service.get_own_membership(user))
 
 
 @router.get("/me/check-ins", response_model=CheckInPage)

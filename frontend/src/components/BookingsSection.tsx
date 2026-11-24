@@ -30,6 +30,7 @@ function BookingLine({ booking: b, action }: { booking: BookedClass; action?: Re
         </span>
       </span>
       {action}
+      {b.attended !== null && <span className={b.attended ? "pill active" : "pill expired"}>{b.attended ? "Attended" : "Missed"}</span>}
     </li>
   )
 }

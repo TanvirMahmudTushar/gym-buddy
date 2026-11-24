@@ -1,8 +1,9 @@
 import { type FormEvent, useState } from "react"
-import type { Member, MemberUpdate, Plan } from "../types/member"
-import { PLANS } from "../utils/member"
+import { usePlans } from "../context/PlansContext"
+import type { Member, MemberUpdate } from "../types/member"
 import { type ProfileErrors, type ProfileForm, checkProfile, toProfileBody, toProfileForm } from "../utils/profile"
 import ProfileFields from "./ProfileFields"
+import TrainerSelect from "./TrainerSelect"
 
 interface Props {
   member: Member
@@ -12,9 +13,11 @@ interface Props {
 }
 
 export default function EditMemberForm({ member, saving, onSave, onCancel }: Props) {
+  const { offered, planLabel } = usePlans()
   const [form, setForm] = useState({
     name: member.name,
     plan: member.plan,
+    trainer_id: member.trainer_id === null ? "" : String(member.trainer_id),
     notes: member.notes ?? "",
   })
   // Phone, date of birth and emergency contact: the same fields and checks as the member's own My account.
@@ -32,6 +35,7 @@ export default function EditMemberForm({ member, saving, onSave, onCancel }: Pro
     onSave({
       name: form.name.trim(),
       plan: form.plan,
+      trainer_id: form.trainer_id ? Number(form.trainer_id) : null,
       notes: form.notes.trim() || null,
       ...toProfileBody(profile),
     })
@@ -52,14 +56,22 @@ export default function EditMemberForm({ member, saving, onSave, onCancel }: Pro
       </div>
       <div className="field">
         <label htmlFor="edit-plan">Plan</label>
-        <select id="edit-plan" value={form.plan} onChange={(e) => setForm({ ...form, plan: e.target.value as Plan })}>
-          {PLANS.map((p) => (
-            <option key={p.value} value={p.value}>
-              {p.label}
+        <select id="edit-plan" value={form.plan} onChange={(e) => setForm({ ...form, plan: e.target.value })}>
+          {/* A member keeps a plan that was retired since. */}
+          {!offered.some((p) => p.plan === member.plan) && <option value={member.plan}>{planLabel(member.plan)}</option>}
+          {offered.map((p) => (
+            <option key={p.plan} value={p.plan}>
+              {p.name}
             </option>
           ))}
         </select>
       </div>
+      <TrainerSelect
+        id="edit-trainer"
+        label="Personal trainer"
+        value={form.trainer_id}
+        onChange={(trainer_id) => setForm((prev) => ({ ...prev, trainer_id }))}
+      />
       <ProfileFields
         idPrefix="edit"
         form={profile}

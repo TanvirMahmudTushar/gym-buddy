@@ -7,7 +7,16 @@ from fastapi import APIRouter, Depends, Query
 
 from app.database import SessionDep
 from app.deps import CurrentUser
-from app.models import BookingRead, BookingPage, ClassCreate, ClassPage, ClassRead, ClassUpdate, User
+from app.models import (
+    AttendanceUpdate,
+    BookingPage,
+    BookingRead,
+    ClassCreate,
+    ClassPage,
+    ClassRead,
+    ClassUpdate,
+    User,
+)
 from app.rbac import Permission, require_permission
 from app.services import class_service, member_service
 
@@ -68,6 +77,15 @@ def list_bookings(
     """Gym managers and admins: any class. A trainer: only the classes they teach (403 for the rest)."""
     items, total = class_service.list_bookings(session, class_id, offset, limit, viewer)
     return {"items": items, "total": total, "offset": offset, "limit": limit}
+
+
+@router.put("/{class_id}/bookings/{member_id}/attendance", response_model=BookingRead)
+def mark_attendance(
+    class_id: int, member_id: int, body: AttendanceUpdate, session: SessionDep, viewer: BookingViewer
+) -> dict:
+    """Marks whether the member came (null clears it). Gym managers and admins: any class; a trainer: their own.
+    400 until an hour before the class starts; 404 if the member has not booked it."""
+    return class_service.mark_attendance(session, class_id, member_id, body.attended, viewer)
 
 
 @router.post("/{class_id}/bookings", status_code=201, response_model=BookingRead)

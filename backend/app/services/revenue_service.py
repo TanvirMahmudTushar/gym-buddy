@@ -1,11 +1,12 @@
 # Revenue for the admin dashboard (SRS FR-52). Days and months are UTC calendar days, the same calendar the
 # payments list filters use, so every number here matches the payments list for the same dates.
-# Voided payments are never counted.
+# Voided payments are never counted. Net income is revenue minus the expenses dated in the same month.
 from datetime import date, timedelta
 
 from sqlmodel import Session, col, func, select
 
 from app.models import Payment, start_of_day, utc_today
+from app.services import expense_service
 
 METHOD_ORDER = ["cash", "card", "bank_transfer", "mobile_banking"]
 LAST_DAYS = 30
@@ -47,11 +48,18 @@ def revenue_stats(session: Session) -> dict:
     months = []
     for back in range(MONTHS - 1, -1, -1):
         start = _month_start(today, back)
-        months.append({"month": start.strftime("%Y-%m"), "amount": _sum(session, start, _month_start(start, -1))})
+        end = _month_start(start, -1)
+        amount, expenses = _sum(session, start, end), expense_service.total_between(session, start, end)
+        months.append(
+            {"month": start.strftime("%Y-%m"), "amount": amount, "expenses": expenses, "net": amount - expenses}
+        )
 
     return {
         "today": _sum(session, today),
-        "this_month": _sum(session, _month_start(today)),
+        # The last month in the list is this month so far.
+        "this_month": months[-1]["amount"],
+        "expenses_this_month": months[-1]["expenses"],
+        "net_this_month": months[-1]["net"],
         "last_30_days": _sum(session, since_30),
         "last_30_days_from": since_30,
         "by_method": [{"method": m, "amount": a, "count": c} for m, (a, c) in by_method.items()],

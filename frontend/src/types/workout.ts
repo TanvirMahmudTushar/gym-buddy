@@ -6,7 +6,7 @@ export interface Workout {
   /** YYYY-MM-DD */
   workout_date: string
   notes: string | null
-  /** null for a personal workout, which only its owner can see. */
+  /** null only for an old personal workout, which nothing but the admin's All workouts list shows. */
   group_id: number | null
   group_name: string | null
   /** Who added it; null once that account is deleted. */
@@ -14,6 +14,8 @@ export interface Workout {
   owner_name: string | null
   assigned_to: number | null
   assigned_to_name: string | null
+  /** When the person it is assigned to marked it done. */
+  completed_at: string | null
   created_at: string
   updated_at: string
 }
@@ -25,7 +27,7 @@ export interface WorkoutPage {
   limit: number
 }
 
-/** Add or edit a workout. group_id and assigned_to only when adding to a group. */
+/** Add or edit a workout. group_id and assigned_to only when adding. */
 export interface WorkoutBody {
   title: string
   workout_date: string

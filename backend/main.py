@@ -16,6 +16,8 @@ from app.routers import (
     auth,
     check_ins,
     classes,
+    equipment,
+    expenses,
     groups,
     members,
     moderation,
@@ -36,17 +38,25 @@ from app.services.auth_service import (
     SamePasswordError,
     WrongPasswordError,
 )
-from app.services.checkin_service import MembershipNotValidError
+from app.services.checkin_service import (
+    AlreadyInsideError,
+    CannotCheckOutError,
+    CheckInNotFoundError,
+    MembershipNotValidError,
+)
 from app.services.class_service import (
     AlreadyBookedError,
+    AttendanceNotOpenError,
     BookingNotFoundError,
     CapacityBelowBookingsError,
     ClassFullError,
     ClassNotFoundError,
     ClassStartedError,
+    MemberNotBookedError,
     NotYourClassError,
-    TrainerNotFoundError,
 )
+from app.services.equipment_service import EquipmentNotFoundError
+from app.services.expense_service import ExpenseNotFoundError
 from app.services.member_service import (
     AccountNotFoundError,
     AlreadyMemberError,
@@ -64,8 +74,15 @@ from app.services.group_service import (
     GroupPermissionError,
 )
 from app.services.payment_service import PaymentNotFoundError
+from app.services.plan_service import (
+    PlanInUseError,
+    PlanNameTakenError,
+    PlanNotFoundError,
+    PlanNotOfferedError,
+)
 from app.services.profile_service import IncompleteEmergencyContactError
 from app.services.session_service import SessionNotFoundError
+from app.services.trainer_service import TrainerNotFoundError
 from app.services.user_service import (
     CannotBanError,
     CannotChangeOwnRoleError,
@@ -73,7 +90,7 @@ from app.services.user_service import (
     CannotRevokeOwnSessionsError,
     UserNotFoundError,
 )
-from app.services.workout_service import AssigneeNotInGroupError, NotGroupWorkoutError, WorkoutNotFoundError
+from app.services.workout_service import AssigneeNotInGroupError, NotAssignedToYouError, WorkoutNotFoundError
 
 logger = logging.getLogger("gym_buddy")
 
@@ -112,6 +129,8 @@ app.include_router(activity.router)
 app.include_router(workouts.router)
 app.include_router(groups.router)
 app.include_router(moderation.router)
+app.include_router(equipment.router)
+app.include_router(expenses.router)
 
 # Run at import (not in a lifespan hook) so it also works on Vercel's serverless functions.
 create_db_and_tables()
@@ -136,6 +155,16 @@ async def cannot_delete_account(request: Request, exc: CannotDeleteAccountError)
 @app.exception_handler(MembershipNotValidError)
 async def membership_not_valid(request: Request, exc: MembershipNotValidError) -> JSONResponse:
     return JSONResponse(status_code=400, content={"detail": str(exc)})
+
+
+@app.exception_handler(CannotCheckOutError)
+async def cannot_check_out(request: Request, exc: CannotCheckOutError) -> JSONResponse:
+    return JSONResponse(status_code=400, content={"detail": str(exc)})
+
+
+@app.exception_handler(AlreadyInsideError)
+async def already_inside(request: Request, exc: AlreadyInsideError) -> JSONResponse:
+    return JSONResponse(status_code=409, content={"detail": str(exc)})
 
 
 @app.exception_handler(ClassNotFoundError)
@@ -168,12 +197,21 @@ _plain_error(AlreadyBookedError, 409, "You have already booked this class")
 _plain_error(BookingNotFoundError, 404, "You have not booked this class")
 _plain_error(TrainerNotFoundError, 422, "trainer_id: pick an account with the Trainer role")
 _plain_error(NotYourClassError, 403, "You can only see the bookings of the classes you teach")
+_plain_error(AttendanceNotOpenError, 400, "Attendance can be marked from one hour before the class starts")
+_plain_error(MemberNotBookedError, 404, "This member has not booked this class")
+_plain_error(CheckInNotFoundError, 404, "Check-in not found")
+_plain_error(PlanNotFoundError, 404, "Plan not found")
+_plain_error(PlanNotOfferedError, 422, "plan: pick a plan the gym offers now")
+_plain_error(PlanNameTakenError, 409, "Another plan already has this name")
+_plain_error(PlanInUseError, 409, "Members or payments have this plan; retire it instead of deleting it")
+_plain_error(EquipmentNotFoundError, 404, "Equipment not found")
+_plain_error(ExpenseNotFoundError, 404, "Expense not found")
 _plain_error(PaymentNotFoundError, 404, "Payment not found")
 _plain_error(AnnouncementNotFoundError, 404, "Announcement not found")
 _plain_error(SessionNotFoundError, 404, "Session not found")
 _plain_error(CannotRevokeOwnSessionsError, 400, "Log out your own sessions on My account")
 _plain_error(WorkoutNotFoundError, 404, "Workout not found")
-_plain_error(NotGroupWorkoutError, 400, "Only a group workout can be assigned")
+_plain_error(NotAssignedToYouError, 403, "Only the person this workout is assigned to can mark it done")
 _plain_error(AssigneeNotInGroupError, 422, "user_id: pick someone in this workout's group")
 _plain_error(GroupNotFoundError, 404, "Group not found")
 _plain_error(GroupAccountNotFoundError, 422, "No account has that email. Ask the person to sign up first.")

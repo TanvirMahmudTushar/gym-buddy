@@ -1,9 +1,10 @@
 import { type FormEvent, useEffect, useState } from "react"
-import { listMemberPayments, listPlans, recordPayment } from "../services/paymentService"
+import { usePlans } from "../context/PlansContext"
+import { listMemberPayments, recordPayment } from "../services/paymentService"
 import type { Member, Plan } from "../types/member"
-import type { Payment, PaymentMethod, PlanPrice } from "../types/payment"
+import type { Payment, PaymentMethod } from "../types/payment"
 import { METHODS, addDays, formatMoney } from "../utils/payment"
-import { errorText, formatDate, planLabel, todayUtc } from "../utils/member"
+import { errorText, formatDate, todayUtc } from "../utils/member"
 import PaymentLine from "./PaymentLine"
 
 const PAGE_SIZE = 5
@@ -16,7 +17,7 @@ interface Props {
 
 // Take a payment (optionally renewing the membership) and see this member's payment history.
 export default function PaymentSection({ member, onRecorded }: Props) {
-  const [plans, setPlans] = useState<PlanPrice[]>([])
+  const { offered } = usePlans()
   const [payments, setPayments] = useState<Payment[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -24,18 +25,17 @@ export default function PaymentSection({ member, onRecorded }: Props) {
   const [amount, setAmount] = useState("")
   const [method, setMethod] = useState<PaymentMethod>("cash")
   const [renew, setRenew] = useState(false)
-  const [plan, setPlan] = useState<Plan>(member.plan)
+  // The member's own plan, or the cheapest offered one when theirs was retired.
+  const [chosen, setChosen] = useState<Plan>(member.plan)
+  const plan = offered.some((p) => p.plan === chosen) ? chosen : (offered[0]?.plan ?? chosen)
   const [note, setNote] = useState("")
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState("")
   const [message, setMessage] = useState("")
 
-  // The panel remounts this section for each member (key), so these load once per member.
+  // The panel remounts this section for each member (key), so this runs once per member.
   useEffect(() => {
     let ignore = false
-    listPlans()
-      .then((p) => !ignore && setPlans(p))
-      .catch(() => undefined) // the form still works without the suggested price
     listMemberPayments(member.id, 0, PAGE_SIZE)
       .then((page) => {
         if (ignore) return
@@ -49,7 +49,7 @@ export default function PaymentSection({ member, onRecorded }: Props) {
     }
   }, [member.id])
 
-  const planInfo = (p: Plan) => plans.find((x) => x.plan === p)
+  const planInfo = (p: Plan) => offered.find((x) => x.plan === p)
   const selected = renew ? planInfo(plan) : undefined
   // An active member renews from their current expiry, an expired one from today: the same rule the API uses.
   const newExpiry = selected ? addDays(member.expires_on > todayUtc() ? member.expires_on : todayUtc(), selected.duration_days) : null
@@ -61,7 +61,7 @@ export default function PaymentSection({ member, onRecorded }: Props) {
   }
 
   function changePlan(next: Plan) {
-    setPlan(next)
+    setChosen(next)
     const price = planInfo(next)?.price
     if (renew && price !== undefined) setAmount(String(price))
   }
@@ -141,11 +141,10 @@ export default function PaymentSection({ member, onRecorded }: Props) {
         {renew && (
           <div className="field">
             <label htmlFor={`${id}-plan`}>Plan</label>
-            <select id={`${id}-plan`} value={plan} onChange={(e) => changePlan(e.target.value as Plan)}>
-              {(plans.length ? plans.map((p) => p.plan) : [member.plan]).map((p) => (
-                <option key={p} value={p}>
-                  {planLabel(p)}
-                  {planInfo(p) ? ` · ${formatMoney(planInfo(p)!.price)} · ${planInfo(p)!.duration_days} days` : ""}
+            <select id={`${id}-plan`} value={plan} onChange={(e) => changePlan(e.target.value)}>
+              {offered.map((p) => (
+                <option key={p.plan} value={p.plan}>
+                  {p.name} · {formatMoney(p.price)} · {p.duration_days} days
                 </option>
               ))}
             </select>

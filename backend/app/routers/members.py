@@ -41,11 +41,12 @@ MANAGE_PAYMENTS = Depends(require_permission(Permission.PAYMENTS_MANAGE))
 Manager = Annotated[User, Depends(require_permission(Permission.MEMBERS_MANAGE))]
 
 
-@router.post("", status_code=201, response_model=MemberRead, dependencies=[MANAGE_MEMBERS])
-def create_member(body: MemberCreate, session: SessionDep) -> User:
-    """Starts a membership on the account with this email (the person signs up first).
-    422 if no account has the email; 409 if that account already has a membership."""
-    return member_service.start_membership(session, body)
+@router.post("", status_code=201, response_model=MemberRead)
+def create_member(body: MemberCreate, session: SessionDep, manager: Manager) -> dict:
+    """Starts a membership on the account with this email (the person signs up first). Without expires_on it runs for
+    the plan's days; with payment_method the plan's price is recorded as paid in the same step.
+    422 if no account has the email or the plan is not offered; 409 if that account already has a membership."""
+    return member_service.read(session, member_service.start_membership(session, body, manager))
 
 
 @router.get("", response_model=MemberPage, dependencies=[READ_MEMBERS])
@@ -58,8 +59,8 @@ def list_members(
 ) -> dict:
     """Newest membership first. A frozen member counts as frozen whatever its expiry date.
     q finds members by part of the name, email or phone, in any case."""
-    items, total = member_service.list_members(session, status, offset, limit, (q or "").strip() or None)
-    return {"items": items, "total": total, "offset": offset, "limit": limit}
+    members, total = member_service.list_members(session, status, offset, limit, (q or "").strip() or None)
+    return {"items": member_service.read_many(session, members), "total": total, "offset": offset, "limit": limit}
 
 
 @router.get("/waiting", response_model=AccountPage, dependencies=[READ_MEMBERS])
@@ -83,20 +84,22 @@ def bulk_delete_members(body: MemberBulkDelete, session: SessionDep, manager: Ma
 
 
 @router.get("/{member_id}", response_model=MemberRead, dependencies=[READ_MEMBERS])
-def get_member(member_id: int, session: SessionDep) -> User:
-    return member_service.get_member(session, member_id)
+def get_member(member_id: int, session: SessionDep) -> dict:
+    return member_service.read(session, member_service.get_member(session, member_id))
 
 
 @router.patch("/{member_id}", response_model=MemberRead, dependencies=[MANAGE_MEMBERS])
-def update_member(member_id: int, body: MemberUpdate, session: SessionDep) -> User:
-    """Only the fields sent change. A later expires_on renews; is_frozen true / false freezes / unfreezes.
+def update_member(member_id: int, body: MemberUpdate, session: SessionDep) -> dict:
+    """Only the fields sent change. A later expires_on renews; is_frozen true / false freezes / unfreezes; trainer_id
+    sets the personal trainer (an account with the Trainer role, or null for none).
     phone, date_of_birth and the emergency contact follow the same rules as PATCH /users/me/profile."""
-    return member_service.update_member(session, member_id, body.model_dump(exclude_unset=True))
+    member = member_service.update_member(session, member_id, body.model_dump(exclude_unset=True))
+    return member_service.read(session, member)
 
 
 @router.post("/{member_id}/check-ins", status_code=201, response_model=CheckInRead, dependencies=[RECORD_CHECK_INS])
 def record_check_in(member_id: int, session: SessionDep, user: CurrentUser) -> dict:
-    """400 if the membership is frozen or expired. Several check-ins on the same day are allowed."""
+    """400 if the membership is frozen or expired; 409 if the member is checked in today and not checked out yet."""
     return checkin_service.record_check_in(session, member_id, user)
 
 

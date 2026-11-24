@@ -25,8 +25,8 @@ This document lists the requirements for Gym Buddy: the MVP (gym member CRUD RES
 
 ### 1.2 Scope
 - **MVP:** a client can create, list, view, update and delete gym members over HTTP. A member record holds name, phone, membership plan, start and expiry dates and an active flag. There are no accounts; all members are in one shared list.
-- **Beta:** gym members sign up and log in, see their own membership, visits and payments, book workout classes, and log workouts alone or in training groups. Gym managers run members, check-ins, payments, classes and announcements; trainers see their classes; admins also manage users, roles, prices, the activity log and content.
-- Out of scope: see [PRD, section 5](01-prd.md#5-scope). Online card payments and equipment tracking are not part of this system: staff record payments taken at the desk (cash, card, bank transfer or mobile banking).
+- **Beta:** gym members sign up and log in, see their own membership, visits and payments, book classes, and follow the workouts their trainer assigns them. Trainers run classes, clients and training groups. Gym managers run members, attendance, payments, classes, equipment and announcements; admins also manage plans, expenses, users, roles, the activity log and moderation.
+- Out of scope: see [PRD, section 5](01-prd.md#5-scope). Online card payments are not part of this system: staff record payments taken at the desk (cash, card, bank transfer or mobile banking).
 
 ### 1.3 Definitions
 
@@ -35,7 +35,7 @@ This document lists the requirements for Gym Buddy: the MVP (gym member CRUD RES
 | CRUD | Create, Read, Update, Delete |
 | REST | API style where resources (like `members`) are accessed with HTTP methods (GET, POST, PATCH, DELETE) |
 | Member | A person with a gym membership. In the MVP, a member record (name, phone, plan, dates, status); in the final release, a user account on which staff have set a plan |
-| Plan | The membership type: `monthly`, `quarterly` or `yearly` |
+| Plan | (Beta) What the gym sells: a name, a price, a length in days, offered or retired. Admins manage them; a new database starts with Monthly, Quarterly and Yearly. (MVP: `monthly`, `quarterly` or `yearly`) |
 | Valid membership | A membership that is not frozen and whose `expires_on` is today or later (UTC). (MVP: `is_active = true`) |
 | Frozen membership | A membership paused by staff: `is_frozen = true` (MVP: `is_active = false`) |
 | Expired membership | A membership with `expires_on` before today |
@@ -43,14 +43,17 @@ This document lists the requirements for Gym Buddy: the MVP (gym member CRUD RES
 | Session | (Beta) One login on one browser, stored in `auth_session`; logging out or a ban ends it on the server |
 | Permission | (Beta) A named right such as `members:read`, held by roles (`backend/app/rbac.py`); every protected endpoint asks for one |
 | Payment | (Beta) Money a member paid at the desk, recorded by staff, optionally renewing the membership; it can be voided but never deleted |
-| Workout | (Beta) A training session someone logs: personal (only its owner sees it) or in a training group |
-| Training group | (Beta) A group anyone can start; the owner adds people and ticks what each may do with the group's workouts |
+| Workout | (Beta) A training session in a training group, which may be assigned to one person, who marks it done |
+| Training group | (Beta) Members training under a trainer. Trainers and staff start one; its owner adds people and ticks what each may do with the group's workouts |
 | Class | (Beta) A scheduled workout session with a name, start time, duration, capacity and an optional trainer |
 | Trainer | (Beta) An account with the role `trainer` who teaches classes; a class's `trainer_id` points at one. Classes from before trainers were accounts keep a free-text `trainer_name` |
 | Booking | (Beta) A member's reserved spot in a class |
 | Emergency contact | (Beta) The person to call if something happens to a member at the gym: a name and a phone, kept on the member's account |
 | Announcement | (Beta) News from the gym (a title, a message and an optional end date) that gym managers and admins post and every logged-in user reads until its end date |
-| Check-in | (Beta) A record that a member arrived at the gym, entered by staff |
+| Check-in | (Beta) A record that a member arrived at the gym, entered by staff, with when they left once checked out |
+| Personal trainer | (Beta) The trainer staff picked for a member; the member is that trainer's client |
+| Equipment | (Beta) What the gym owns: working, being repaired or out of order, with its services |
+| Expense | (Beta) Money the gym spent; payments minus expenses is the month's net income |
 | RBAC | Role-Based Access Control: what a caller can do depends on their role |
 | JWT | JSON Web Token: a signed token that proves who the caller is |
 | Access token | (Beta) Short-lived JWT sent in the `Authorization: Bearer` header |
@@ -75,11 +78,11 @@ flowchart LR
 | Anonymous client | MVP | Anyone who can reach the API; full access to the shared member list |
 | Guest | Beta | Not logged in; can only sign up, log in, check health and read the API docs |
 | User | Beta | Logged in with global role `user` (everyone who signs up); edits their own profile, views their own membership and check-ins, browses classes, books and cancels their own bookings |
-| Trainer | Beta | Logged in with global role `trainer` (given by an admin): sees the classes they teach and who booked each one, and has the same own-account pages as a User. Cannot manage members or classes |
-| Gym Manager | Beta | Gym staff with global role `gym_manager`: manage all members, classes and check-ins and view bookings. Cannot list users, change roles or see the dashboard |
+| Trainer | Beta | Logged in with global role `trainer` (given by an admin): sees the classes they teach, who booked each one and who came, sees their own clients, runs training groups, reports equipment faults, and has the same own-account pages as a User. Cannot manage members or classes |
+| Gym Manager | Beta | Gym staff with global role `gym_manager`: manage all members, classes, attendance, payments, equipment and announcements. Cannot list users, change roles, or see the admin statistics, plans or expenses |
 | Admin | Beta | Global role `admin`: everything a Gym Manager can do, plus list users, change roles, view dashboard stats, ban / unban users, and read the activity log and the security view |
 
-`user`, `trainer`, `gym_manager` and `admin` are **global** roles stored on the user account. An account has at most one membership, stored on the account itself (plan, dates, frozen). A logged-in `user` with no membership can log in, edit their profile, log workouts and join groups, but gets `404` on the membership endpoints and cannot book until staff start their membership.
+`user`, `trainer`, `gym_manager` and `admin` are **global** roles stored on the user account. An account has at most one membership, stored on the account itself (plan, dates, frozen). A logged-in `user` with no membership can log in, edit their profile and be in a training group, but gets `404` on the membership endpoints and cannot book until staff start their membership.
 
 ### 2.3 Use cases
 
@@ -270,8 +273,8 @@ Every Admin is also a logged-in user, so they can log out, edit their profile an
 |---|---|---|---|
 | FR-30 | A gym manager or admin shall be able to record a check-in for a member. The request returns `400` if the membership is not valid (frozen or expired). The check-in stores who recorded it and when. | Beta | US-18 |
 | FR-31 | A gym manager or admin shall be able to list a member's check-ins (newest first, paginated). | Beta | US-18 |
-| FR-42 | A gym manager or admin shall be able to list everyone who has checked in today (since midnight UTC), newest first, with the member's name and who recorded it. | Beta | US-18 |
-| FR-32 | Recording more than one check-in for the same member on the same day is allowed; each is stored as its own record. | Beta | US-18 |
+| FR-42 | A gym manager or admin shall be able to list everyone who checked in on a UTC day (today by default), newest first, with the member's name, when they left and who recorded it, searched by name, email or phone, or narrowed to who is in the gym now. | Beta | US-18 |
+| FR-32 | A member may check in more than once on the same day; each is its own record. A member checked in today and not checked out yet cannot be checked in again (`409`). | Beta | US-18 |
 | FR-33 | A user whose account has no linked membership shall get `404` for FR-17, FR-18 and FR-29. | Beta | US-11 |
 
 > **Built so far (gym manager):** FR-30, FR-31, FR-32 and FR-42. Deleting a member also deletes their check-ins. The member's own view of their check-ins (FR-18) is built, with FR-17, FR-23 and FR-33 (see the user notes).
@@ -282,11 +285,11 @@ Every Admin is also a logged-in user, so they can log out, edit their profile an
 
 | ID | Requirement | Release | Story |
 |---|---|---|---|
-| FR-43 | Each plan (`monthly`, `quarterly`, `yearly`) shall have a price in whole taka and a length in days. Any logged-in user can list them. | Beta | US-25 |
+| FR-43 | Each plan shall have a name, a price in whole taka, a length in days, an optional description, and be offered or retired. Any logged-in user can list them, cheapest first. | Beta | US-25 |
 | FR-44 | A gym manager or admin shall be able to record a payment for a member: `amount` (whole taka, 1 to 10,000,000), `method` (`cash`, `card`, `bank_transfer` or `mobile_banking`) and an optional `note` (up to 200 characters). A User gets `403`, a logged-out caller `401`, an unknown member `404`. | Beta | US-25 |
 | FR-45 | When a payment names a `renew_plan`, the member's `expires_on` shall become the later of today and the current expiry, plus that plan's days, and the member's `plan` shall become that plan. A frozen member's expiry is extended but they stay frozen. | Beta | US-25 |
 | FR-46 | A gym manager or admin shall be able to list a member's payments, newest first, paginated. Each payment keeps the member's name, so it still reads correctly if the member is deleted; deleting a member never deletes their payments. | Beta | US-25 |
-| FR-47 | An admin shall be able to change a plan's `price` (1 to 10,000,000) and `duration_days` (1 to 3,660). Both are sent together, and the three plans cannot be added or removed. Other roles get `403`. New values apply to later payments only; payments already taken are not changed. | Beta | US-26 |
+| FR-47 | An admin shall be able to change a plan's `name`, `price` (1 to 10,000,000), `duration_days` (1 to 3,660) and `description`; only the fields sent change. Other roles get `403`. New values apply to later payments and memberships only; payments already taken are not changed. Adding and retiring plans is FR-109 and FR-110. | Beta | US-26 |
 | FR-48 | A gym manager or admin shall be able to list all payments, newest first, paginated, filtered by date range (`date_from`, `date_to`: UTC calendar days, both inclusive), `method` and part of the member's name (any case). Voided payments are left out unless `include_voided=true`. The response includes `total_amount`: the sum of every matching payment that is not voided, across all pages. A User gets `403`; `date_from` after `date_to` gives `422`. | Beta | US-25 |
 | FR-49 | A logged-in user shall be able to list their own payments, newest first, paginated, with voided payments included and marked. Nobody can list another person's payments this way. | Beta | US-25 |
 | FR-50 | An admin shall be able to void a payment with a required `reason` (1 to 200 characters). The payment stays on record with `voided_at`, `void_reason` and who voided it, but is left out of every total and of revenue. Voiding an already voided payment changes nothing. Voiding does not change the member's expiry date. A gym manager gets `403`, an unknown payment `404`. | Beta | US-25 |
@@ -303,7 +306,7 @@ Every Admin is also a logged-in user, so they can log out, edit their profile an
 | FR-54 | A gym manager or admin shall be able to search the member list with `q`: members whose name, email or phone contains the text, in any case, combined with the `status` filter. `%` and `_` match themselves. | Beta | US-13 |
 | FR-55 | A gym manager or admin shall be able to list the accounts waiting for a membership: role `user` and no plan, newest sign-up first, with the same `q` search on name and email. Starting a membership removes the account from this list. | Beta | US-13 |
 | FR-56 | The admin user list shall show each account's `plan`, `expires_on` and `is_frozen` (empty for an account without a membership) and accept `q` to search by name or email. | Beta | US-12 |
-| FR-57 | The Members page shall open on a member and a filter given in its address (`#/members?filter=...&member=ID`), and every member's name in the payments list, class bookings and today's check-ins shall link there. | Beta | US-13 |
+| FR-57 | The Members page shall open on a member and a filter given in its address (`#/members?filter=...&member=ID`), and every member's name in the payments list, class bookings and the attendance list shall link there. | Beta | US-13 |
 
 > **Built so far (finding members):** FR-54 to FR-57.
 
@@ -318,12 +321,12 @@ Every Admin is also a logged-in user, so they can log out, edit their profile an
 
 > **Built so far (bookings and renewals):** FR-58 to FR-61.
 
-### 3.7d Gym Manager overview — Beta
+### 3.7d Front desk overview — Beta
 
 | ID | Requirement | Release | Story |
 |---|---|---|---|
-| FR-62 | A gym manager or admin shall be able to view today's overview: check-ins since midnight UTC, memberships expiring soon (FR-53), accounts waiting for a membership (FR-55), payments taken since midnight UTC that are not voided (count and sum), and the next 5 classes that have not started with their bookings and capacity. Each number shall equal the list it links to. A user gets `403`. | Beta | US-20 |
-| FR-63 | A gym manager shall land on the overview after logging in. | Beta | US-20 |
+| FR-62 | A gym manager or admin shall be able to view today's overview: check-ins since midnight UTC and who is inside now, equipment to fix and services due (FR-118), memberships expiring soon (FR-53), accounts waiting for a membership (FR-55), payments taken since midnight UTC that are not voided (count and sum), and the next 5 classes that have not started with their bookings and capacity. Each number shall equal the list it links to. A user gets `403`. | Beta | US-20 |
+| FR-63 | A gym manager and an admin shall land on the Dashboard after logging in: the overview (FR-62), with the admin statistics (FR-35, FR-52) below it for an admin. | Beta | US-20 |
 
 ### 3.7e Admin password reset — Beta
 
@@ -352,7 +355,7 @@ Story US-27: as a gym manager, I want to post holiday hours, new classes and oth
 | FR-72 | A gym manager or admin shall be able to post an announcement: `title` (1–100 characters after trimming), `message` (1–1,000 characters after trimming) and an optional `ends_on` (a date, not before today in UTC: `422`). The system records who posted it and when. A user or trainer gets `403`. | Beta | US-27 |
 | FR-73 | Any logged-in user shall be able to list the current announcements (no `ends_on`, or `ends_on` today or later in UTC), newest first, paginated, each with `posted_at`, `updated_at` (null until edited) and the poster's current name. An announcement stops showing the day after its `ends_on`, with nothing to run. | Beta | US-27 |
 | FR-74 | A gym manager or admin shall be able to list every announcement including ended ones (`include_ended=true`; other roles `403`), edit one (only the fields sent change; `ends_on: null` removes the end date; a new `ends_on` before today is `422`) and delete one (`404` for an unknown id). An edit keeps the poster and `posted_at` and sets `updated_at`. | Beta | US-27 |
-| FR-75 | Members shall see the current announcements on My membership (the card is hidden when there are none), and gym managers and admins on the Overview, which links to the Announcements page. Deleting the account that posted an announcement keeps the announcement, without a poster name. | Beta | US-27 |
+| FR-75 | Members shall see the current announcements on My membership (the card is hidden when there are none), trainers on My classes, and gym managers and admins on the Dashboard, which links to the Announcements page. Deleting the account that posted an announcement keeps the announcement, without a poster name. | Beta | US-27 |
 
 ### 3.7h Member profile details — Beta
 
@@ -392,34 +395,56 @@ Story US-29: as an admin, I want to see who did what to which account, from wher
 
 ### 3.7j Workouts and training groups — Beta
 
-Story US-30: as a member, I want to log my own workouts and share workouts in a training group where the owner decides what each person may do, so we can plan sessions together without anyone changing what they should not.
+Story US-30: as a trainer, I want to run a training group where I decide what each member may do, and give members workouts, so we can plan sessions together without anyone changing what they should not.
 
 | ID | Requirement | Release | Story |
 |---|---|---|---|
-| FR-90 | A logged-in user of any role shall be able to add, list, view, edit and delete their own personal workouts: `title` (1–100 characters after trimming), `workout_date` (from 2000-01-01 to a year from today, UTC) and optional `notes` (up to 1,000). Only the owner can read or change a personal workout through the workout endpoints; anyone else, whatever their role, gets `404` there. Only content moderation (FR-104) lets an admin see and delete it. | Beta | US-30 |
-| FR-91 | A logged-in user shall be able to start a training group (`name`, 1–100 characters) and becomes its owner, and list the groups they own or belong to, each with their own permissions in it (`my_permissions`). | Beta | US-30 |
+| FR-90 | *Withdrawn.* Personal workouts (a private diary only its owner could read) were built in PR #70 and removed: nobody at the gym could see them, so they did not help run it. Every workout is now in a training group (`422` without `group_id`). | Beta | US-30 |
+| FR-91 | A trainer, gym manager or admin (`groups:create`; a user gets `403`) shall be able to start a training group (`name`, 1–100 characters) and becomes its owner. Any logged-in user shall be able to list the groups they own or belong to, each with their own permissions in it (`my_permissions`). | Beta | US-30 |
 | FR-92 | The owner shall be able to add an existing account to the group by its email, with `can_create`, `can_update` and `can_assign` (`422` if no account has the email, `409` if it is already in the group), change those permissions, and remove a member. A member may leave the group. The owner cannot leave or lose a permission (`400`). Only the owner sees the members' emails. | Beta | US-30 |
 | FR-93 | Everyone in a group shall be able to read the group, its people and its workouts. `can_create` allows adding a workout to the group, `can_update` editing or deleting one, and `can_assign` assigning one to someone in the group or unassigning it (`422` for someone outside the group). The owner holds all three. A member without the permission gets `403`. | Beta | US-30 |
 | FR-94 | Only the owner shall be able to rename or delete the group and add, remove or change the permissions of members: other members get `403`. Anyone outside the group gets `404` for the group, its people, its workouts and each of its workouts. Deleting a group deletes its workouts and memberships. | Beta | US-30 |
 | FR-95 | The per-group permissions shall be worked out in the RBAC module (`rbac.group_permissions()`) and checked on the server on every request; a changed permission applies on the member's next request. The app shall show only the buttons the caller's `my_permissions` allow. | Beta | US-30 |
-| FR-96 | A user shall be able to list the group workouts assigned to them. Leaving or being removed from a group unassigns that group's workouts from them. | Beta | US-30 |
-| FR-97 | Deleting an account shall delete the groups it owns (with their workouts and memberships), its memberships in other groups and its personal workouts; the group workouts it added stay without an owner, and the ones assigned to it become unassigned. | Beta | US-30 |
+| FR-96 | A user shall be able to list the workouts assigned to them. Leaving or being removed from a group unassigns that group's workouts from them. Marking one done is FR-116. | Beta | US-30 |
+| FR-97 | Deleting an account shall delete the groups it owns (with their workouts and memberships), and its memberships in other groups; the workouts it added stay without an owner, and the ones assigned to it become unassigned. | Beta | US-30 |
 
-> **Built so far (workouts and groups):** FR-90 to FR-97, with the Workouts and Groups pages for every role. Admins have no special access through these endpoints; they review and delete content on the Moderation page (3.7k). Group chat and invitations by email are out of scope.
+> **Built so far (training):** FR-91 to FR-97, on the Training page (Assigned to me, My groups). Admins have no special access through these endpoints; they review and delete on All groups and All workouts (3.7k). Group chat and invitations by email are out of scope.
 
 ### 3.7k Content moderation — Beta
 
-Story US-31: as an admin, I want to find and remove anyone's workouts and training groups, so I can take down abusive or unsuitable content even when nobody else can see it.
+Story US-31: as an admin, I want to find and remove any training group or workout, so I can take down unsuitable content in groups I am not in.
 
 | ID | Requirement | Release | Story |
 |---|---|---|---|
-| FR-104 | An admin shall be able to list every workout, personal or in a group, latest workout date first, paginated, with its owner (name and email), group and assignee, filtered by `owner_id`, `group_id`, `kind` (`personal` / `group`), date range (`date_from`, `date_to`: the workout's date, both inclusive) and `q` (part of the title, the notes, or the owner's name or email, any case). This is the only way past FR-90's privacy. | Beta | US-31 |
+| FR-104 | An admin shall be able to list every workout, latest workout date first, paginated, with its owner (name and email), group and assignee, filtered by `owner_id`, `group_id`, date range (`date_from`, `date_to`: the workout's date, both inclusive) and `q` (part of the title, the notes, or the owner's name or email, any case). | Beta | US-31 |
 | FR-105 | An admin shall be able to list every training group, newest first, paginated, with its owner, number of people and number of workouts, filtered by `owner_id`, date range (the UTC day it was made) and `q` (group name, or the owner's name or email). | Beta | US-31 |
 | FR-106 | An admin shall be able to delete one workout or group, or up to 100 at once in one transaction (unknown ids are skipped). Deleting a group also deletes its workouts and memberships. There is no undo (no soft delete), and admins cannot edit anyone else's content. | Beta | US-31 |
 | FR-107 | Every moderation delete shall be written to the activity log (`workout_delete` / `group_delete`), naming the admin, the owner as the account affected, and the workout's title and date or the group's name and how many workouts went with it. | Beta | US-31, US-29 |
 | FR-108 | An admin shall be able to download the workouts, and the groups, matching the FR-104 / FR-105 filters as CSV (same rows and order as the list, the FR-51 format); each download is logged. Users, trainers and gym managers get `403` on every moderation endpoint (`content:moderate`). | Beta | US-31 |
 
-> **Built so far (moderation):** FR-104 to FR-108, with the Moderation page (Workouts and Groups tabs, select-many delete with a confirm step, owner filter linked from a user's details). The groups CSV goes beyond the issue, which asked only for the workouts CSV.
+> **Built so far (moderation):** FR-104 to FR-108, on the Training page (All groups and All workouts, select-many delete with a confirm step, owner filter linked from a user's details). The groups CSV goes beyond the issue, which asked only for the workouts CSV.
+
+### 3.7l Plans, attendance, trainers, equipment and expenses — Beta
+
+Stories: US-32 as an admin, I want to decide which plans the gym sells, so prices and offers can change. US-33 as a gym manager, I want to see who is inside and who came to a class. US-34 as a trainer, I want to see my clients and whether they did their workouts. US-35 as a gym manager, I want to know which equipment is broken or due for a service. US-36 as an admin, I want to record expenses and see the net income. US-37 as a gym manager, I want to start and pay for a membership in one step.
+
+| ID | Requirement | Release | Story |
+|---|---|---|---|
+| FR-109 | An admin shall be able to add a plan (`name` 1–60 characters, unique in any case, else `409`; price and days as in FR-47). Its code is made from the name and never changes. Other roles get `403`. | Beta | US-32 |
+| FR-110 | An admin shall be able to retire a plan and offer it again. A retired plan cannot be chosen for a membership, a plan change or a renewal (`422`); members and payments that have it keep it. A plan no member or payment has can be deleted; any other answers `409`. | Beta | US-32 |
+| FR-111 | When a membership is started without `expires_on`, it shall run for the plan's days from `joined_on`. With `payment_method`, the plan's price shall be recorded as the first payment in the same transaction. | Beta | US-37 |
+| FR-112 | A gym manager or admin shall be able to check a member out, recording when they left. A visit already checked out, or from an earlier UTC day, gives `400`. | Beta | US-33 |
+| FR-113 | A gym manager or admin (any class) or the class's trainer (their own classes, else `403`) shall be able to mark whether each person who booked came, change the mark or clear it, from one hour before the class starts (`400` before). The member sees the mark on their past bookings. | Beta | US-33 |
+| FR-114 | A gym manager or admin shall be able to pick a member's personal trainer, an account with the role `trainer` (`422` otherwise), or none. The member sees the trainer's name on My membership. When the account stops being a trainer or is deleted, its clients have no trainer. | Beta | US-34 |
+| FR-115 | A trainer shall be able to list their own clients, by name, with email, phone, plan, membership dates and last visit, and never notes, payments, date of birth or emergency contact, nor another trainer's clients. | Beta | US-34 |
+| FR-116 | Only the person a workout is assigned to shall be able to mark it done or clear the mark (`403` for anyone else in the group, whatever their permissions). Assigning it to someone else clears the mark. | Beta | US-34 |
+| FR-117 | A gym manager or admin shall be able to add, edit and delete equipment: name, category, quantity, status (`working`, `maintenance`, `out_of_order`), when it was bought and last serviced, how often it is serviced, and notes. The next service date is the last service (or the purchase, or today) plus that many days. | Beta | US-35 |
+| FR-118 | A trainer, gym manager or admin shall be able to list equipment by status and category, by what needs attention, and by services overdue or due within 7 days, and report a fault, which marks it out of order with the reason and who reported it. A user gets `403`. | Beta | US-35 |
+| FR-119 | A gym manager or admin shall be able to record a service or repair: the equipment works again, the fault is cleared and the next service is counted from today. | Beta | US-35 |
+| FR-120 | An admin shall be able to add, list (by date range, category and description, with the total of every match), edit, delete and export as CSV the gym's expenses (category, whole taka, a date up to today, description). Deletes and exports are written to the activity log. Other roles get `403`. | Beta | US-36 |
+| FR-121 | The revenue view (FR-52) shall include this month's expenses and net income, and the expenses and net income of each of the last 6 months. | Beta | US-36 |
+
+> **Built so far (gym management):** FR-109 to FR-121.
 
 ### 3.8 Account security — Beta
 
@@ -486,12 +511,16 @@ A new member always starts as `Active` if `expires_on` is today or later. "Expir
 | View own membership and check-in history | No | Yes (`404` if no membership yet) | Only with a membership | Only with a membership | Only with a membership |
 | Create, list, view, update, delete members | No | No (`403`) | No (`403`) | Yes | Yes |
 | Start a membership on an account (by its email) | No | No (`403`) | No (`403`) | Yes | Yes |
-| Record or list check-ins for a member | No | No (`403`) | No (`403`) | Yes | Yes |
+| Check a member in or out, list attendance and a member's visits | No | No (`403`) | No (`403`) | Yes | Yes |
 | List and view classes | No | Yes | Yes | Yes | Yes |
 | Create, edit, delete classes | No | No (`403`) | No (`403`) | Yes | Yes |
 | List trainers (the class form's choices) | No | No (`403`) | No (`403`) | Yes | Yes |
-| View a class's bookings | No | No (`403`) | Own classes only (`403` for others) | Yes | Yes |
-| List the classes I teach | No | No (`403`) | Yes | No (`403`) | No (`403`) |
+| View a class's bookings, mark who came | No | No (`403`) | Own classes only (`403` for others) | Yes | Yes |
+| List the classes I teach, list my clients | No | No (`403`) | Yes | No (`403`) | No (`403`) |
+| Pick a member's personal trainer | No | No (`403`) | No (`403`) | Yes | Yes |
+| List equipment, report a fault | No | No (`403`) | Yes | Yes | Yes |
+| Add, edit, service, delete equipment | No | No (`403`) | No (`403`) | Yes | Yes |
+| Add, edit, retire, delete plans; manage expenses | No | No (`403`) | No (`403`) | No (`403`) | Yes |
 | Book or cancel own class booking | No | Yes (valid membership needed to book) | Only with a membership | Only with a membership | Only with a membership |
 | List own bookings | No | Yes | Yes | Yes | Yes |
 | List or cancel a member's bookings | No | No (`403`) | No (`403`) | Yes | Yes |
@@ -510,9 +539,10 @@ A new member always starts as `Active` if `expires_on` is today or later. "Expir
 | Read the current announcements | No | Yes | Yes | Yes | Yes |
 | Post, edit, delete announcements; list ended ones | No | No (`403`) | No (`403`) | Yes | Yes |
 | Read the activity log and the security view, export the log as CSV | No | No (`403`) | No (`403`) | No (`403`) | Yes |
-| Add, view, edit, delete own personal workouts; see workouts assigned to me | No | Yes | Yes | Yes | Yes |
-| Start a training group, list my groups; in a group, what the group permissions below allow | No | Yes | Yes | Yes | Yes |
-| Read another person's personal workout, or a group one is not in (workout and group endpoints) | No | No (`404`) | No (`404`) | No (`404`) | No (`404`) |
+| See workouts assigned to me, mark them done | No | Yes | Yes | Yes | Yes |
+| Start a training group | No | No (`403`) | Yes | Yes | Yes |
+| List the groups I am in; in a group, what the group permissions below allow | No | Yes | Yes | Yes | Yes |
+| Read a group one is not in, or its workouts (workout and group endpoints) | No | No (`404`) | No (`404`) | No (`404`) | No (`404`) |
 | Moderate content: list, export and delete anyone's workouts and groups | No | No (`403`) | No (`403`) | No (`403`) | Yes (no editing) |
 
 Every endpoint except sign up, log in, refresh, health and the docs returns `401` when no valid token is sent.
@@ -523,13 +553,18 @@ Every endpoint except sign up, log in, refresh, health and the docs returns `401
 |---|---|---|---|---|---|
 | `members:read` | Member list and details, waiting list, a member's visits and bookings | No | No | Yes | Yes |
 | `members:manage` | Start, edit and delete memberships; cancel a booking for a member | No | No | Yes | Yes |
-| `check_ins:record` | Check a member in; today's check-ins | No | No | Yes | Yes |
+| `check_ins:record` | Check members in and out; the attendance list of any day | No | No | Yes | Yes |
 | `payments:manage` | Take payments; a member's payments; the list of all payments | No | No | Yes | Yes |
 | `payments:void` | Void a payment | No | No | No | Yes |
 | `payments:export` | Export payments as CSV | No | No | No | Yes |
 | `classes:manage` | Add, edit and delete classes; list trainers; any class's bookings | No | No | Yes | Yes |
-| `classes:teach` | My classes and their bookings (only the classes I teach) | No | Yes | No | No |
-| `overview:read` | Today's overview | No | No | Yes | Yes |
+| `classes:teach` | My classes, their bookings and attendance (only the classes I teach) | No | Yes | No | No |
+| `clients:read` | My clients | No | Yes | No | No |
+| `groups:create` | Start a training group | No | Yes | Yes | Yes |
+| `equipment:read` | The equipment list; report a fault | No | Yes | Yes | Yes |
+| `equipment:manage` | Add, edit, service and delete equipment | No | No | Yes | Yes |
+| `expenses:manage` | List, add, edit, delete and export expenses | No | No | No | Yes |
+| `overview:read` | The front desk part of the Dashboard | No | No | Yes | Yes |
 | `announcements:manage` | Post, edit and delete announcements; list ended ones | No | No | Yes | Yes |
 | `dashboard:read` | Dashboard stats and revenue | No | No | No | Yes |
 | `users:read` | List users | No | No | No | Yes |
@@ -538,7 +573,7 @@ Every endpoint except sign up, log in, refresh, health and the docs returns `401
 | `users:reset_password` | Reset a password (not one's own, not another admin's) | No | No | No | Yes |
 | `users:revoke_sessions` | End every session of another user | No | No | No | Yes |
 | `users:export` | Download the users CSV | No | No | No | Yes |
-| `plans:edit` | Plan prices and lengths | No | No | No | Yes |
+| `plans:edit` | Add, edit, retire and delete plans | No | No | No | Yes |
 | `activity:read` | The activity log, its CSV export and the security view | No | No | No | Yes |
 | `content:moderate` | List, export and delete anyone's workouts and groups | No | No | No | Yes |
 
@@ -717,7 +752,7 @@ Actions on one's own account and data (profile, password, sessions, own membersh
 **AC-22 Record check-in (FR-30, FR-31, FR-32)**
 - Given member `5` has a valid membership
 - When an admin sends `POST /api/v1/members/5/check-ins`, the response is `201` with `checked_in_at`.
-- When the admin records a second check-in the same day, the response is `201` again.
+- A second check-in while member `5` is inside returns `409`; after `POST /api/v1/check-ins/{id}/check-out` (`200`, `checked_out_at` set) it is `201` again.
 - Given member `6` is expired, `POST /api/v1/members/6/check-ins` returns `400`.
 - Member `5`'s owner sees both check-ins in `GET /api/v1/users/me/check-ins`, newest first.
 
@@ -854,19 +889,20 @@ Actions on one's own account and data (profile, password, sessions, own membersh
 - The gym manager, a trainer and a user get `403` on all three endpoints; no login gets `401`.
 - No row holds any password, the temporary password from a reset, a token or a hash.
 
-**AC-45 Workouts and training groups (FR-90 – FR-97)**
-- Given owner O of group G, member A with no permissions ticked, member B with all three, and user X outside G
+**AC-45 Training groups and workouts (FR-91 – FR-97, FR-116)**
+- Given owner O (a trainer) of group G, member A with no permissions ticked, member B with all three, and user X outside G
 - A's `POST /api/v1/workouts` with `group_id` G is `403`; B's is `201`, and B can assign it to A; assigning it to X is `422`.
 - A's `PATCH /api/v1/workouts/{id}` on a G workout is `403` and B's is `200`; X's is `404`.
 - A's `PATCH /api/v1/groups/{G}` and `DELETE /api/v1/groups/{G}` are `403`, X's are `404`, and O's are `200` and `204`.
 - When O ticks `can_update` for A, A's next `PATCH` on the workout is `200`.
-- X's `GET /api/v1/workouts/{id}` for O's personal workout is `404`.
+- X, a user, gets `403` on `POST /api/v1/groups`; a trainer gets `201`.
+- With a workout assigned to A, A's `PUT /api/v1/workouts/{id}/completion` is `200` with `completed_at` set, and O's and B's are `403`; assigning it to B clears `completed_at`.
 - When A leaves G, A's `GET /api/v1/groups/{G}` is `404` and the G workouts assigned to A become unassigned.
 
 **AC-47 Content moderation (FR-104 – FR-108)**
-- Given user A with a personal workout and group G (two workouts, member B), user C with a personal workout, and an admin
-- `GET /api/v1/admin/workouts` lists all four workouts with their titles and notes, including A's personal one, while A's workout still answers `404` to C through `/api/v1/workouts/{id}`.
-- `?owner_id=A&kind=group` returns G's two workouts; `GET /api/v1/admin/workouts/export.csv` with the same filters returns the same rows in the same order and adds an `export` row.
+- Given trainer A with group G (two workouts, member B), trainer C with group H (one workout), and an admin in neither
+- `GET /api/v1/admin/workouts` lists all three workouts with their titles and notes, while G's workouts still answer `404` to C and to the admin through `/api/v1/workouts/{id}`.
+- `?owner_id=A` returns G's two workouts; `GET /api/v1/admin/workouts/export.csv` with the same filters returns the same rows in the same order and adds an `export` row.
 - `DELETE /api/v1/admin/groups/{G}` is `204`; G's workouts and memberships are gone, B's `GET /api/v1/groups/{G}` is `404`, and a `group_delete` row names the admin and A.
 - `POST /api/v1/admin/workouts/bulk-delete` with C's workout, a duplicate and an unknown id returns `{"deleted": 1}` and adds one `workout_delete` row.
 - A user, a trainer and a gym manager get `403` on all eight moderation endpoints; no login gets `401`.
@@ -881,7 +917,7 @@ Actions on one's own account and data (profile, password, sessions, own membersh
 - `GET /api/v1/admin/users?q=…&role=user&status=active&offset=0&limit=1` returns one matching user and `total` counts all of them; the next offset returns the next one; `GET /api/v1/admin/users/export.csv` with the same filters returns the same users in the same order and adds an `export` row.
 - `POST /api/v1/admin/users/bulk-ban` with C, D, B and the admin's own id bans C and D, and lists B (an admin) and the admin themself in `skipped` with the reasons; C's next request gets `403 Account banned`.
 - `POST /api/v1/admin/users/bulk-unban` with C and an active user unbans C and lists the active user as skipped.
-- `GET /api/v1/admin/users/{D}` shows D's active sessions, workout counts and groups without any workout's text, and no password hash.
+- `GET /api/v1/admin/users/{D}` shows D's active sessions, record counts and groups, and no password hash.
 - `POST /api/v1/admin/users/{D}/revoke-sessions` returns the number ended, and D's next request with the old access token gets `401`; the admin's own id gets `400`.
 - A gym manager gets `403` on every one of these endpoints.
 
@@ -905,7 +941,13 @@ Actions on one's own account and data (profile, password, sessions, own membersh
 | US-15 | FR-26 | `GET /api/v1/classes`, `GET /api/v1/classes/{id}` | Beta |
 | US-16 | FR-29, NFR-21 | `POST` / `DELETE /api/v1/classes/{id}/bookings` | Beta |
 | US-17 | FR-28 | `GET /api/v1/classes/{id}/bookings` | Beta |
-| US-18 | FR-30 – FR-32 | `POST` / `GET /api/v1/members/{id}/check-ins` | Beta |
+| US-18 | FR-30 – FR-32, FR-42 | `POST` / `GET /api/v1/members/{id}/check-ins`, `GET /api/v1/check-ins` | Beta |
+| US-32 | FR-109, FR-110 | `POST /api/v1/plans`, `PATCH` / `DELETE /api/v1/plans/{plan}` | Beta |
+| US-33 | FR-112, FR-113 | `POST /api/v1/check-ins/{id}/check-out`, `PUT /api/v1/classes/{id}/bookings/{member_id}/attendance` | Beta |
+| US-34 | FR-114 – FR-116 | `POST` / `PATCH /api/v1/members`, `GET /api/v1/trainers/me/clients`, `PUT /api/v1/workouts/{id}/completion` | Beta |
+| US-35 | FR-117 – FR-119 | `/api/v1/equipment`, `/api/v1/equipment/{id}`, `/report`, `/service` | Beta |
+| US-36 | FR-120, FR-121 | `/api/v1/expenses`, `/api/v1/expenses/{id}`, `/api/v1/expenses/export.csv`, `GET /api/v1/admin/revenue` | Beta |
+| US-37 | FR-111 | `POST /api/v1/members` | Beta |
 | US-19 | FR-34, NFR-11 – NFR-14 | `POST /api/v1/auth/login` | Beta |
 | US-20 | FR-35, FR-52 | `GET /api/v1/admin/stats`, `GET /api/v1/admin/revenue` | Beta |
 | US-21 | FR-36, FR-37, FR-39 | `POST /api/v1/admin/users/{id}/ban`, `GET /api/v1/admin/users` | Beta |
@@ -922,4 +964,4 @@ Actions on one's own account and data (profile, password, sessions, own membersh
 | US-31 | FR-104 – FR-108 | `GET /api/v1/admin/workouts`, `/api/v1/admin/workouts/export.csv`, `/api/v1/admin/workouts/bulk-delete`, `DELETE /api/v1/admin/workouts/{id}`, `GET /api/v1/admin/groups`, `/api/v1/admin/groups/export.csv`, `/api/v1/admin/groups/bulk-delete`, `DELETE /api/v1/admin/groups/{id}` | Beta |
 | US-30 | FR-90 – FR-97 | `/api/v1/workouts`, `/api/v1/workouts/assigned`, `/api/v1/workouts/{id}`, `PUT /api/v1/workouts/{id}/assignee`, `/api/v1/groups`, `/api/v1/groups/{id}`, `/api/v1/groups/{id}/workouts`, `/api/v1/groups/{id}/members`, `/api/v1/groups/{id}/members/{user_id}` | Beta |
 | US-29 | FR-84 – FR-89, NFR-23 | `GET /api/v1/admin/activity`, `GET /api/v1/admin/activity/export.csv`, `GET /api/v1/admin/activity/security` | Beta |
-| US-25, US-26 | FR-43 – FR-51, FR-53 | `GET /api/v1/members?status=expiring_soon`, `/api/v1/plans`, `/api/v1/members/{id}/payments`, `/api/v1/payments`, `/api/v1/payments/{id}/void`, `/api/v1/payments/export.csv`, `/api/v1/users/me/payments`, `PUT /api/v1/admin/plans/{plan}` | Beta |
+| US-25, US-26 | FR-43 – FR-51, FR-53 | `GET /api/v1/members?status=expiring_soon`, `/api/v1/plans`, `/api/v1/members/{id}/payments`, `/api/v1/payments`, `/api/v1/payments/{id}/void`, `/api/v1/payments/export.csv`, `/api/v1/users/me/payments`, `PATCH /api/v1/plans/{plan}` | Beta |

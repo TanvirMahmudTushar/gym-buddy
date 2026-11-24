@@ -139,16 +139,18 @@ backend/
       members.py       # /api/v1/members (+ check-ins in Beta)
       auth.py          # /api/v1/auth/signup, /login, /refresh, /logout (sets and clears the refresh cookie)
       users.py         # /api/v1/users/me (profile, change name, change password, my sessions)
-      admin.py         # /api/v1/admin/stats, /revenue, /users (list, change role, ban, unban), /plans (set prices)
-      check_ins.py     # /api/v1/check-ins/today
+      admin.py         # /api/v1/admin/stats, /revenue, /users (list, change role, ban, unban)
+      check_ins.py     # /api/v1/check-ins (a day's attendance, who is inside, check out: gym manager, admin)
       classes.py       # /api/v1/classes (read: anyone logged in; change and bookings: gym manager, admin)
-      plans.py         # /api/v1/plans (anyone logged in)
+      plans.py         # /api/v1/plans (read: anyone logged in; add, edit, retire, delete: admin)
+      equipment.py     # /api/v1/equipment (list, report a fault: trainer, gym manager, admin; the rest: gym manager, admin)
+      expenses.py      # /api/v1/expenses (admin)
       payments.py      # /api/v1/payments (list: gym manager, admin; void and CSV export: admin)
       overview.py      # /api/v1/overview (gym manager, admin)
-      trainers.py      # /api/v1/trainers (list: gym manager, admin) and /trainers/me/classes (trainer)
+      trainers.py      # /api/v1/trainers (list: gym manager, admin), /trainers/me/classes and /trainers/me/clients (trainer)
       announcements.py # /api/v1/announcements (read the current ones: anyone logged in; post, edit, delete and ended ones: gym manager, admin)
       activity.py      # /api/v1/admin/activity (list, CSV export, security view: admin)
-      workouts.py      # /api/v1/workouts (my workouts, assigned to me, add, read, edit, assign, delete: anyone logged in, by group permission)
+      workouts.py      # /api/v1/workouts (assigned to me, add, read, edit, assign, mark done, delete: by group permission)
       groups.py        # /api/v1/groups (my groups, start, read, rename, delete, a group's workouts and members)
       moderation.py    # /api/v1/admin/workouts and /api/v1/admin/groups (list, CSV export, delete one or many: admin)
     services/
@@ -156,12 +158,16 @@ backend/
       member_service.py  # member rules and queries; raises MemberNotFoundError / InvalidExpiryError
       auth_service.py    # sign up (always role user), log in (re-hashes a pre-pepper hash), change password; raises EmailTakenError / InvalidCredentialsError
       session_service.py # login sessions: start, rotate the refresh token (grace period, reuse detection), list, revoke one or all; raises InvalidRefreshTokenError / SessionNotFoundError
-      user_service.py    # list users (search, role, status) and trainers, users CSV, a user's details, change role (an ex-trainer's classes keep the name as text), rename, ban / unban one or many, end a user's sessions; raises UserNotFoundError / CannotChangeOwnRoleError / CannotBanError / CannotRevokeOwnSessionsError
-      stats_service.py   # member, check-in, class and user counts for the admin dashboard and the gym manager overview (each reuses the rule of the list it links to)
-      revenue_service.py # revenue today, this month, last 30 days, by method and by month (voided left out)
-      payment_service.py # plan prices, record a payment (and renew), payment lists and total, void, CSV export; raises PaymentNotFoundError
-      class_service.py   # classes and bookings: create, list, edit, delete, who booked, a trainer's own classes; raises ClassNotFoundError / CapacityBelowBookingsError / TrainerNotFoundError / NotYourClassError
-      checkin_service.py # record a check-in (membership must be valid), history, today's list; raises MembershipNotValidError
+      user_service.py    # list users (search, role, status), users CSV, a user's details, change role (an ex-trainer lets go of classes and clients), rename, ban / unban one or many, end a user's sessions; raises UserNotFoundError / CannotChangeOwnRoleError / CannotBanError / CannotRevokeOwnSessionsError
+      stats_service.py   # member, check-in, class and user counts for the Dashboard's front desk and admin parts (each reuses the rule of the list it links to)
+      revenue_service.py # revenue today, this month, last 30 days, by method and by month (voided left out), with expenses and net income
+      plan_service.py    # membership plans: list, add, edit, retire, delete, get_offered(); raises PlanNotFoundError / PlanNotOfferedError / PlanNameTakenError / PlanInUseError
+      trainer_service.py # who can be a trainer, a trainer's clients, release_trainer(); raises TrainerNotFoundError
+      expense_service.py # expenses: list with total, add, edit, delete (logged), CSV, total_between() for net income
+      equipment_service.py # equipment: list, add, edit, report a fault, record a service, next service date, stats
+      payment_service.py # record a payment (and renew), payment lists and total, void, CSV export; raises PaymentNotFoundError
+      class_service.py   # classes and bookings: create, list, edit, delete, who booked and who came, a trainer's own classes; raises ClassNotFoundError / CapacityBelowBookingsError / AttendanceNotOpenError / NotYourClassError
+      checkin_service.py # check in (membership must be valid, not already inside) and out, history, a day's list, who is inside; raises MembershipNotValidError / AlreadyInsideError / CannotCheckOutError
       search.py          # contains_any(): the any-case text search shared by the member, waiting and user lists
       profile_service.py # phone, date of birth and emergency contact: update my own, and the both-or-neither contact check member_service also uses; raises IncompleteEmergencyContactError
       announcement_service.py # post, list (current or all, newest first, with the poster's name), edit, delete; raises AnnouncementNotFoundError
@@ -169,8 +175,8 @@ backend/
       csv_export.py      # the CSV writer the payments and activity exports share: byte order mark, formula-safe cells, UTC times
       group_service.py   # training groups: access() and require() on rbac.group_permissions(), list with counts, members, delete_for_accounts(); raises GroupNotFoundError / GroupPermissionError / GroupOwnerError
       moderation_service.py # admin lists, CSVs and deletes of anyone's workouts and groups (one activity row per delete)
-      workout_service.py # personal and group workouts: lists, add, edit, assign, delete; raises WorkoutNotFoundError / NotGroupWorkoutError / AssigneeNotInGroupError
-  tests/               # pytest suite (section 14): conftest.py, test_login.py, test_tokens.py, test_refresh.py, test_rbac.py, test_cors.py, test_config.py
+      workout_service.py # workouts in groups: lists, add, edit, assign, mark done, delete; raises WorkoutNotFoundError / NotAssignedToYouError / AssigneeNotInGroupError
+  tests/               # pytest suite (section 14): conftest.py, test_login.py, test_tokens.py, test_refresh.py, test_rbac.py, test_gym.py, test_cors.py, test_config.py
   .env.example         # the four variables with placeholders only (copy to backend/.env)
   requirements-dev.txt # -r requirements.txt + pytest, httpx (not installed by Vercel)
   pytest.ini
@@ -179,9 +185,9 @@ frontend/
   src/
     App.tsx            # hash router: picks the page for #/members, #/classes, ...; guards each page by permission
     components/        # the forms, lists and panels the pages are built from
-    context/           # AuthContext: who is logged in, login / signup / logout; restores the login with a refresh on load
-    layouts/           # AppLayout: header, and the pages each role may open
-    pages/             # HomePage (members), LoginPage, SignupPage, AccountPage, DashboardPage (admin), OverviewPage (gym manager, admin), UsersPage (admin; one user's details at `#/users?user=ID`), ClassesPage (gym manager, admin), PaymentsPage (gym manager, admin), MembershipPage and TimetablePage (user), MyClassesPage (trainer), PlansPage (admin), AnnouncementsPage (gym manager, admin), ActivityPage, SecurityPage and ModerationPage (admin), WorkoutsPage and GroupsPage (everyone; GroupsPage shows one group with `#/groups?group=ID`), ChoosePasswordPage (after an admin reset); AboutPage and MemberDetailsPage are empty placeholders
+    context/           # AuthContext: who is logged in, login / signup / logout; restores the login with a refresh on load; PlansContext: the plans' names and prices
+    layouts/           # AppLayout: the sidebar with the pages each role may open
+    pages/             # DashboardPage, MembersPage, AttendancePage, PaymentsPage, ClassesPage and AnnouncementsPage (gym manager, admin); EquipmentPage (trainer, gym manager, admin); PlansPage, ExpensesPage, UsersPage (one user's details at `#/users?user=ID`), SecurityPage and ActivityPage (admin); MyClassesPage and MyClientsPage (trainer); MembershipPage and TimetablePage (user); TrainingPage (everyone; one group at `#/training?group=ID`; All groups and All workouts for admins), AccountPage, LoginPage, SignupPage, ChoosePasswordPage (after an admin reset)
     services/          # fetch calls to the API; api.ts keeps the access token in memory and refreshes it once on a 401
     types/             # TypeScript types
     utils/             # display helpers; membersLink() builds the #/members?filter=&member= address
@@ -258,7 +264,8 @@ erDiagram
 | `emergency_contact_name` | varchar(100) | Nullable; set or cleared together with `emergency_contact_phone`. Added to an existing table on start |
 | `emergency_contact_phone` | varchar(20) | Nullable; set or cleared together with `emergency_contact_name`. Added to an existing table on start |
 | `password_changed_at` | timestamp (UTC) | Nullable: the last password change or reset |
-| `plan` | varchar(10) | Nullable: `monthly`, `quarterly` or `yearly`. Null until staff start a membership; an account with a plan is a member |
+| `plan` | varchar(40) | Nullable: the code of a row in `plan_price`. Null until staff start a membership; an account with a plan is a member. Widened from varchar(10) on start |
+| `trainer_id` | integer | FK → `app_user.id`, nullable, on delete set null, indexed (`ix_app_user_trainer_id`): the personal trainer. Cleared when that account stops being a trainer. Added to an existing table on start |
 | `joined_on` | date | Nullable; set with `plan` |
 | `expires_on` | date | Nullable; set with `plan`, never before `joined_on` |
 | `is_frozen` | boolean | Default `false`; a frozen membership cannot check in or book, whatever its expiry date |
@@ -313,17 +320,25 @@ The first Beta design linked a `member` row to an account with a nullable `membe
 | `class_id` | integer | PK part, FK → `gym_class.id`, on delete cascade |
 | `member_id` | integer | PK part, FK → `app_user.id` (the member who booked), on delete cascade, indexed |
 | `booked_at` | timestamp (UTC) | Not null |
+| `attended` | boolean | Nullable: came, did not come, or not marked. Added to an existing table on start |
 
-**`plan_price`**
+**`plan_price`** (the membership plans; the class is `MembershipPlan`)
 
 | Column | Type | Rules |
 |---|---|---|
-| `plan` | varchar(10) | Primary key: `monthly`, `quarterly` or `yearly` |
+| `plan` | varchar(40) | Primary key: a code made from the first name (`student-monthly`); it never changes |
+| `name` | varchar(60) | Not null, unique in any case (checked by `plan_service`). Added to an existing table on start and filled from the code |
+| `description` | varchar(300) | Nullable |
+| `is_active` | boolean | Default true; false = retired |
 | `price` | integer | Whole taka |
 | `duration_days` | integer | Days a renewal adds |
 | `updated_at` | timestamp (UTC) | Not null |
 
-Filled with monthly 1,500 / 30, quarterly 4,000 / 90 and yearly 14,000 / 365 when the table is first created; existing rows are never overwritten.
+A new, empty table gets Monthly 1,500 / 30, Quarterly 4,000 / 90 and Yearly 14,000 / 365; after that the admin's changes, retirements and deletions stay.
+
+**`expense`**: `id`, `category` (`rent`, `salaries`, `utilities`, `equipment`, `maintenance`, `marketing`, `other`), `amount` (whole taka), `spent_on` (date, indexed), `description` (varchar 200, nullable), `recorded_by` (FK → `app_user.id`, on delete set null), `created_at`.
+
+**`equipment`**: `id`, `name`, `category` (`cardio`, `strength`, `free_weights`, `functional`, `other`), `quantity`, `status` (`working`, `maintenance`, `out_of_order`; indexed), `purchased_on`, `service_every_days`, `last_serviced_on`, `next_service_on` (indexed; worked out on every save so the list can filter on it), `issue`, `reported_by` (FK → `app_user.id`, on delete set null), `reported_at`, `notes`, `created_at`, `updated_at`.
 
 **`payment`**
 
@@ -420,15 +435,16 @@ The composite primary key stops the same account being added twice, even by two 
 | Column | Type | Rules |
 |---|---|---|
 | `id` | integer | Primary key |
-| `owner_id` | integer | FK → `app_user.id`, nullable, on delete set null, indexed: who added it. A personal workout is deleted with its owner's account (by the service); a group workout stays with `null` |
-| `group_id` | integer | FK → `training_group.id`, nullable, on delete cascade, indexed. `null` = personal: only the owner can see it. Cannot change after creation |
+| `owner_id` | integer | FK → `app_user.id`, nullable, on delete set null, indexed: who added it. The workout stays with `null` when that account is deleted |
+| `group_id` | integer | FK → `training_group.id`, on delete cascade, indexed; every new workout has one. (`null` only on personal workouts from before they were withdrawn, which only moderation lists.) Cannot change after creation |
 | `title` | varchar(100) | Not null, 1–100 characters after trimming |
 | `workout_date` | date | Not null, 2000-01-01 to today + 365 days when sent |
 | `notes` | varchar(1000) | Nullable; blank text becomes null |
-| `assigned_to` | integer | FK → `app_user.id`, nullable, on delete set null, indexed. Only on a group workout, and only someone in that group (the owner or a member) |
+| `assigned_to` | integer | FK → `app_user.id`, nullable, on delete set null, indexed. Only someone in the group (the owner or a member) |
+| `completed_at` | timestamp (UTC) | Nullable: when the assignee marked it done; cleared when it is reassigned. Added to an existing table on start |
 | `created_at`, `updated_at` | timestamp (UTC) | Not null; `updated_at` changes on every edit and assignment |
 
-`group_service.delete_for_accounts()` runs inside `member_service._delete_accounts()`: it deletes the account's own groups (their workouts and members first), its `group_member` rows and its personal workouts, and sets `owner_id` and `assigned_to` to null on the group workouts that remain. Deleting a group, and leaving one, delete or update the dependent rows in the service too, since SQLite does not enforce the cascades by default.
+`group_service.delete_for_accounts()` runs inside `member_service._delete_accounts()`: it deletes the account's own groups (their workouts and members first), its `group_member` rows and any old personal workouts, and sets `owner_id` and `assigned_to` to null on the group workouts that remain. Deleting a group, and leaving one, delete or update the dependent rows in the service too, since SQLite does not enforce the cascades by default.
 
 Indexes: `app_user(email)` (unique), `class_booking(member_id)`, `check_in(member_id, checked_in_at)`, `gym_class(starts_at)`, `gym_class(trainer_id)`, `announcement(posted_at)`, `auth_session(user_id)`, `auth_session(token_hash)` (unique), `auth_session(previous_token_hash)`, `activity_log(created_at)`, `activity_log(event)`, `activity_log(actor_id)`, `activity_log(target_id)`, `training_group(owner_id)`, `group_member(user_id)`, `workout(owner_id)`, `workout(group_id)`, `workout(assigned_to)`.
 
@@ -474,8 +490,10 @@ erDiagram
     }
     PLAN_PRICE {
         string plan PK
+        string name
         int price
         int duration_days
+        bool is_active
     }
     PAYMENT {
         int id PK
@@ -565,6 +583,22 @@ erDiagram
         date workout_date
         string notes
         int assigned_to FK
+        datetime completed_at
+    }
+    EQUIPMENT {
+        int id PK
+        string name
+        string category
+        string status
+        date next_service_on
+        int reported_by FK
+    }
+    EXPENSE {
+        int id PK
+        string category
+        int amount
+        date spent_on
+        int recorded_by FK
     }
 ```
 
@@ -579,9 +613,9 @@ erDiagram
 
 | Schema | Used for | Fields | Release |
 |---|---|---|---|
-| `MemberCreate` | `POST` member body | MVP: `full_name`, `phone?`, `plan`, `joined_on?`, `expires_on`, `notes?`. Final: `email` (an existing account) instead of `full_name` | MVP |
+| `MemberCreate` | `POST` member body | MVP: `full_name`, `phone?`, `plan`, `joined_on?`, `expires_on`, `notes?`. Final: `email` (an existing account) instead of `full_name`, `expires_on?` (default: the plan's days), `trainer_id?`, `payment_method?` (record the first payment) | MVP |
 | `MemberUpdate` | `PATCH` member body | all optional: `name` (MVP `full_name`), `phone`, `plan`, `expires_on`, `is_frozen` (MVP `is_active`), `notes`; (Beta) extends `ProfileUpdate`, so staff also send `date_of_birth` and the emergency contact | MVP |
-| `MemberRead` | Member responses | `id` (the account id), `name`, `email`, `phone`, `date_of_birth`, `emergency_contact_name`, `emergency_contact_phone`, `plan`, `joined_on`, `expires_on`, `is_frozen`, `notes` | MVP |
+| `MemberRead` | Member responses | `id` (the account id), `name`, `email`, `phone`, `date_of_birth`, `emergency_contact_name`, `emergency_contact_phone`, `plan`, `joined_on`, `expires_on`, `is_frozen`, `trainer_id?`, `trainer_name?`, `notes` | MVP |
 | `MemberPage` | Member list response | `items` (`MemberRead[]`), `total` (all members matching the filter), `offset`, `limit` | MVP |
 | `MemberBulkDelete` | Bulk delete body | `ids` (1 to 100 member IDs) | MVP |
 | `MemberBulkDeleteResult` | Bulk delete response | `deleted` (how many members were deleted) | MVP |
@@ -590,7 +624,7 @@ erDiagram
 | `TokenResponse` | Login / refresh | `access_token`, `token_type: "bearer"`, `expires_in` (900), `user` (`UserRead`); the refresh token is only in the cookie | Beta |
 | `SessionRead` | My sessions | `id`, `created_at`, `last_used_at`, `expires_at`, `ip`, `user_agent`, `current` (the session of this request); never the token hashes | Beta |
 | `UserRead` | User responses | `id`, `email`, `name`, `role`, `created_at` (never `password_hash`) | Beta |
-| `MeRead` | My own account (`/users/me`, login, refresh) | `UserRead` fields + `permissions` (the caller's role's permissions from `app/rbac.py`) | Beta |
+| `MeRead` | My own account (`/users/me`, login, refresh) | `UserRead` fields + `permissions` (the caller's role's permissions from `app/rbac.py`) + `plan?` | Beta |
 | `RoleUpdate` | Change role | `role` | Beta |
 | `ProfileUpdate` | Change own name | `name` | Beta |
 | `PasswordChange` | Change own password | `current_password`, `new_password` | Beta |
@@ -602,35 +636,40 @@ erDiagram
 | `BulkUserAction` | Bulk ban / unban | `ids` (1 to 100 account ids; duplicates count once), `reason?` (≤ 500) | Beta |
 | `BulkBanResult` / `BulkUnbanResult` | Bulk ban / unban response | `banned` (or `unbanned`): the ids changed; `skipped: [{id, name?, reason}]` | Beta |
 | `SessionsRevoked` | End a user's sessions | `revoked` (how many active sessions ended) | Beta |
-| `ModerationWorkoutFilter` / `ModerationGroupFilter` | Moderation filters for the lists and CSVs | workouts: `owner_id?`, `group_id?`, `kind?` (`personal` / `group`), `date_from?`, `date_to?` (the workout's date), `q?`; groups: `owner_id?`, `date_from?`, `date_to?` (UTC day made), `q?`; `date_from` after `date_to` is `422` | Beta |
+| `ModerationWorkoutFilter` / `ModerationGroupFilter` | Moderation filters for the lists and CSVs | workouts: `owner_id?`, `group_id?`, `date_from?`, `date_to?` (the workout's date), `q?`; groups: `owner_id?`, `date_from?`, `date_to?` (UTC day made), `q?`; `date_from` after `date_to` is `422` | Beta |
 | `ModerationWorkoutRead` / `ModerationWorkoutPage` | Admin workout list | `WorkoutRead` + `owner_email?`; page: `items`, `total`, `offset`, `limit` | Beta |
 | `ModerationGroupRead` / `ModerationGroupPage` | Admin group list | `id`, `name`, `owner_id`, `owner_name`, `owner_email`, `created_at`, `member_count` (owner included), `workout_count` | Beta |
 | `ContentBulkDelete` / `ContentDeleted` | Delete many | `ids` (1 to 100) / `deleted` (how many; unknown ids skipped) | Beta |
-| `AdminUserDetail` | A user's details | `AdminUserRead` + `joined_on?`, `locked_until?`, `sessions: AdminSessionRead[]` (`id`, `created_at`, `last_used_at`, `expires_at`, `ip?`, `user_agent?`), `workouts {personal, in_groups, assigned}`, `groups [{id, name, is_owner, member_count}]`, `recent_activity: ActivityRead[]` (10); never the password hash | Beta |
+| `AdminUserDetail` | A user's details | `AdminUserRead` + `joined_on?`, `locked_until?`, `sessions: AdminSessionRead[]` (`id`, `created_at`, `last_used_at`, `expires_at`, `ip?`, `user_agent?`), `records {visits, bookings, payments, workouts_added, workouts_assigned, workouts_completed}`, `groups [{id, name, is_owner, member_count}]`, `recent_activity: ActivityRead[]` (10); never the password hash | Beta |
 | `PasswordResetResult` | Admin password reset | `user: AdminUserRead`, `temporary_password` (shown once) | Beta |
-| `AdminStats` | Dashboard | `members {total, active, expired, frozen, new_last_7_days, expiring_soon}`, `classes {total, upcoming}`, `check_ins {today, last_7_days}`, `users {total, users, trainers, gym_managers, admins, banned, new_last_7_days}`, `workouts {total, last_7_days}`, `groups {total}` | Beta |
-| `Overview` | Gym manager start page | `check_ins_today`, `expiring_soon`, `waiting`, `payments_today {count, amount}`, `next_classes: ClassRead[]` (5) | Beta |
-| `RevenueStats` | Dashboard revenue | `today`, `this_month`, `last_30_days`, `last_30_days_from` (date), `by_method [{method, amount, count}]` (all four methods), `months [{month: "YYYY-MM", amount}]` (6, oldest first) | Beta |
+| `AdminStats` | Dashboard | `members {total, active, expired, frozen, new_last_7_days, expiring_soon}`, `classes {total, upcoming}`, `check_ins {today, last_7_days, inside_now, by_day [{day, count}]}`, `users {total, users, trainers, gym_managers, admins, banned, new_last_7_days}`, `workouts {total, last_7_days, completed}`, `groups {total}`, `equipment {total, needs_attention, service_due}` | Beta |
+| `Overview` | Front desk part of the Dashboard | `check_ins_today`, `inside_now`, `expiring_soon`, `waiting`, `payments_today {count, amount}`, `equipment_attention`, `equipment_service_due`, `next_classes: ClassRead[]` (5) | Beta |
+| `RevenueStats` | Dashboard revenue | `today`, `this_month`, `expenses_this_month`, `net_this_month`, `last_30_days`, `last_30_days_from` (date), `by_method [{method, amount, count}]` (all four methods), `months [{month: "YYYY-MM", amount, expenses, net}]` (6, oldest first) | Beta |
 | `ClassCreate` / `ClassUpdate` | Create / edit class | `name`, `description?`, `trainer_id?` (an account with the role `trainer`, or null), `starts_at`, `duration_minutes`, `capacity` (all optional on update; on update a `trainer_id` left out keeps the trainer) | Beta |
 | `TrainerRead` | Trainer list | `id`, `name` | Beta |
+| `ClientRead` / `ClientPage` | A trainer's clients | `id`, `name`, `email`, `phone?`, `plan`, `expires_on`, `is_frozen`, `last_visit_at?` | Beta |
 | `ClassRead` | Class responses | all class columns except `created_by` (`trainer_name` is the trainer's current account name, or the old text name) + `booked_count` (`is_booked_by_me` comes with member booking); times are UTC with a trailing `Z` | Beta |
 | `ClassPage` / `BookingPage` | Class and booking lists | `items`, `total`, `offset`, `limit` | Beta |
-| `BookingRead` | Booking responses | `class_id`, `member_id`, `member_name`, `booked_at` | Beta |
-| `BookedClassRead` / `BookedClassPage` | A member's bookings | `class_id`, `class_name`, `starts_at`, `duration_minutes`, `trainer_name?`, `booked_at` | Beta |
+| `BookingRead` | Booking responses | `class_id`, `member_id`, `member_name`, `booked_at`, `attended?` | Beta |
+| `AttendanceUpdate` | Mark attendance | `attended` (required; `null` clears) | Beta |
+| `BookedClassRead` / `BookedClassPage` | A member's bookings | `class_id`, `class_name`, `starts_at`, `duration_minutes`, `trainer_name?`, `booked_at`, `attended?` | Beta |
 | `PaymentCreate` / `PaymentRead` / `PaymentPage` | Record and list payments | create: `amount`, `method`, `note?`, `renew_plan?`; read: `id`, `member_id?`, `member_name`, `amount`, `method`, `plan?`, `note?`, `paid_at`, `renewed_until?`, `recorded_by_name?`, `voided_at?`, `void_reason?`, `voided_by_name?` | Beta |
 | `PaymentListPage` | All payments | `PaymentPage` + `total_amount` (sum of the matching payments that are not voided, across all pages) | Beta |
 | `PaymentFilter` | Query filters for the list and the CSV | `date_from?`, `date_to?` (UTC days, inclusive; `date_from` after `date_to` is `422`), `method?`, `member?` (part of the name, any case), `include_voided` (default false) | Beta |
 | `VoidRequest` | Void a payment | `reason` (1 to 200 characters, required) | Beta |
-| `PlanRead` | Plan prices | `plan`, `price`, `duration_days` | Beta |
-| `PlanUpdate` | Change a plan | `price` (1 to 10,000,000), `duration_days` (1 to 3,660), both required | Beta |
-| `CheckInRead` | Check-in responses | `id`, `member_id`, `member_name`, `checked_in_at`, `recorded_by_name` | Beta |
+| `PlanRead` | Plans | `plan` (code), `name`, `price`, `duration_days`, `description?`, `is_active` | Beta |
+| `PlanCreate` / `PlanUpdate` | Add / change a plan | `name` (1–60), `price` (1 to 10,000,000), `duration_days` (1 to 3,660), `description?` (≤ 300); update: all optional, plus `is_active` | Beta |
+| `EquipmentCreate` / `EquipmentUpdate` / `EquipmentRead` / `EquipmentPage` | Equipment | the `equipment` columns staff set (update also `status`); read adds `next_service_on?`, `issue?`, `reported_by_name?`, `reported_at?` | Beta |
+| `EquipmentReport` / `EquipmentFilter` | Report a fault / list filters | `issue` (1–500) / `status?`, `category?`, `needs_attention`, `service_due`, `q?` | Beta |
+| `ExpenseCreate` / `ExpenseUpdate` / `ExpenseRead` / `ExpensePage` / `ExpenseFilter` | Expenses | `category`, `amount`, `spent_on` (up to today), `description?`; read adds `recorded_by_name?`; page adds `total_amount`; filter: `date_from?`, `date_to?`, `category?`, `q?` | Beta |
+| `CheckInRead` | Check-in responses | `id`, `member_id`, `member_name`, `checked_in_at`, `checked_out_at?`, `recorded_by_name?` | Beta |
 | `CheckInPage` | Check-in lists | `items: CheckInRead[]`, `total`, `offset`, `limit` | Beta |
 | `AnnouncementCreate` / `AnnouncementUpdate` | Post / edit an announcement | `title` (1–100), `message` (1–1,000), `ends_on?` (a date not before today, or null for none); all optional on update, where `title` and `message` cannot be null and a left-out `ends_on` keeps the end date | Beta |
 | `ActivityRead` / `ActivityPage` | Activity log | `id`, `created_at`, `event`, `actor_id?`, `actor_email?`, `target_id?`, `target_email?`, `details?`, `ip?`, `user_agent?`; page: `items`, `total`, `offset`, `limit` | Beta |
 | `ActivityFilter` | Query filters for the activity list and its CSV | `event?` (an `ActivityEvent`), `user_id?` (actor or target), `date_from?`, `date_to?` (UTC days, inclusive; `date_from` after `date_to` is `422`), `q?` (≤ 100: part of an email, the IP or the details) | Beta |
-| `WorkoutCreate` / `WorkoutUpdate` | Add / edit a workout | `title` (1–100), `workout_date` (2000-01-01 to today + 365), `notes?` (≤ 1,000, blank → null); create also `group_id?` and `assigned_to?` (needs `group_id`); update: all optional, `title` and `workout_date` not null | Beta |
-| `WorkoutAssign` | Assign a group workout | `user_id` (required; `null` unassigns) | Beta |
-| `WorkoutRead` / `WorkoutPage` | Workout responses and lists | `id`, `title`, `workout_date`, `notes?`, `group_id?`, `group_name?`, `owner_id?`, `owner_name?`, `assigned_to?`, `assigned_to_name?`, `created_at`, `updated_at`; page: `items`, `total`, `offset`, `limit` | Beta |
+| `WorkoutCreate` / `WorkoutUpdate` | Add / edit a workout | `title` (1–100), `workout_date` (2000-01-01 to today + 365), `notes?` (≤ 1,000, blank → null); create also `group_id` (required) and `assigned_to?`; update: all optional, `title` and `workout_date` not null | Beta |
+| `WorkoutAssign` / `WorkoutCompletion` | Assign a workout / mark it done | `user_id` (required; `null` unassigns) / `done` | Beta |
+| `WorkoutRead` / `WorkoutPage` | Workout responses and lists | `id`, `title`, `workout_date`, `notes?`, `group_id?`, `group_name?`, `owner_id?`, `owner_name?`, `assigned_to?`, `assigned_to_name?`, `completed_at?`, `created_at`, `updated_at`; page: `items`, `total`, `offset`, `limit` | Beta |
 | `GroupCreate` | Start or rename a group | `name` (1–100) | Beta |
 | `GroupRead` / `GroupPage` | Group responses and lists | `id`, `name`, `owner_id`, `owner_name`, `created_at`, `member_count` (owner included), `workout_count`, `my_permissions` (`read`, `create`, `update`, `assign`, `manage`) | Beta |
 | `GroupMemberAdd` / `GroupMemberUpdate` | Add someone / change their permissions | add: `email`, `can_create`, `can_update`, `can_assign` (default false); update: the three flags, optional, not null | Beta |
@@ -731,9 +770,10 @@ In the MVP no login is needed. In the Beta the member endpoints need `members:re
 | `GET` | `/api/v1/members/{id}` | Gym Manager, Admin | — | `200` `MemberRead` | `403`, `404` | FR-19 |
 | `PATCH` | `/api/v1/members/{id}` | Gym Manager, Admin | `MemberUpdate` | `200` `MemberRead` | `403`, `404`, `422` | FR-19 |
 | `DELETE` | `/api/v1/members/{id}` | Gym Manager, Admin | — | `204` | `403`, `404` | FR-19 |
-| `POST` | `/api/v1/members/{id}/check-ins` | Gym Manager, Admin | — | `201` `CheckInRead` | `400` (frozen: "Membership is frozen"; expired: "Membership expired on YYYY-MM-DD"), `403`, `404` | FR-30 |
+| `POST` | `/api/v1/members/{id}/check-ins` | Gym Manager, Admin | — | `201` `CheckInRead` | `400` (frozen: "Membership is frozen"; expired: "Membership expired on YYYY-MM-DD"), `403`, `404`, `409` (already inside) | FR-30, FR-32 |
 | `GET` | `/api/v1/members/{id}/check-ins?offset&limit` | Gym Manager, Admin | — | `200` `CheckInPage` (newest first) | `403`, `404`, `422` | FR-31 |
-| `GET` | `/api/v1/check-ins/today?offset&limit` | Gym Manager, Admin | — | `200` `CheckInPage` (since midnight UTC, newest first; `limit` up to 100, default 50) | `401`, `403`, `422` | FR-42 |
+| `GET` | `/api/v1/check-ins?day&inside&q&offset&limit` | Gym Manager, Admin | — | `200` `CheckInPage` (a UTC day, today by default, newest first; `limit` up to 100, default 50) | `401`, `403`, `422` | FR-42 |
+| `POST` | `/api/v1/check-ins/{check_in_id}/check-out` | Gym Manager, Admin | — | `200` `CheckInRead` | `400` (already out, or an earlier day), `403`, `404` | FR-112 |
 
 **Admin**
 
@@ -744,7 +784,7 @@ In the MVP no login is needed. In the Beta the member endpoints need `members:re
 | `POST` | `/api/v1/admin/users/bulk-ban` | Admin (`users:ban`) | `BulkUserAction` | `200` `BulkBanResult` (one transaction; one `ban` row per banned user) | `403`, `422` | FR-101 |
 | `POST` | `/api/v1/admin/users/bulk-unban` | Admin (`users:ban`) | `BulkUserAction` | `200` `BulkUnbanResult` | `403`, `422` | FR-101 |
 | `GET` | `/api/v1/admin/users/{user_id}` | Admin (`users:read`) | — | `200` `AdminUserDetail` | `403`, `404`, `422` | FR-99 |
-| `GET` | `/api/v1/admin/workouts?owner_id&group_id&kind&date_from&date_to&q&offset&limit` | Admin (`content:moderate`) | — | `200` `ModerationWorkoutPage` (latest workout date first) | `401`, `403`, `422` | FR-104 |
+| `GET` | `/api/v1/admin/workouts?owner_id&group_id&date_from&date_to&q&offset&limit` | Admin (`content:moderate`) | — | `200` `ModerationWorkoutPage` (latest workout date first) | `401`, `403`, `422` | FR-104 |
 | `GET` | `/api/v1/admin/workouts/export.csv` (same filters) | Admin (`content:moderate`) | — | `200` `text/csv` `workouts-YYYY-MM-DD.csv`, `Cache-Control: no-store`; adds an `export` row | `401`, `403`, `422` | FR-108 |
 | `POST` / `DELETE` | `/api/v1/admin/workouts/bulk-delete` / `/api/v1/admin/workouts/{workout_id}` | Admin (`content:moderate`) | `ContentBulkDelete` / — | `200` `ContentDeleted` / `204`; one `workout_delete` row each | `403`, `404` (single), `422` | FR-106, FR-107 |
 | `GET` | `/api/v1/admin/groups?owner_id&date_from&date_to&q&offset&limit` | Admin (`content:moderate`) | — | `200` `ModerationGroupPage` (newest first) | `401`, `403`, `422` | FR-105 |
@@ -769,8 +809,12 @@ Ban rules: banning is idempotent (banning a banned user changes nothing), an adm
 
 | Method | Path | Who | Body | Success | Errors | FR |
 |---|---|---|---|---|---|---|
-| `GET` | `/api/v1/plans` | Any logged-in user | — | `200` `PlanRead[]` (monthly, quarterly, yearly) | `401` | FR-43 |
-| `PUT` | `/api/v1/admin/plans/{plan}` | Admin | `PlanUpdate` | `200` `PlanRead` | `401`, `403`, `422` (unknown plan or out-of-range value) | FR-47 |
+| `GET` | `/api/v1/plans` | Any logged-in user | — | `200` `PlanRead[]` (cheapest first, retired included) | `401` | FR-43 |
+| `POST` | `/api/v1/plans` | Admin | `PlanCreate` | `201` `PlanRead` | `401`, `403`, `409` (name taken), `422` | FR-109 |
+| `PATCH` / `DELETE` | `/api/v1/plans/{plan}` | Admin | `PlanUpdate` / — | `200` `PlanRead` / `204` | `401`, `403`, `404`, `409` (name taken / in use), `422` | FR-47, FR-110 |
+| `GET` / `POST` | `/api/v1/expenses` | Admin | filters / `ExpenseCreate` | `200` `ExpensePage` / `201` `ExpenseRead` | `401`, `403`, `422` | FR-120 |
+| `PATCH` / `DELETE` | `/api/v1/expenses/{expense_id}` | Admin | `ExpenseUpdate` / — | `200` `ExpenseRead` / `204` (adds an `expense_delete` row) | `403`, `404`, `422` | FR-120 |
+| `GET` | `/api/v1/expenses/export.csv` (same filters) | Admin | — | `200` `text/csv`; adds an `export` row | `401`, `403`, `422` | FR-120 |
 | `POST` | `/api/v1/members/{id}/payments` | Gym Manager, Admin | `PaymentCreate` | `201` `PaymentRead` (with `renew_plan`, the member's expiry and plan change too) | `403`, `404`, `422` | FR-44, FR-45 |
 | `GET` | `/api/v1/members/{id}/payments?offset&limit` | Gym Manager, Admin | — | `200` `PaymentPage` (newest first, voided included) | `403`, `404`, `422` | FR-46 |
 | `GET` | `/api/v1/payments?date_from&date_to&method&member&include_voided&offset&limit` | Gym Manager, Admin | — | `200` `PaymentListPage` (newest first) | `401`, `403`, `422` | FR-48 |
@@ -793,6 +837,8 @@ Ban rules: banning is idempotent (banning a banned user changes nothing), an adm
 | `GET` | `/api/v1/classes/{class_id}/bookings` | Gym Manager, Admin; Trainer for the classes they teach | — | `200` `BookingPage` (in booking order) | `403` (including a trainer and another class), `404` | FR-28, FR-71 |
 | `GET` | `/api/v1/trainers` | Gym Manager, Admin | — | `200` `TrainerRead[]` (role `trainer`, by name; not paged, like `/plans`) | `401`, `403` | FR-68 |
 | `GET` | `/api/v1/trainers/me/classes?when&offset&limit` | Trainer | — | `200` `ClassPage` (classes with `trainer_id` = me; `upcoming` soonest first, `past` latest first) | `401`, `403`, `422` | FR-70 |
+| `GET` | `/api/v1/trainers/me/clients?offset&limit` | Trainer (`clients:read`) | — | `200` `ClientPage` (members with `trainer_id` = me) | `401`, `403` | FR-115 |
+| `PUT` | `/api/v1/classes/{class_id}/bookings/{member_id}/attendance` | Gym Manager, Admin; Trainer for the classes they teach | `AttendanceUpdate` | `200` `BookingRead` | `400` (over an hour before), `403`, `404` | FR-113 |
 | `POST` | `/api/v1/classes/{class_id}/bookings` | Any logged-in user with a linked, valid membership | — | `201` `BookingRead` | `400` (membership not valid / class already started), `404`, `409` (full or already booked) | FR-28, FR-29 |
 | `DELETE` | `/api/v1/classes/{class_id}/bookings` | Any logged-in user with a membership | — | `204` (cancel my booking) | `400` (class started), `404` | FR-29 |
 
@@ -806,19 +852,29 @@ Ban rules: banning is idempotent (banning a banned user changes nothing), an adm
 | `PATCH` | `/api/v1/announcements/{announcement_id}` | Gym Manager, Admin | `AnnouncementUpdate` | `200` `AnnouncementRead` (only the fields sent change; sets `updated_at`) | `401`, `403`, `404`, `422` | FR-74 |
 | `DELETE` | `/api/v1/announcements/{announcement_id}` | Gym Manager, Admin | — | `204` | `401`, `403`, `404` | FR-74 |
 
-**Workouts and training groups (anyone logged in; group permissions in section 10.3)**
+**Equipment**
 
 | Method | Path | Who | Body | Success | Errors | FR |
 |---|---|---|---|---|---|---|
-| `GET` | `/api/v1/workouts?offset&limit` | Any logged-in user | — | `200` `WorkoutPage` (my personal workouts, latest date first) | `401` | FR-90 |
-| `GET` | `/api/v1/workouts/assigned?offset&limit` | Any logged-in user | — | `200` `WorkoutPage` (group workouts assigned to me; declared before `/{workout_id}`) | `401` | FR-96 |
-| `POST` | `/api/v1/workouts` | Any logged-in user; `create` in the group | `WorkoutCreate` | `201` `WorkoutRead` | `403`, `404` (not in the group), `422` | FR-90, FR-93 |
-| `GET` | `/api/v1/workouts/{workout_id}` | Owner; `read` in the group | — | `200` `WorkoutRead` | `404` | FR-90, FR-93 |
-| `PATCH` | `/api/v1/workouts/{workout_id}` | Owner; `update` in the group | `WorkoutUpdate` | `200` `WorkoutRead` | `403`, `404`, `422` | FR-90, FR-93 |
-| `PUT` | `/api/v1/workouts/{workout_id}/assignee` | `assign` in the group | `WorkoutAssign` | `200` `WorkoutRead` | `400` (personal), `403`, `404`, `422` (not in the group) | FR-93 |
-| `DELETE` | `/api/v1/workouts/{workout_id}` | Owner; `update` in the group | — | `204` | `403`, `404` | FR-90, FR-93 |
+| `GET` | `/api/v1/equipment?status&category&needs_attention&service_due&q&offset&limit` | Trainer, Gym Manager, Admin | — | `200` `EquipmentPage` (by name; `service_due`: most overdue first) | `401`, `403`, `422` | FR-118 |
+| `POST` | `/api/v1/equipment/{equipment_id}/report` | Trainer, Gym Manager, Admin | `EquipmentReport` | `200` `EquipmentRead` | `403`, `404`, `422` | FR-118 |
+| `POST` | `/api/v1/equipment` | Gym Manager, Admin | `EquipmentCreate` | `201` `EquipmentRead` | `403`, `422` | FR-117 |
+| `PATCH` / `DELETE` | `/api/v1/equipment/{equipment_id}` | Gym Manager, Admin | `EquipmentUpdate` / — | `200` `EquipmentRead` / `204` | `403`, `404`, `422` | FR-117 |
+| `POST` | `/api/v1/equipment/{equipment_id}/service` | Gym Manager, Admin | — | `200` `EquipmentRead` | `403`, `404` | FR-119 |
+
+**Training groups and workouts (group permissions in section 10.3)**
+
+| Method | Path | Who | Body | Success | Errors | FR |
+|---|---|---|---|---|---|---|
+| `GET` | `/api/v1/workouts/assigned?offset&limit` | Any logged-in user | — | `200` `WorkoutPage` (workouts assigned to me; declared before `/{workout_id}`) | `401` | FR-96 |
+| `POST` | `/api/v1/workouts` | `create` in the group | `WorkoutCreate` | `201` `WorkoutRead` | `403`, `404` (not in the group), `422` | FR-93 |
+| `GET` | `/api/v1/workouts/{workout_id}` | `read` in the group | — | `200` `WorkoutRead` | `404` | FR-93 |
+| `PATCH` | `/api/v1/workouts/{workout_id}` | `update` in the group | `WorkoutUpdate` | `200` `WorkoutRead` | `403`, `404`, `422` | FR-93 |
+| `PUT` | `/api/v1/workouts/{workout_id}/assignee` | `assign` in the group | `WorkoutAssign` | `200` `WorkoutRead` (not done, if the person changed) | `403`, `404`, `422` (not in the group) | FR-93, FR-116 |
+| `PUT` | `/api/v1/workouts/{workout_id}/completion` | The person it is assigned to | `WorkoutCompletion` | `200` `WorkoutRead` | `403`, `404` | FR-116 |
+| `DELETE` | `/api/v1/workouts/{workout_id}` | `update` in the group | — | `204` | `403`, `404` | FR-93 |
 | `GET` | `/api/v1/groups?offset&limit` | Any logged-in user | — | `200` `GroupPage` (groups I own or am in, by name) | `401` | FR-91 |
-| `POST` | `/api/v1/groups` | Any logged-in user | `GroupCreate` | `201` `GroupRead` (I am the owner) | `401`, `422` | FR-91 |
+| `POST` | `/api/v1/groups` | Trainer, Gym Manager, Admin (`groups:create`) | `GroupCreate` | `201` `GroupRead` (I am the owner) | `401`, `403`, `422` | FR-91 |
 | `GET` | `/api/v1/groups/{group_id}` | `read` | — | `200` `GroupRead` | `404` | FR-91 |
 | `PATCH` / `DELETE` | `/api/v1/groups/{group_id}` | `manage` (owner) | `GroupCreate` / — | `200` `GroupRead` / `204` | `403`, `404`, `422` | FR-94 |
 | `GET` | `/api/v1/groups/{group_id}/workouts?offset&limit` | `read` | — | `200` `WorkoutPage` | `404` | FR-93 |
@@ -1001,13 +1057,13 @@ class Permission(str, Enum):
     MEMBERS_READ = "members:read"
     CLASSES_TEACH = "classes:teach"
     USERS_BAN = "users:ban"
-    ...                                   # 20 in all (SRS 3.11)
+    ...                                   # 25 in all (SRS 3.11)
 
 ROLE_PERMISSIONS = {
     "user": frozenset(),                  # only their own account and data
-    "trainer": frozenset({Permission.CLASSES_TEACH}),
-    "gym_manager": _GYM_MANAGER,          # 7 permissions
-    "admin": _GYM_MANAGER | {...},        # those + 12 admin permissions
+    "trainer": frozenset({CLASSES_TEACH, CLIENTS_READ, GROUPS_CREATE, EQUIPMENT_READ}),
+    "gym_manager": _GYM_MANAGER,          # 10 permissions
+    "admin": _GYM_MANAGER | {...},        # those + 13 admin permissions
 }
 
 def require_permission(*permissions: Permission):
@@ -1027,7 +1083,7 @@ Routes declare the check in one of two ways, both resolved before the body is va
 READ_MEMBERS = Depends(require_permission(Permission.MEMBERS_READ))
 
 @router.get("/{member_id}", response_model=MemberRead, dependencies=[READ_MEMBERS])   # when the route does not need the user
-def get_member(member_id: int, session: SessionDep) -> User: ...
+def get_member(member_id: int, session: SessionDep) -> dict: ...
 
 Banner = Annotated[User, Depends(require_permission(Permission.USERS_BAN))]
 
@@ -1040,19 +1096,23 @@ def ban_user(user_id: int, session: SessionDep, admin: Banner, body: BanRequest 
 | `/api/v1/users/me/*`, `GET /classes`, `GET /classes/{id}`, `POST` / `DELETE /classes/{id}/bookings`, `GET /plans`, `GET /announcements` | `CurrentUser` only: the caller's own data |
 | `GET /members`, `GET /members/waiting`, `GET /members/{id}`, `GET /members/{id}/check-ins`, `GET /members/{id}/bookings` | `members:read` |
 | `POST /members`, `PATCH` / `DELETE /members/{id}`, `POST /members/bulk-delete`, `DELETE /members/{id}/bookings/{class_id}` | `members:manage` |
-| `POST /members/{id}/check-ins`, `GET /check-ins/today` | `check_ins:record` |
+| `POST /members/{id}/check-ins`, `GET /check-ins`, `POST /check-ins/{id}/check-out` | `check_ins:record` |
 | `POST` / `GET /members/{id}/payments`, `GET /payments` | `payments:manage` |
 | `POST /payments/{id}/void` / `GET /payments/export.csv` | `payments:void` / `payments:export` |
-| `POST /classes`, `PATCH` / `DELETE /classes/{id}`, `GET /trainers` | `classes:manage` |
-| `GET /classes/{id}/bookings` | `classes:manage` or `classes:teach`; the service then refuses a caller without `classes:manage` who does not teach the class (`rbac.is_owner()`, `NotYourClassError` → `403`) |
-| `GET /trainers/me/classes` | `classes:teach` |
+| `POST /classes`, `PATCH` / `DELETE /classes/{id}` | `classes:manage` |
+| `GET /trainers` | `classes:manage` or `members:manage` |
+| `GET /classes/{id}/bookings`, `PUT /classes/{id}/bookings/{member_id}/attendance` | `classes:manage` or `classes:teach`; the service then refuses a caller without `classes:manage` who does not teach the class (`rbac.is_owner()`, `NotYourClassError` → `403`) |
+| `GET /trainers/me/classes` / `GET /trainers/me/clients` | `classes:teach` / `clients:read` |
+| `GET /equipment`, `POST /equipment/{id}/report` / the other `/equipment` routes | `equipment:read` / `equipment:manage` |
+| `/expenses/*` | `expenses:manage` |
 | `GET /overview` | `overview:read` |
 | `POST /announcements`, `PATCH` / `DELETE /announcements/{id}`; `GET /announcements?include_ended=true` | `announcements:manage` (the last one checked in the route with `rbac.has_permission()`) |
 | `GET /admin/stats`, `GET /admin/revenue` | `dashboard:read` |
 | `GET /admin/users`, `GET /admin/users/{id}` / `PATCH .../role` / `POST .../ban`, `.../unban`, `POST /admin/users/bulk-ban`, `/bulk-unban` / `POST .../reset-password` | `users:read` / `users:change_role` / `users:ban` / `users:reset_password` |
 | `POST /admin/users/{id}/revoke-sessions` / `GET /admin/users/export.csv` | `users:revoke_sessions` / `users:export` |
 | `GET` / `POST` / `DELETE` `/admin/workouts*`, `/admin/groups*` (moderation) | `content:moderate` |
-| `PUT /admin/plans/{plan}` | `plans:edit` |
+| `POST /plans`, `PATCH` / `DELETE /plans/{plan}` | `plans:edit` |
+| `POST /groups` | `groups:create` |
 | `GET /admin/activity`, `GET /admin/activity/export.csv`, `GET /admin/activity/security` | `activity:read` |
 | `/workouts/*`, `/groups/*` | `CurrentUser`, then the group permissions below (`rbac.group_permissions()`) inside the service |
 
@@ -1070,31 +1130,32 @@ def group_permissions(user, owner_id, member: GroupMember | None) -> frozenset[G
     return {READ} | {CREATE if member.can_create} | {UPDATE if ...} | {ASSIGN if ...}
 ```
 
-`group_service.access(session, user, group_id)` loads the group and the caller's `group_member` row, asks `group_permissions()`, and raises `GroupNotFoundError` (`404`) for an empty set; `group_service.require(permissions, p)` raises `GroupPermissionError` (`403`, naming the missing permission). Every group route and every group-workout action goes through these two, so the flags are read from the database on every request and a change applies on the member's next request. `workout_service._access()` treats a personal workout like a private record (`rbac.is_owner()`, else `404`) and a group workout through `access()`; an outsider's `GroupNotFoundError` becomes `WorkoutNotFoundError`, so a group workout's id does not show that it exists either. Deleting a group workout needs `update`; `PUT /workouts/{id}/assignee` needs `assign` and an assignee for whom `group_service.in_group()` is true. A member may call `DELETE /groups/{id}/members/{own id}` without `manage` (leave). `GroupRead.my_permissions` lists the caller's set in the enum's order for the app's buttons.
+`group_service.access(session, user, group_id)` loads the group and the caller's `group_member` row, asks `group_permissions()`, and raises `GroupNotFoundError` (`404`) for an empty set; `group_service.require(permissions, p)` raises `GroupPermissionError` (`403`, naming the missing permission). Every group route and every group-workout action goes through these two, so the flags are read from the database on every request and a change applies on the member's next request. `workout_service._access()` goes through `access()` too; an outsider's `GroupNotFoundError` becomes `WorkoutNotFoundError`, so a workout's id does not show that it exists either. Deleting a workout needs `update`; `PUT /workouts/{id}/assignee` needs `assign` and an assignee for whom `group_service.in_group()` is true. A member may call `DELETE /groups/{id}/members/{own id}` without `manage` (leave). `GroupRead.my_permissions` lists the caller's set in the enum's order for the app's buttons.
 
-| Action | Personal workout | Group workout / group |
-|---|---|---|
-| Read a workout, the group, its people, its workouts | owner, else `404` | `read`, else `404` |
-| Add a workout | anyone (their own) | `create` (and `assign` with `assigned_to`), else `403` |
-| Edit or delete a workout | owner, else `404` | `update`, else `403` |
-| Assign a workout | `400` | `assign`, else `403` |
-| Rename or delete the group; add, change or remove members | — | `manage`, else `403` (a member may remove themself) |
+| Action | Needs, in the group |
+|---|---|
+| Read the group, its people, its workouts | `read`, else `404` |
+| Add a workout | `create` (and `assign` with `assigned_to`), else `403` |
+| Edit or delete a workout | `update`, else `403` |
+| Assign a workout | `assign`, else `403` |
+| Mark a workout done | being the person it is assigned to (`rbac.is_owner(user, workout.assigned_to)`), else `403` |
+| Rename or delete the group; add, change or remove members | `manage`, else `403` (a member may remove themself) |
 
 Row-level rules that depend on the data are checked inside the route:
 - Own membership: the caller's own `app_user` row (`member_service.get_own_membership(user)`); a member can never pass an id to read another member's record.
 - Book class: class must exist (`404`), `starts_at` must be in the future (`400`), `count(bookings) < capacity` (`409` if full), and no existing `(class_id, member_id)` row (`409`). Do the capacity check and insert in one transaction.
 - Cancel booking: delete the caller's own `(class_id, member_id)` row; none found → `404`.
 - Edit class capacity: new `capacity` below the current booking count → `422`.
-- Check-in: member must be valid (`400` otherwise); a second check-in for the same member on the same UTC date is allowed but the dashboard counts distinct members.
-- Start a membership: `member_service.start_membership()` finds the account by email (none → `AccountNotFoundError`, `422`) and refuses one that already has a plan (`AlreadyMemberError`, `409`).
+- Check-in: member must be valid (`400` otherwise); a member checked in today and not checked out is refused (`AlreadyInsideError` → `409`); coming back after a check-out is allowed.
+- Start a membership: `member_service.start_membership()` finds the account by email (none → `AccountNotFoundError`, `422`) and refuses one that already has a plan (`AlreadyMemberError`, `409`). The plan must be offered (`plan_service.get_offered()` → `422`); the expiry defaults to its days, and with `payment_method` the first payment is added in the same commit.
 - Change role: `user_id == caller` → `400`.
 - Ban: target is the caller or an admin → `400`. Otherwise set `is_banned = true`, `banned_at = now`, `ban_reason`, and revoke all the user's sessions in the same transaction (`session_service.revoke_all()`). Unban clears the three fields; the revoked sessions stay revoked.
 - Login rejects a banned user with `403`; refresh answers `401`, because the ban revoked the sessions (and `rotate()` also refuses a banned user).
 - Change password: verify `current_password` (`400` if wrong), hash `new_password`, and revoke every session except the caller's (`keep=auth.session_id`) in the same transaction; the caller stays logged in.
-- **Built so far (trainers):** `class_service` checks that a sent `trainer_id` is an account with the role `trainer` (`TrainerNotFoundError` → `422`) and clears the old `trainer_name`; lists outer-join the trainer's account and select `coalesce(app_user.name, gym_class.trainer_name)`, so a renamed trainer shows everywhere. `user_service.change_role()` calls `class_service.release_trainer()` when an account stops being a trainer, in the same commit.
+- **Built so far (trainers):** `trainer_service.check_trainer()` checks that a sent `trainer_id` (of a class or a member) is an account with the role `trainer` (`TrainerNotFoundError` → `422`) and clears the old `trainer_name`; lists outer-join the trainer's account and select `coalesce(app_user.name, gym_class.trainer_name)`, so a renamed trainer shows everywhere. `user_service.change_role()` calls `trainer_service.release_trainer()` (classes keep the name as text, clients have no trainer) when an account stops being a trainer, in the same commit.
 - **Built so far (profile details):** `profile_service.check_emergency_contact()` merges the sent fields with the saved ones before checking, so sending only a new contact phone works, and a refused change leaves the saved contact alone (`IncompleteEmergencyContactError` → `422`). `PATCH /users/me/profile` and `member_service.update_member()` both call it. `start_membership()` keeps a saved phone when the Add member form leaves it empty.
 - **Built so far (announcements):** `announcement_service` filters current ones with `or_(ends_on IS NULL, ends_on >= utc_today())` and outer-joins `app_user` for the poster's name, so an announcement whose poster's account is gone is still listed. An `ends_on` before today is refused by the schemas' validator (`422`); an edit that leaves `ends_on` out keeps an ended announcement's date, so its text can still be corrected. `member_service._delete_accounts()` sets `posted_by` to null before deleting an account.
-- **Built so far (password reset):** `get_logged_in_user` returns the user from `get_auth` (token, ban and session check); `get_current_user` (used by every route and by `require_roles`) also returns `403 Choose a new password first` while `must_change_password` is set. Only `GET /users/me` and `POST /users/me/password` take `LoggedInUser` instead (the password route takes `AuthDep` to know which session to keep), so a reset account can see who it is and choose a password. The reset revokes every session; after choosing a password the same session goes on working.
+- **Built so far (password reset):** `get_logged_in_user` returns the user from `get_auth` (token, ban and session check); `get_current_user` (used by every route and by `require_permission`) also returns `403 Choose a new password first` while `must_change_password` is set. Only `GET /users/me` and `POST /users/me/password` take `LoggedInUser` instead (the password route takes `AuthDep` to know which session to keep), so a reset account can see who it is and choose a password. The reset revokes every session; after choosing a password the same session goes on working.
 
 ### 10.4 Admin dashboard stats
 
@@ -1154,7 +1215,7 @@ stats = AdminStats(
 | `role_change` | `user_service.change_role()`, only when the role differs | the admin / the account | `user → trainer` |
 | `ban`, `unban` | `user_service.ban_user()`, `unban_user()`, only when the state changes | the admin / the account | the reason and how many sessions ended |
 | `account_delete` | `member_service.delete_member()`, `bulk_delete_members()` (one row each) | the gym manager or admin / the email only | the person's name and how it was deleted |
-| `export` | `payment_service.export_csv()`, `activity_service.export_csv()`, `user_service.export_csv()`, `moderation_service.export_*_csv()`, after the rows are read | the admin / — | the file, the row count and the filters |
+| `export` | `payment_service.export_csv()`, `expense_service.export_csv()`, `activity_service.export_csv()`, `user_service.export_csv()`, `moderation_service.export_*_csv()`, after the rows are read | the admin / — | the file, the row count and the filters |
 | `workout_delete`, `group_delete` | `moderation_service.delete_workouts()` / `delete_groups()`, one row per item, in the delete's transaction | the admin / the owner (by email if the account is gone) | the title, date and personal or group; or the group's name and how many workouts went with it |
 
 - **Client address:** routes take `ClientDep` (`app/request_info.py`), a `Client(ip, user_agent)` built from the request, and pass it to the service. On Vercel (`VERCEL` is set) the IP is the first address in `X-Forwarded-For`, which the platform overwrites; elsewhere it is the connection's address, because the header could be made up. Both are cut to the column lengths.
@@ -1200,9 +1261,10 @@ The plan was Alembic (revisions `0001_mvp` and `0002_beta`, run by hand against 
 1. `_drop_old_member_tables()`: only on a database that still has the MVP `member` table, drop `check_in`, `class_booking`, `payment` and `member` (data included; `CASCADE` on PostgreSQL). This was the one destructive change, made once when members became accounts (PR #40) and announced in the README; accounts, classes and plan prices were kept. On every later start it does nothing.
 2. `SQLModel.metadata.create_all(engine)`: create any table that does not exist yet (and the three dropped ones, now pointing at `app_user`).
 3. `_add_missing_columns()`: for each `(table, column, definition)` in `_ADDED_COLUMNS` (the lockout, ban, password and membership columns on `app_user`, the void columns on `payment`, `trainer_id` on `gym_class`, …), `ALTER TABLE … ADD COLUMN` when the column is missing (`IF NOT EXISTS` on PostgreSQL, since two serverless instances may start together), then `CREATE INDEX IF NOT EXISTS` for `_ADDED_INDEXES`.
-4. `_seed_plan_prices()`: insert the default monthly, quarterly and yearly prices if missing; existing prices are never changed.
+4. `_widen_plan_columns()`: on PostgreSQL, the plan code columns go from varchar(10) to varchar(40), once (a widening keeps the data and does not rewrite the table; SQLite does not enforce the length).
+5. `_seed_plans()`: an empty plan table gets the three default plans; plans from before they had names get one. A plan an admin changed, retired or deleted stays that way.
 
-A change that renames or removes a column, or changes a type, cannot be made this way; that is the point to adopt Alembic (risks, section 13).
+A change that renames or removes a column, or changes a type other than that one widening, cannot be made this way; that is the point to adopt Alembic (risks, section 13).
 
 The first admin is promoted by hand in the Supabase table editor or SQL editor (`update app_user set role = 'admin' where email = …`); after that admins give roles on the Users page.
 
@@ -1229,10 +1291,11 @@ The first admin is promoted by hand in the Supabase table editor or SQL editor (
 | `test_login.py` | Right password (tokens, cookie flags), any-case email, wrong password and unknown email give the same `401`, the 5th wrong password answers `429` with `Retry-After` and blocks even the right one, a right password resets the count, the failed login is logged without the password |
 | `test_tokens.py` | Missing, garbage, tampered (signature), forged (another `sub`), expired and `sid`-less tokens get `401`; the token stops working after logout although it is still well signed; a ban answers `403` |
 | `test_refresh.py` | No cookie `204`; rotation gives a new cookie and a working token; the replaced cookie within the grace period gets a token but no cookie; after the grace period it ends the whole session for both holders; a cookie two rotations old is refused; refresh after logout or a ban is refused |
-| `test_rbac.py` | Every admin `GET` route without a path parameter (found from the OpenAPI schema) is `403` for a user, trainer and gym manager, `200` for an admin, `401` for a visitor; staff routes; a role change applies with the same token; another user's personal workout is `404` (an admin's too); a group member without `can_update` gets `403`, then `200` once ticked; only the owner renames or deletes a group; an admin cannot ban another admin or themself, nor change their own role; a bulk ban skips the admin |
+| `test_rbac.py` | Every admin `GET` route without a path parameter (found from the OpenAPI schema) is `403` for a user, trainer and gym manager, `200` for an admin, `401` for a visitor; staff routes; a role change applies with the same token; a user cannot start a group; another person's session is `404`; a group and its workouts are `404` to outsiders (an admin too); a group member without `can_update` gets `403`, then `200` once ticked; only the owner renames or deletes a group; an admin cannot ban another admin or themself, nor change their own role; a bulk ban skips the admin |
+| `test_gym.py` | Plans (add, retire, delete, in use), a membership with its first payment, check-in and check-out, class attendance, a trainer's own clients, marking a workout done, equipment services and faults, expenses and net income, a user's record counts |
 | `test_cors.py` | `FRONTEND_ORIGIN` gets `Access-Control-Allow-Origin` and credentials, and its preflight is allowed; other origins (including look-alikes and `null`) and their preflights get no `Access-Control-*` header; `*` is never sent |
 | `test_config.py` | `.env` fills in missing variables but never overrides, is never read on Vercel, may be absent; `FRONTEND_ORIGIN` lists, trailing slashes, `*` and scheme-less values refused, defaults locally and on Vercel |
 
-Run: `pip install -r requirements-dev.txt` (adds `pytest` and `httpx` to `requirements.txt`; Vercel installs only `requirements.txt`), then `pytest` in `backend/`. 53 tests, all passing. Not in CI (out of scope).
+Run: `pip install -r requirements-dev.txt` (adds `pytest` and `httpx` to `requirements.txt`; Vercel installs only `requirements.txt`), then `pytest` in `backend/`. 69 tests, all passing. Not in CI (out of scope).
 
-**Smoke test through the public API.** `scripts/seed_demo.py` (README, **Demo data**) signs accounts up, gives roles, starts memberships, takes payments, checks members in, creates classes, books them, posts announcements, logs workouts and sets up a group with mixed permissions, stopping at the first unexpected status code. Run against a fresh local backend and then again, it creates everything once and nothing the second time. Its results were checked by role: each account's role and landing page, `403` when a group member without `update` edits a group workout, `404` for someone outside the group, a class at capacity, and the Overview numbers (`check_ins_today`, `expiring_soon`, `waiting`, `payments_today`) matching the seeded data.
+**Smoke test through the public API.** `scripts/seed_demo.py` (README, **Demo data**) signs accounts up, gives roles, starts memberships, takes payments, checks members in and out, creates classes, books them, posts announcements, adds equipment and expenses, and sets up a training group with mixed permissions, stopping at the first unexpected status code. Run against a fresh local backend and then again, it creates everything once and nothing the second time. Its results were checked by role: each account's role and landing page, `403` when a group member without `update` edits a group workout, `404` for someone outside the group, a class at capacity, and the Overview numbers (`check_ins_today`, `expiring_soon`, `waiting`, `payments_today`) matching the seeded data.

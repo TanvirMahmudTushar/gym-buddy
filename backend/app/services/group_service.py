@@ -136,7 +136,7 @@ def list_groups(session: Session, user: User, offset: int, limit: int) -> tuple[
 
 
 def create_group(session: Session, user: User, name: str) -> dict:
-    """Anyone logged in can start a group; they become its owner."""
+    """Trainers and staff start groups (groups:create, checked by the route); whoever starts one is its owner."""
     group = TrainingGroup(name=name, owner_id=user.id)
     session.add(group)
     session.commit()
@@ -265,7 +265,7 @@ def remove_member(session: Session, user: User, group_id: int, member_id: int) -
     session.exec(
         update(Workout)
         .where(col(Workout.group_id) == group_id, col(Workout.assigned_to) == member_id)
-        .values(assigned_to=None)
+        .values(assigned_to=None, completed_at=None)
     )
     session.delete(member)
     session.commit()
@@ -273,15 +273,15 @@ def remove_member(session: Session, user: User, group_id: int, member_id: int) -
 
 def delete_for_accounts(session: Session, ids: list[int]) -> None:
     """Before accounts are deleted: their groups go (with those groups' workouts and members), they leave every other
-    group, their personal workouts go, and the group workouts they added or were assigned stay without them.
-    The caller commits."""
+    group, and the workouts they added or were assigned stay without them. The caller commits."""
     owned = list(session.exec(select(TrainingGroup.id).where(col(TrainingGroup.owner_id).in_(ids))).all())
     if owned:
         delete_groups(session, owned)
     session.exec(delete(GroupMember).where(col(GroupMember.user_id).in_(ids)))
+    # Personal workouts from an earlier version, which are in no group.
     session.exec(delete(Workout).where(col(Workout.owner_id).in_(ids), col(Workout.group_id).is_(None)))
     session.exec(update(Workout).where(col(Workout.owner_id).in_(ids)).values(owner_id=None))
-    session.exec(update(Workout).where(col(Workout.assigned_to).in_(ids)).values(assigned_to=None))
+    session.exec(update(Workout).where(col(Workout.assigned_to).in_(ids)).values(assigned_to=None, completed_at=None))
 
 
 def groups_of(session: Session, user_id: int) -> list[dict]:

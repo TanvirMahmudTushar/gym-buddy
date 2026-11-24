@@ -15,7 +15,7 @@ interface Props {
   refreshKey?: number
 }
 
-// The current announcements, newest first, for anyone to read: on My membership and on the Overview.
+// The current announcements, newest first, for anyone to read: on My membership, My classes and the Dashboard.
 export default function AnnouncementsCard({ hideWhenEmpty = false, emptyText = "No announcements right now.", footer, refreshKey = 0 }: Props) {
   const [items, setItems] = useState<Announcement[]>([])
   const [total, setTotal] = useState(0)

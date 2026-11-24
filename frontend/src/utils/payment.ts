@@ -10,7 +10,8 @@ export const METHODS: { value: PaymentMethod; label: string }[] = [
 
 export const methodLabel = (method: PaymentMethod) => METHODS.find((m) => m.value === method)?.label ?? method
 
-export const formatMoney = (amount: number) => `৳${amount.toLocaleString("en-US")}`
+/** A negative amount (a month that cost more than it earned) keeps its sign in front: -৳500. */
+export const formatMoney = (amount: number) => `${amount < 0 ? "-" : ""}৳${Math.abs(amount).toLocaleString("en-US")}`
 
 /** The address of the Payments page filtered to these UTC days (YYYY-MM-DD), so a number elsewhere can link to its list. */
 export function paymentsLink(from: string, to: string): string {

@@ -28,7 +28,6 @@ export interface Page<T> {
 /** The workouts tab's filters. Dates are the workout's date, both included; empty means any. */
 export interface WorkoutFilters {
   owner_id: number | null
-  kind: "personal" | "group" | ""
   date_from: string
   date_to: string
   q: string

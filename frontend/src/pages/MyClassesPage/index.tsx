@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import AnnouncementsCard from "../../components/AnnouncementsCard"
 import ClassBookings from "../../components/ClassBookings"
 import { listMyClasses } from "../../services/trainerService"
 import type { BookingWhen, GymClass } from "../../types/gymClass"
@@ -25,10 +26,10 @@ function MyClassItem({ gymClass: c, open }: { gymClass: GymClass; open: boolean 
       {c.description && <p>{c.description}</p>}
       <div className="actions">
         <button type="button" onClick={() => setShowBookings((v) => !v)} aria-expanded={showBookings}>
-          {showBookings ? "Hide who booked" : "Who booked"}
+          {showBookings ? "Hide bookings" : "Bookings and attendance"}
         </button>
       </div>
-      {showBookings && <ClassBookings classId={c.id} linkMembers={false} />}
+      {showBookings && <ClassBookings classId={c.id} startsAt={c.starts_at} linkMembers={false} />}
     </li>
   )
 }
@@ -92,33 +93,36 @@ export default function MyClassesPage() {
     )
 
   return (
-    <section className="card narrow-wide" aria-labelledby="my-classes-heading">
-      <div className="toolbar">
-        <h2 id="my-classes-heading">My classes</h2>
-        <div className="chips" role="group" aria-label="Which classes to show">
-          {(["upcoming", "past"] as const).map((w) => (
-            <button key={w} type="button" className="chip" aria-pressed={when === w} onClick={() => setWhen(w)}>
-              {w === "upcoming" ? "Upcoming" : "Past"}
-            </button>
-          ))}
+    <div className="column narrow-wide">
+      <section className="card" aria-labelledby="my-classes-heading">
+        <div className="toolbar">
+          <h2 id="my-classes-heading">My classes</h2>
+          <div className="chips" role="group" aria-label="Which classes to show">
+            {(["upcoming", "past"] as const).map((w) => (
+              <button key={w} type="button" className="chip" aria-pressed={when === w} onClick={() => setWhen(w)}>
+                {w === "upcoming" ? "Upcoming" : "Past"}
+              </button>
+            ))}
+          </div>
         </div>
-      </div>
-      <p className="hint">
-        The classes you teach, with who booked each one. Upcoming classes are soonest first; past classes latest first.
-      </p>
-      {body}
-      {!loading && classes.length > 0 && (
-        <div className="list-foot">
-          <span>
-            Showing {classes.length} of {total} {total === 1 ? "class" : "classes"}
-          </span>
-          {classes.length < total && (
-            <button onClick={loadMore} disabled={loadingMore}>
-              {loadingMore ? "Loading…" : "Load more"}
-            </button>
-          )}
-        </div>
-      )}
-    </section>
+        <p className="hint">
+          The classes you teach, with who booked each one and who came. Upcoming classes are soonest first; past classes latest first.
+        </p>
+        {body}
+        {!loading && classes.length > 0 && (
+          <div className="list-foot">
+            <span>
+              Showing {classes.length} of {total} {total === 1 ? "class" : "classes"}
+            </span>
+            {classes.length < total && (
+              <button onClick={loadMore} disabled={loadingMore}>
+                {loadingMore ? "Loading…" : "Load more"}
+              </button>
+            )}
+          </div>
+        )}
+      </section>
+      <AnnouncementsCard hideWhenEmpty />
+    </div>
   )
 }

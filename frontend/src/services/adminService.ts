@@ -10,8 +10,7 @@ import type {
   Role,
   UserFilters,
 } from "../types/auth"
-import type { PlanPrice, RevenueStats } from "../types/payment"
-import type { Plan } from "../types/member"
+import type { RevenueStats } from "../types/payment"
 import { request, requestBlob } from "./api"
 
 const BASE = "/api/v1/admin"
@@ -65,7 +64,3 @@ export const unbanUser = (id: number) => request<AdminUser>(`${BASE}/users/${id}
 export const getStats = () => request<AdminStats>(`${BASE}/stats`)
 
 export const getRevenue = () => request<RevenueStats>(`${BASE}/revenue`)
-
-// Set a plan's price (whole taka) and the number of days a renewal adds.
-export const updatePlan = (plan: Plan, body: { price: number; duration_days: number }) =>
-  request<PlanPrice>(`${BASE}/plans/${plan}`, { method: "PUT", body: JSON.stringify(body) })

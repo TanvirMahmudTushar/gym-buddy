@@ -24,3 +24,7 @@ export const listBookings = (id: number): Promise<BookingPage> => request<Bookin
 export const bookClass = (id: number) => request<Booking>(`${BASE}/${id}/bookings`, { method: "POST" })
 
 export const cancelBooking = (id: number) => request<void>(`${BASE}/${id}/bookings`, { method: "DELETE" })
+
+/** Mark whether someone who booked came (null clears it). Opens an hour before the class starts. */
+export const markAttendance = (classId: number, memberId: number, attended: boolean | null) =>
+  request<Booking>(`/api/v1/classes/${classId}/bookings/${memberId}/attendance`, { method: "PUT", body: JSON.stringify({ attended }) })

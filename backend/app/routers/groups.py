@@ -1,9 +1,10 @@
-# Training groups under /api/v1/groups (SRS 3.7j, TDD 6.2). Anyone logged in can start a group and becomes its
-# owner. What each person may do in a group comes from app/rbac.py (GroupPermission): someone outside the group gets
-# 404, a member without the permission 403. Routes only handle HTTP; the rules live in app/services/group_service.py.
+# Training groups under /api/v1/groups (SRS 3.7j, TDD 6.2). Trainers and staff start groups (groups:create) and own
+# the ones they start. What each person may do in a group comes from app/rbac.py (GroupPermission): someone outside the
+# group gets 404, a member without the permission 403. Routes only handle HTTP; the rules live in
+# app/services/group_service.py.
 from typing import Annotated
 
-from fastapi import APIRouter, Path, Query
+from fastapi import APIRouter, Depends, Path, Query
 
 from app.database import SessionDep
 from app.deps import CurrentUser
@@ -14,8 +15,10 @@ from app.models import (
     GroupMemberUpdate,
     GroupPage,
     GroupRead,
+    User,
     WorkoutPage,
 )
+from app.rbac import Permission, require_permission
 from app.services import group_service, workout_service
 
 router = APIRouter(prefix="/api/v1/groups", tags=["groups"])
@@ -25,6 +28,7 @@ GroupId = Annotated[int, Path(ge=1, le=2_147_483_647)]
 UserId = Annotated[int, Path(ge=1, le=2_147_483_647)]
 Offset = Annotated[int, Query(ge=0)]
 Limit = Annotated[int, Query(ge=1, le=100)]
+GroupCreator = Annotated[User, Depends(require_permission(Permission.GROUPS_CREATE))]
 
 
 @router.get("", response_model=GroupPage)
@@ -35,9 +39,9 @@ def list_my_groups(user: CurrentUser, session: SessionDep, offset: Offset = 0, l
 
 
 @router.post("", status_code=201, response_model=GroupRead)
-def create_group(body: GroupCreate, user: CurrentUser, session: SessionDep) -> dict:
-    """I become the owner and hold every permission in the group."""
-    return group_service.create_group(session, user, body.name)
+def create_group(body: GroupCreate, creator: GroupCreator, session: SessionDep) -> dict:
+    """Trainers, gym managers and admins (403 for a member). I become the owner and hold every permission in it."""
+    return group_service.create_group(session, creator, body.name)
 
 
 @router.get("/{group_id}", response_model=GroupRead)

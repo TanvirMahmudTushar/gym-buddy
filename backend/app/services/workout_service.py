@@ -1,9 +1,7 @@
-# Workouts: personal ones and the ones shared in a training group (final spec 2.2, SRS 3.7j), used by
-# app/routers/workouts.py and the group workout list in app/routers/groups.py.
-#
-# A personal workout (no group) belongs to its owner alone: anyone else gets 404, as if it did not exist.
-# A group workout follows the caller's group permissions (rbac.group_permissions() through group_service):
-# outsiders get 404, members without the permission 403.
+# Workouts in training groups (final spec 2.2, SRS 3.7j), used by app/routers/workouts.py and the group workout list in
+# app/routers/groups.py. A workout follows the caller's permissions in its group (rbac.group_permissions() through
+# group_service): outsiders get 404, members without the permission 403. The person a workout is assigned to marks it
+# done.
 from sqlalchemy.orm import aliased
 from sqlmodel import Session, col, func, select
 
@@ -17,8 +15,8 @@ class WorkoutNotFoundError(Exception):
     """No workout has this id, or the caller may not see it."""
 
 
-class NotGroupWorkoutError(Exception):
-    """Only a group workout can be assigned to someone."""
+class NotAssignedToYouError(Exception):
+    """Only the person a workout is assigned to can mark it done."""
 
 
 class AssigneeNotInGroupError(Exception):
@@ -33,7 +31,7 @@ def _with_names(filters: list):
     """Workouts matching the filters, latest workout date first, with the owner's, group's and assignee's names."""
     return (
         select(Workout, Owner.name, TrainingGroup.name, Assignee.name)
-        # Outer joins: a personal workout has no group, and the owner or assignee may be gone.
+        # Outer joins: nobody may be assigned, and the owner's account may be gone.
         .join(Owner, col(Workout.owner_id) == col(Owner.id), isouter=True)
         .join(TrainingGroup, col(Workout.group_id) == col(TrainingGroup.id), isouter=True)
         .join(Assignee, col(Workout.assigned_to) == col(Assignee.id), isouter=True)
@@ -54,6 +52,7 @@ def _read(workout: Workout, owner_name: str | None, group_name: str | None, assi
         "owner_name": owner_name,
         "assigned_to": workout.assigned_to,
         "assigned_to_name": assignee_name,
+        "completed_at": workout.completed_at,
         "created_at": workout.created_at,
         "updated_at": workout.updated_at,
     }
@@ -67,11 +66,6 @@ def _page(session: Session, filters: list, offset: int, limit: int) -> tuple[lis
     total = session.exec(select(func.count()).select_from(Workout).where(*filters)).one()
     rows = session.exec(_with_names(filters).offset(offset).limit(limit)).all()
     return [_read(*row) for row in rows], total
-
-
-def list_personal(session: Session, user: User, offset: int, limit: int) -> tuple[list[dict], int]:
-    """My own workouts that are in no group."""
-    return _page(session, [col(Workout.owner_id) == user.id, col(Workout.group_id).is_(None)], offset, limit)
 
 
 def list_assigned(session: Session, user: User, offset: int, limit: int) -> tuple[list[dict], int]:
@@ -91,13 +85,12 @@ def _check_assignee(session: Session, group: TrainingGroup, user_id: int) -> Non
 
 
 def create_workout(session: Session, user: User, data: WorkoutCreate) -> dict:
-    """A personal workout, or one in a group the caller may add to (and assign in, when assigned_to is sent)."""
-    if data.group_id is not None:
-        group, permissions = group_service.access(session, user, data.group_id)
-        group_service.require(permissions, GroupPermission.CREATE)
-        if data.assigned_to is not None:
-            group_service.require(permissions, GroupPermission.ASSIGN)
-            _check_assignee(session, group, data.assigned_to)
+    """In a group the caller may add to (and assign in, when assigned_to is sent)."""
+    group, permissions = group_service.access(session, user, data.group_id)
+    group_service.require(permissions, GroupPermission.CREATE)
+    if data.assigned_to is not None:
+        group_service.require(permissions, GroupPermission.ASSIGN)
+        _check_assignee(session, group, data.assigned_to)
     workout = Workout(owner_id=user.id, **data.model_dump())
     session.add(workout)
     session.commit()
@@ -106,15 +99,11 @@ def create_workout(session: Session, user: User, data: WorkoutCreate) -> dict:
 
 
 def _access(session: Session, user: User, workout_id: int, permission: GroupPermission) -> Workout:
-    """The workout if the caller may do this to it. A personal workout: its owner may do anything, anyone else gets
-    404. A group workout: 404 for outsiders, 403 for members without the permission."""
+    """The workout if the caller may do this to it: 404 for someone outside its group, 403 for a member without the
+    permission."""
     workout = session.get(Workout, workout_id)
-    if workout is None:
+    if workout is None or workout.group_id is None:
         raise WorkoutNotFoundError(workout_id)
-    if workout.group_id is None:
-        if not rbac.is_owner(user, workout.owner_id):
-            raise WorkoutNotFoundError(workout_id)
-        return workout
     try:
         _, permissions = group_service.access(session, user, workout.group_id)
     except group_service.GroupNotFoundError:
@@ -129,7 +118,7 @@ def get_workout(session: Session, user: User, workout_id: int) -> dict:
 
 
 def update_workout(session: Session, user: User, workout_id: int, changes: dict) -> dict:
-    """Only the fields sent change. In a group this needs the update permission."""
+    """Only the fields sent change. Needs the update permission."""
     workout = _access(session, user, workout_id, GroupPermission.UPDATE)
     workout.sqlmodel_update(changes)
     workout.updated_at = utc_now()
@@ -139,12 +128,13 @@ def update_workout(session: Session, user: User, workout_id: int, changes: dict)
 
 
 def assign_workout(session: Session, user: User, workout_id: int, assignee_id: int | None) -> dict:
-    """Assign a group workout to someone in the group (or unassign it with None). Needs the assign permission."""
+    """Assign a workout to someone in its group (or unassign it with None). Needs the assign permission."""
     workout = _access(session, user, workout_id, GroupPermission.ASSIGN)
-    if workout.group_id is None:
-        raise NotGroupWorkoutError(workout_id)
     if assignee_id is not None:
         _check_assignee(session, session.get(TrainingGroup, workout.group_id), assignee_id)
+    if workout.assigned_to != assignee_id:
+        # The new person has not done it yet.
+        workout.completed_at = None
     workout.assigned_to = assignee_id
     workout.updated_at = utc_now()
     session.add(workout)
@@ -152,8 +142,20 @@ def assign_workout(session: Session, user: User, workout_id: int, assignee_id: i
     return _one(session, workout_id)
 
 
+def complete_workout(session: Session, user: User, workout_id: int, done: bool) -> dict:
+    """The person it is assigned to marks it done, or clears the mark. Nobody else can, whatever their permissions."""
+    workout = _access(session, user, workout_id, GroupPermission.READ)
+    if not rbac.is_owner(user, workout.assigned_to):
+        raise NotAssignedToYouError(workout_id)
+    if done != (workout.completed_at is not None):
+        workout.completed_at = utc_now() if done else None
+        session.add(workout)
+        session.commit()
+    return _one(session, workout_id)
+
+
 def delete_workout(session: Session, user: User, workout_id: int) -> None:
-    """In a group, deleting counts as editing: it needs the update permission."""
+    """Deleting counts as editing: it needs the update permission."""
     workout = _access(session, user, workout_id, GroupPermission.UPDATE)
     session.delete(workout)
     session.commit()
@@ -164,14 +166,19 @@ def _count(session: Session, *filters) -> int:
 
 
 def counts_for(session: Session, user_id: int) -> dict:
-    """How many workouts an account has, for the admin's user details. Counts only: the content stays private."""
+    """How many workouts an account added and was assigned, for the admin's user details."""
+    assigned = col(Workout.assigned_to) == user_id
     return {
-        "personal": _count(session, col(Workout.owner_id) == user_id, col(Workout.group_id).is_(None)),
-        "in_groups": _count(session, col(Workout.owner_id) == user_id, col(Workout.group_id).is_not(None)),
-        "assigned": _count(session, col(Workout.assigned_to) == user_id),
+        "workouts_added": _count(session, col(Workout.owner_id) == user_id),
+        "workouts_assigned": _count(session, assigned),
+        "workouts_completed": _count(session, assigned, col(Workout.completed_at).is_not(None)),
     }
 
 
 def workout_stats(session: Session, since) -> dict:
-    """Every workout, and the ones added since `since`, for the admin dashboard."""
-    return {"total": _count(session), "last_7_days": _count(session, col(Workout.created_at) >= since)}
+    """Every workout, the ones added since `since` and the ones marked done, for the admin dashboard."""
+    return {
+        "total": _count(session),
+        "last_7_days": _count(session, col(Workout.created_at) >= since),
+        "completed": _count(session, col(Workout.completed_at).is_not(None)),
+    }

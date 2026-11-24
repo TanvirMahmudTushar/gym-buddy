@@ -2,6 +2,7 @@ import { useState } from "react"
 import type { RevenueStats } from "../types/payment"
 import { formatDate } from "../utils/member"
 import { formatMoney, methodLabel } from "../utils/payment"
+import BarList from "./BarList"
 
 /** A round number at or just above the largest value, so the axis reads 0 / half / top in clean steps. */
 function niceMax(value: number): number {
@@ -29,59 +30,63 @@ const monthName = (month: string, style: "short" | "long") =>
 function MonthChart({ months }: { months: RevenueStats["months"] }) {
   const [active, setActive] = useState<number | null>(null)
   const top = niceMax(Math.max(...months.map((m) => m.amount)))
-  if (top === 0) return <p className="empty">No payments in the last 6 months.</p>
+  if (top === 0 && months.every((m) => m.expenses === 0)) return <p className="empty">No payments or expenses in the last 6 months.</p>
 
   const last = months.length - 1
   // The first and last tips line up with the plot's edge instead of centring, so they never overflow the card.
   const edge = (i: number) => (i === 0 ? "start" : i === last ? "end" : "")
   return (
     <>
-      <div className="month-chart">
-        <div className="month-axis" aria-hidden="true">
-          {[top, top / 2, 0].map((t) => (
-            <span key={t}>{tickLabel(t, top)}</span>
-          ))}
+      {top > 0 && (
+        <div className="month-chart">
+          <div className="month-axis" aria-hidden="true">
+            {[top, top / 2, 0].map((t) => (
+              <span key={t}>{tickLabel(t, top)}</span>
+            ))}
+          </div>
+          <ul className="month-plot" aria-label="Revenue in each of the last 6 months">
+            {months.map((m, i) => (
+              <li
+                key={m.month}
+                tabIndex={0}
+                aria-label={`${monthName(m.month, "long")}: ${formatMoney(m.amount)}`}
+                className={active === i ? "month-col active" : "month-col"}
+                onPointerEnter={() => setActive(i)}
+                onPointerLeave={() => setActive(null)}
+                onFocus={() => setActive(i)}
+                onBlur={() => setActive(null)}
+              >
+                <div className="month-bar-area">
+                  {m.amount > 0 && <div className="month-bar" style={{ height: `${(m.amount / top) * 100}%` }} />}
+                  {/* The column's aria-label already says this, so screen readers skip the visual tip. */}
+                  {active === i ? (
+                    <div className={`chart-tip ${edge(i)}`} aria-hidden="true" style={{ bottom: `${(m.amount / top) * 100}%` }}>
+                      <strong>{formatMoney(m.amount)}</strong>
+                      <span>{monthName(m.month, "long")}</span>
+                    </div>
+                  ) : (
+                    i === last && (
+                      <span className="month-cap end" aria-hidden="true" style={{ bottom: `${(m.amount / top) * 100}%` }}>
+                        {formatMoney(m.amount)}
+                      </span>
+                    )
+                  )}
+                </div>
+                <span className="month-label">{monthName(m.month, "short")}</span>
+              </li>
+            ))}
+          </ul>
         </div>
-        <ul className="month-plot" aria-label="Revenue in each of the last 6 months">
-          {months.map((m, i) => (
-            <li
-              key={m.month}
-              tabIndex={0}
-              aria-label={`${monthName(m.month, "long")}: ${formatMoney(m.amount)}`}
-              className={active === i ? "month-col active" : "month-col"}
-              onPointerEnter={() => setActive(i)}
-              onPointerLeave={() => setActive(null)}
-              onFocus={() => setActive(i)}
-              onBlur={() => setActive(null)}
-            >
-              <div className="month-bar-area">
-                {m.amount > 0 && <div className="month-bar" style={{ height: `${(m.amount / top) * 100}%` }} />}
-                {/* The column's aria-label already says this, so screen readers skip the visual tip. */}
-                {active === i ? (
-                  <div className={`chart-tip ${edge(i)}`} aria-hidden="true" style={{ bottom: `${(m.amount / top) * 100}%` }}>
-                    <strong>{formatMoney(m.amount)}</strong>
-                    <span>{monthName(m.month, "long")}</span>
-                  </div>
-                ) : (
-                  i === last && (
-                    <span className="month-cap end" aria-hidden="true" style={{ bottom: `${(m.amount / top) * 100}%` }}>
-                      {formatMoney(m.amount)}
-                    </span>
-                  )
-                )}
-              </div>
-              <span className="month-label">{monthName(m.month, "short")}</span>
-            </li>
-          ))}
-        </ul>
-      </div>
+      )}
       <details className="chart-table">
-        <summary>Show as a table</summary>
+        <summary>Show as a table, with expenses and net income</summary>
         <table>
           <thead>
             <tr>
               <th>Month</th>
               <th>Revenue</th>
+              <th>Expenses</th>
+              <th>Net</th>
             </tr>
           </thead>
           <tbody>
@@ -89,6 +94,8 @@ function MonthChart({ months }: { months: RevenueStats["months"] }) {
               <tr key={m.month}>
                 <td>{monthName(m.month, "long")}</td>
                 <td>{formatMoney(m.amount)}</td>
+                <td>{formatMoney(m.expenses)}</td>
+                <td>{formatMoney(m.net)}</td>
               </tr>
             ))}
           </tbody>
@@ -98,35 +105,27 @@ function MonthChart({ months }: { months: RevenueStats["months"] }) {
   )
 }
 
-// The last 30 days by method: a name, a bar and the amount on each row, bars on one scale.
+// The last 30 days by method.
 function MethodBars({ methods }: { methods: RevenueStats["by_method"] }) {
-  const top = Math.max(...methods.map((m) => m.amount))
-  if (top === 0) return <p className="empty">No payments in the last 30 days.</p>
+  if (methods.every((m) => m.amount === 0)) return <p className="empty">No payments in the last 30 days.</p>
   return (
-    <ul className="bar-list">
-      {methods.map((m) => (
-        <li key={m.method}>
-          <span className="bar-name">
-            {methodLabel(m.method)}
-            <span className="hint">
-              {m.count} payment{m.count === 1 ? "" : "s"}
-            </span>
-          </span>
-          <span className="bar-track" aria-hidden="true">
-            {m.amount > 0 && <span className="bar-fill" style={{ width: `${(m.amount / top) * 100}%` }} />}
-          </span>
-          <span className="bar-value">{formatMoney(m.amount)}</span>
-        </li>
-      ))}
-    </ul>
+    <BarList
+      bars={methods.map((m) => ({
+        key: m.method,
+        name: methodLabel(m.method),
+        note: `${m.count} payment${m.count === 1 ? "" : "s"}`,
+        value: m.amount,
+        label: formatMoney(m.amount),
+      }))}
+    />
   )
 }
 
-// Admins only: money taken, from the same payments (and the same UTC days) as the Payments page.
+// Admins only: money taken and spent, from the same payments and expenses (and the same UTC days) as their pages.
 export default function RevenueCard({ revenue }: { revenue: RevenueStats }) {
   return (
     <section className="card" aria-labelledby="stats-revenue">
-      <h2 id="stats-revenue">Revenue</h2>
+      <h2 id="stats-revenue">Revenue and net income</h2>
       <dl className="stats">
         <div className="stat">
           <dt>Today</dt>
@@ -135,6 +134,16 @@ export default function RevenueCard({ revenue }: { revenue: RevenueStats }) {
         <div className="stat">
           <dt>This month</dt>
           <dd>{formatMoney(revenue.this_month)}</dd>
+        </div>
+        <div className="stat">
+          <dt>Expenses this month</dt>
+          <dd>
+            <a href="#/expenses">{formatMoney(revenue.expenses_this_month)}</a>
+          </dd>
+        </div>
+        <div className={revenue.net_this_month < 0 ? "stat alert" : "stat"}>
+          <dt>Net this month</dt>
+          <dd>{formatMoney(revenue.net_this_month)}</dd>
         </div>
         <div className="stat">
           <dt>Last 30 days</dt>
@@ -147,7 +156,7 @@ export default function RevenueCard({ revenue }: { revenue: RevenueStats }) {
           <MethodBars methods={revenue.by_method} />
         </div>
         <div className="stack">
-          <h3>Last 6 months (৳)</h3>
+          <h3>Revenue, last 6 months (৳)</h3>
           <MonthChart months={revenue.months} />
         </div>
       </div>

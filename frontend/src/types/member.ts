@@ -1,7 +1,9 @@
 // Member types matching the FastAPI schemas (TDD 5.3). A member is a user whose account has a membership.
+import type { PaymentMethod } from "./payment"
 import type { Profile } from "./profile"
 
-export type Plan = "monthly" | "quarterly" | "yearly"
+/** A plan's code, such as "monthly". Its name and price come from the plan list (context/PlansContext.tsx). */
+export type Plan = string
 export type MemberStatus = "active" | "expired" | "frozen"
 /** A member list filter: a status, or active memberships ending today or within the next 7 days. */
 export type MemberFilter = MemberStatus | "expiring_soon"
@@ -16,6 +18,9 @@ export interface Member extends Profile {
   joined_on: string
   expires_on: string
   is_frozen: boolean
+  /** The personal trainer, if the member has one. */
+  trainer_id: number | null
+  trainer_name: string | null
   notes: string | null
 }
 
@@ -31,12 +36,16 @@ export interface MemberCreate {
   email: string
   phone: string | null
   plan: Plan
-  expires_on: string
+  /** null: the membership runs for the plan's days. */
+  expires_on: string | null
+  trainer_id: number | null
   notes: string | null
+  /** Set when they pay now: the plan's price is recorded in the same step. */
+  payment_method: PaymentMethod | null
 }
 
 /** PATCH body: only the fields sent change. Staff edit the contact and safety details here too. */
-export type MemberUpdate = Partial<Pick<Member, "name" | "plan" | "expires_on" | "is_frozen" | "notes"> & Profile>
+export type MemberUpdate = Partial<Pick<Member, "name" | "plan" | "expires_on" | "is_frozen" | "trainer_id" | "notes"> & Profile>
 
 export interface MemberBulkDeleteResult {
   deleted: number

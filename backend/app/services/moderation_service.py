@@ -1,5 +1,5 @@
-# Content moderation (final spec 2.3, SRS 3.7k): admins find, export and delete anyone's workouts and training
-# groups. This is the only way past the privacy of personal workouts (FR-90), and it needs content:moderate.
+# Content moderation (final spec 2.3, SRS 3.7k): admins find, export and delete any training group and any workout,
+# in groups they are not in too (it needs content:moderate).
 # Admins cannot edit someone else's content here, and a delete is final (no soft delete). Every delete is written to
 # the activity log, naming the owner as the account affected.
 from datetime import timedelta
@@ -37,6 +37,7 @@ WORKOUTS_CSV_HEADER = [
     "group_id",
     "group",
     "assigned_to",
+    "completed_at_utc",
     "created_at_utc",
     "updated_at_utc",
 ]
@@ -52,10 +53,6 @@ def _workout_conditions(f: ModerationWorkoutFilter) -> list:
         conditions.append(col(Workout.owner_id) == f.owner_id)
     if f.group_id:
         conditions.append(col(Workout.group_id) == f.group_id)
-    if f.kind == "personal":
-        conditions.append(col(Workout.group_id).is_(None))
-    elif f.kind == "group":
-        conditions.append(col(Workout.group_id).is_not(None))
     if f.date_from:
         conditions.append(col(Workout.workout_date) >= f.date_from)
     if f.date_to:
@@ -91,6 +88,7 @@ def _workout_read(w: Workout, owner_name, owner_email, group_name, assignee_name
         "owner_email": owner_email,
         "assigned_to": w.assigned_to,
         "assigned_to_name": assignee_name,
+        "completed_at": w.completed_at,
         "created_at": w.created_at,
         "updated_at": w.updated_at,
     }
@@ -125,6 +123,7 @@ def export_workouts_csv(session: Session, f: ModerationWorkoutFilter, admin: Use
                 w.group_id,
                 group_name,
                 assignee_name,
+                utc_text(w.completed_at),
                 utc_text(w.created_at),
                 utc_text(w.updated_at),
             ]
@@ -148,7 +147,7 @@ def delete_workouts(session: Session, admin: User, ids: list[int], client: Clien
         .where(col(Workout.id).in_(list(dict.fromkeys(ids))))
     ).all()
     for workout, owner, group_name in rows:
-        where = f"in group {group_name}" if group_name else "personal"
+        where = f"in group {group_name}" if group_name else "in no group"
         activity_service.record(
             session,
             ActivityEvent.WORKOUT_DELETE,

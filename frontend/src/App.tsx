@@ -4,26 +4,48 @@ import AppLayout from "./layouts/AppLayout"
 import AccountPage from "./pages/AccountPage"
 import ActivityPage from "./pages/ActivityPage"
 import AnnouncementsPage from "./pages/AnnouncementsPage"
+import AttendancePage from "./pages/AttendancePage"
 import ChoosePasswordPage from "./pages/ChoosePasswordPage"
 import ClassesPage from "./pages/ClassesPage"
 import DashboardPage from "./pages/DashboardPage"
-import GroupsPage from "./pages/GroupsPage"
-import HomePage from "./pages/HomePage"
+import EquipmentPage from "./pages/EquipmentPage"
+import ExpensesPage from "./pages/ExpensesPage"
 import LoginPage from "./pages/LoginPage"
+import MembersPage from "./pages/MembersPage"
 import MembershipPage from "./pages/MembershipPage"
-import ModerationPage from "./pages/ModerationPage"
 import MyClassesPage from "./pages/MyClassesPage"
-import OverviewPage from "./pages/OverviewPage"
+import MyClientsPage from "./pages/MyClientsPage"
 import PaymentsPage from "./pages/PaymentsPage"
 import PlansPage from "./pages/PlansPage"
 import SecurityPage from "./pages/SecurityPage"
 import SignupPage from "./pages/SignupPage"
 import TimetablePage from "./pages/TimetablePage"
+import TrainingPage from "./pages/TrainingPage"
 import UsersPage from "./pages/UsersPage"
-import WorkoutsPage from "./pages/WorkoutsPage"
 import { type Page, type ProtectedPage, canOpen, homePage } from "./utils/auth"
 
-const PAGES: Page[] = ["login", "signup", "dashboard", "overview", "members", "classes", "payments", "announcements", "membership", "timetable", "my-classes", "plans", "account", "users", "activity", "security", "workouts", "groups", "moderation"]
+const PAGES: Page[] = [
+  "login",
+  "signup",
+  "dashboard",
+  "members",
+  "attendance",
+  "payments",
+  "classes",
+  "training",
+  "equipment",
+  "announcements",
+  "plans",
+  "expenses",
+  "users",
+  "activity",
+  "security",
+  "my-classes",
+  "clients",
+  "membership",
+  "timetable",
+  "account",
+]
 const isProtected = (page: Page | null): page is ProtectedPage => page !== null && page !== "login" && page !== "signup"
 
 /** The page part of the URL hash: "members" for #/members?filter=expiring_soon. */
@@ -76,22 +98,23 @@ export default function App() {
       {page === "login" && <LoginPage />}
       {page === "signup" && <SignupPage />}
       {page === "dashboard" && <DashboardPage />}
-      {page === "overview" && <OverviewPage />}
-      {page === "members" && <HomePage />}
-      {page === "classes" && <ClassesPage />}
+      {page === "members" && <MembersPage />}
+      {page === "attendance" && <AttendancePage />}
       {page === "payments" && <PaymentsPage />}
+      {page === "classes" && <ClassesPage />}
+      {page === "training" && <TrainingPage />}
+      {page === "equipment" && <EquipmentPage />}
       {page === "announcements" && <AnnouncementsPage />}
-      {page === "membership" && <MembershipPage />}
-      {page === "timetable" && <TimetablePage />}
-      {page === "my-classes" && <MyClassesPage />}
       {page === "plans" && <PlansPage />}
-      {page === "account" && <AccountPage />}
+      {page === "expenses" && <ExpensesPage />}
       {page === "users" && <UsersPage />}
       {page === "activity" && <ActivityPage />}
       {page === "security" && <SecurityPage />}
-      {page === "workouts" && <WorkoutsPage />}
-      {page === "groups" && <GroupsPage />}
-      {page === "moderation" && <ModerationPage />}
+      {page === "my-classes" && <MyClassesPage />}
+      {page === "clients" && <MyClientsPage />}
+      {page === "membership" && <MembershipPage />}
+      {page === "timetable" && <TimetablePage />}
+      {page === "account" && <AccountPage />}
     </AppLayout>
   )
 }

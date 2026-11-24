@@ -4,7 +4,6 @@ import { listMembers } from "../../services/memberService"
 import AddMemberForm from "../../components/AddMemberForm"
 import MemberDetail from "../../components/MemberDetail"
 import MemberList, { FILTERS, type Filter } from "../../components/MemberList"
-import TodayCheckIns from "../../components/TodayCheckIns"
 import WaitingList from "../../components/WaitingList"
 import type { Member } from "../../types/member"
 import { errorText, hashParams, membersLink } from "../../utils/member"
@@ -21,9 +20,9 @@ function memberFromHash(): number | null {
   return Number.isInteger(id) && id > 0 ? id : null
 }
 
-// The members page: today's check-ins, the searchable member list, people waiting for a membership and the add
-// form on the left; details of the selected member on the right.
-export default function HomePage() {
+// The members page: the searchable member list, people waiting for a membership and the add form on the left; details
+// of the selected member on the right.
+export default function MembersPage() {
   const [members, setMembers] = useState<Member[]>([])
   const [filter, setFilter] = useState<Filter>(filterFromHash)
   const [search, setSearch] = useState("")
@@ -37,11 +36,9 @@ export default function HomePage() {
   const [error, setError] = useState("")
   // Bumped to reload the first page after a change.
   const [reloadKey, setReloadKey] = useState(0)
-  // Bumped after a check-in, to reload the Checked in today card.
-  const [checkInKey, setCheckInKey] = useState(0)
   // The account whose email Start membership put in the Add member form; key makes a second click on the same one count.
   const [start, setStart] = useState<{ email: string; key: number } | null>(null)
-  // #/members?show=waiting (from the overview) opens with the waiting list in view.
+  // #/members?show=waiting (from the Dashboard) opens with the waiting list in view.
   const [showWaiting] = useState(() => hashParams().get("show") === "waiting")
 
   const status = filter === "all" ? null : filter
@@ -122,8 +119,6 @@ export default function HomePage() {
   return (
     <div className="layout">
       <div className="column">
-        {/* Also reloads after deletes, which remove a member's check-ins. */}
-        <TodayCheckIns refreshKey={checkInKey + reloadKey} onSelect={setSelectedId} />
         <MemberList
           members={members}
           filter={filter}
@@ -151,7 +146,6 @@ export default function HomePage() {
           memberId={selectedId}
           onChanged={() => setReloadKey((k) => k + 1)}
           onDeleted={handleDeleted}
-          onCheckedIn={() => setCheckInKey((k) => k + 1)}
         />
       </aside>
     </div>

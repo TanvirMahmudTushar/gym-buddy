@@ -1,13 +1,5 @@
 // Small display helpers for members.
-import type { Member, MemberStatus, Plan } from "../types/member"
-
-export const PLANS: { value: Plan; label: string }[] = [
-  { value: "monthly", label: "Monthly" },
-  { value: "quarterly", label: "Quarterly" },
-  { value: "yearly", label: "Yearly" },
-]
-
-export const planLabel = (plan: Plan) => PLANS.find((p) => p.value === plan)?.label ?? plan
+import type { Member, MemberStatus } from "../types/member"
 
 /** The options after ? in the address: #/members?filter=expiring_soon&member=5. */
 export const hashParams = () => new URLSearchParams(window.location.hash.split("?")[1] ?? "")
@@ -25,7 +17,7 @@ export function membersLink(options: { filter?: string; member?: number | null }
 export const todayUtc = () => new Date().toISOString().slice(0, 10)
 
 /** Frozen wins over expired, matching the backend's status filter. */
-export function memberStatus(member: Member): MemberStatus {
+export function memberStatus(member: Pick<Member, "is_frozen" | "expires_on">): MemberStatus {
   if (member.is_frozen) return "frozen"
   return member.expires_on < todayUtc() ? "expired" : "active"
 }

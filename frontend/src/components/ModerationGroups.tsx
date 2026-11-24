@@ -60,7 +60,7 @@ export default function ModerationGroups({ ownerId, onPickOwner }: Props) {
   return (
     <section className="card" aria-labelledby="mod-groups-heading">
       <div className="toolbar">
-        <h2 id="mod-groups-heading">Training groups</h2>
+        <h2 id="mod-groups-heading">All training groups</h2>
         <button onClick={exportCsv} disabled={exporting || list.loading || list.total === 0}>
           {exporting ? "Exporting…" : "Export CSV"}
         </button>

@@ -1,6 +1,7 @@
 import { type KeyboardEvent } from "react"
+import { usePlans } from "../context/PlansContext"
 import type { Member, MemberFilter } from "../types/member"
-import { expiresSoonNote, formatDate, memberStatus, planLabel } from "../utils/member"
+import { expiresSoonNote, formatDate, memberStatus } from "../utils/member"
 import BulkDeleteBar from "./BulkDeleteBar"
 import StatusPill from "./StatusPill"
 
@@ -43,6 +44,7 @@ interface Props {
 }
 
 export default function MemberList(props: Props) {
+  const { planLabel } = usePlans()
   const { members, filter, selectedId, onSelect, loading, error, total, checkedIds, onCheckedChange } = props
 
   const allChecked = members.length > 0 && checkedIds.length === members.length

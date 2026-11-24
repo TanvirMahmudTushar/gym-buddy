@@ -1,8 +1,9 @@
 import { type FormEvent, Fragment, useEffect, useState } from "react"
 import { useAuth } from "../../context/AuthContext"
+import { usePlans } from "../../context/PlansContext"
 import { exportPaymentsCsv, listPayments, voidPayment } from "../../services/paymentService"
 import type { Payment, PaymentFilters, PaymentMethod } from "../../types/payment"
-import { errorText, formatDate, formatDateTime, hashParams, membersLink, planLabel, todayUtc } from "../../utils/member"
+import { errorText, formatDate, formatDateTime, hashParams, membersLink, todayUtc } from "../../utils/member"
 import { METHODS, formatMoney, methodLabel, saveFile } from "../../utils/payment"
 import { can } from "../../utils/auth"
 
@@ -19,6 +20,7 @@ function filtersFromHash(): PaymentFilters {
 // Gym Managers and Admins: every payment, newest first, with filters and the total of what is shown.
 // Admins can also void a mistaken payment and export the list as CSV.
 export default function PaymentsPage() {
+  const { planLabel } = usePlans()
   const { user } = useAuth()
   // The Void column and Export CSV follow the same permissions the API checks.
   const canVoid = can(user, "payments:void")

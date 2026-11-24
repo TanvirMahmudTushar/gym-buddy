@@ -1,9 +1,13 @@
 import { type FormEvent, useEffect, useRef, useState } from "react"
+import { usePlans } from "../context/PlansContext"
 import { createMember } from "../services/memberService"
-import type { Member, Plan } from "../types/member"
-import { PLANS, errorText, formatDate, todayUtc } from "../utils/member"
+import type { Member } from "../types/member"
+import type { PaymentMethod } from "../types/payment"
+import { errorText, formatDate, todayUtc } from "../utils/member"
+import { METHODS, addDays, formatMoney } from "../utils/payment"
+import TrainerSelect from "./TrainerSelect"
 
-const EMPTY = { email: "", phone: "", plan: "monthly" as Plan, expires_on: "", notes: "" }
+const EMPTY = { email: "", phone: "", plan: "", expires_on: "", trainer_id: "", payment_method: "" as PaymentMethod | "", notes: "" }
 
 // Members are users: the person signs up first, then staff start a membership on that account by its email.
 interface Props {
@@ -13,7 +17,10 @@ interface Props {
 }
 
 export default function AddMemberForm({ onCreated, start }: Props) {
+  const { offered } = usePlans()
   const [form, setForm] = useState(EMPTY)
+  // Until one is picked, the first (cheapest) plan.
+  const plan = offered.find((p) => p.plan === form.plan) ?? offered[0]
   const section = useRef<HTMLElement>(null)
   const planField = useRef<HTMLSelectElement>(null)
 
@@ -25,7 +32,7 @@ export default function AddMemberForm({ onCreated, start }: Props) {
     planField.current?.focus({ preventScroll: true })
   }, [start])
 
-  const [fieldErrors, setFieldErrors] = useState<{ email?: string; expires_on?: string }>({})
+  const [fieldErrors, setFieldErrors] = useState<{ email?: string; plan?: string; expires_on?: string }>({})
   const [error, setError] = useState("")
   const [saving, setSaving] = useState(false)
 
@@ -36,20 +43,22 @@ export default function AddMemberForm({ onCreated, start }: Props) {
     const email = form.email.trim()
     if (!email) errors.email = "Enter the email the person signed up with."
     else if (!/^\S+@\S+\.\S+$/.test(email)) errors.email = "Enter a valid email address."
-    if (!form.expires_on) errors.expires_on = "Pick an expiry date."
-    else if (form.expires_on < today) errors.expires_on = `Expiry can't be before the joined date (${formatDate(today)}).`
+    if (!plan) errors.plan = "Add a plan on the Plans page first."
+    if (form.expires_on && form.expires_on < today) errors.expires_on = `Expiry can't be before the joined date (${formatDate(today)}).`
     setFieldErrors(errors)
     setError("")
-    if (Object.keys(errors).length) return
+    if (Object.keys(errors).length || !plan) return
 
     setSaving(true)
     try {
       const member = await createMember({
         email,
         phone: form.phone.trim() || null,
-        plan: form.plan,
-        expires_on: form.expires_on,
+        plan: plan.plan,
+        expires_on: form.expires_on || null,
+        trainer_id: form.trainer_id ? Number(form.trainer_id) : null,
         notes: form.notes.trim() || null,
+        payment_method: form.payment_method || null,
       })
       setForm(EMPTY)
       onCreated(member)
@@ -90,16 +99,38 @@ export default function AddMemberForm({ onCreated, start }: Props) {
         </div>
         <div className="field">
           <label htmlFor="add-plan">Plan</label>
-          <select id="add-plan" ref={planField} value={form.plan} onChange={(e) => setForm({ ...form, plan: e.target.value as Plan })}>
-            {PLANS.map((p) => (
-              <option key={p.value} value={p.value}>
-                {p.label}
+          <select id="add-plan" ref={planField} value={plan?.plan ?? ""} onChange={(e) => setForm({ ...form, plan: e.target.value })}>
+            {offered.map((p) => (
+              <option key={p.plan} value={p.plan}>
+                {p.name} · {formatMoney(p.price)} · {p.duration_days} days
+              </option>
+            ))}
+          </select>
+          {fieldErrors.plan && <span className="field-error">{fieldErrors.plan}</span>}
+        </div>
+        <div className="field">
+          <label htmlFor="add-payment">First payment</label>
+          <select
+            id="add-payment"
+            value={form.payment_method}
+            onChange={(e) => setForm({ ...form, payment_method: e.target.value as PaymentMethod | "" })}
+          >
+            <option value="">Not paid yet</option>
+            {METHODS.map((m) => (
+              <option key={m.value} value={m.value}>
+                {plan ? `${formatMoney(plan.price)} by ${m.label.toLowerCase()}` : m.label}
               </option>
             ))}
           </select>
         </div>
+        <TrainerSelect
+          id="add-trainer"
+          label="Personal trainer (optional)"
+          value={form.trainer_id}
+          onChange={(trainer_id) => setForm((prev) => ({ ...prev, trainer_id }))}
+        />
         <div className="field">
-          <label htmlFor="add-expires">Expires on</label>
+          <label htmlFor="add-expires">Expires on (optional)</label>
           <input
             id="add-expires"
             type="date"
@@ -107,6 +138,9 @@ export default function AddMemberForm({ onCreated, start }: Props) {
             min={todayUtc()}
             onChange={(e) => setForm({ ...form, expires_on: e.target.value })}
           />
+          {!form.expires_on && plan && (
+            <span className="hint">Left empty: {formatDate(addDays(todayUtc(), plan.duration_days))}, the plan's length.</span>
+          )}
           {fieldErrors.expires_on && <span className="field-error">{fieldErrors.expires_on}</span>}
         </div>
         <div className="field wide">

@@ -14,6 +14,11 @@ export type Permission =
   | "payments:export"
   | "classes:manage"
   | "classes:teach"
+  | "clients:read"
+  | "groups:create"
+  | "equipment:read"
+  | "equipment:manage"
+  | "expenses:manage"
   | "overview:read"
   | "announcements:manage"
   | "dashboard:read"
@@ -41,6 +46,8 @@ export interface User {
 /** The logged-in user (GET /users/me, login, refresh): their account plus what their role may do. */
 export interface Me extends User {
   permissions: Permission[]
+  /** The membership plan, or null while this account has no membership. */
+  plan: Plan | null
 }
 
 /** Log in and refresh. The refresh token is not here: it stays in an HttpOnly cookie the page cannot read. */
@@ -105,10 +112,12 @@ export interface AdminUserPage {
 export interface AdminStats {
   members: { total: number; active: number; expired: number; frozen: number; new_last_7_days: number; expiring_soon: number }
   users: { total: number; users: number; trainers: number; gym_managers: number; admins: number; banned: number; new_last_7_days: number }
-  check_ins: { today: number; last_7_days: number }
+  /** by_day: each of the last 7 UTC days, oldest first. */
+  check_ins: { today: number; last_7_days: number; inside_now: number; by_day: { day: string; count: number }[] }
   classes: { total: number; upcoming: number }
-  workouts: { total: number; last_7_days: number }
+  workouts: { total: number; last_7_days: number; completed: number }
   groups: { total: number }
+  equipment: { total: number; needs_attention: number; service_due: number }
 }
 
 /** The admin user list's filters; the CSV export uses the same ones. Empty means any. */
@@ -145,13 +154,20 @@ export interface AdminSession {
   user_agent: string | null
 }
 
-/** GET /admin/users/{id}: the account and membership, logins, workout counts (not their content), groups, activity. */
+/** GET /admin/users/{id}: the account and membership, logins, how much it has on record, groups, activity. */
 export interface AdminUserDetail extends AdminUser {
   joined_on: string | null
   /** Set while too many wrong passwords block the account's logins. */
   locked_until: string | null
   sessions: AdminSession[]
-  workouts: { personal: number; in_groups: number; assigned: number }
+  records: {
+    visits: number
+    bookings: number
+    payments: number
+    workouts_added: number
+    workouts_assigned: number
+    workouts_completed: number
+  }
   groups: { id: number; name: string; is_owner: boolean; member_count: number }[]
   recent_activity: ActivityEntry[]
 }

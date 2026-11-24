@@ -7,7 +7,7 @@ import { saveFile } from "../utils/payment"
 import ContentDeleteBar from "./ContentDeleteBar"
 
 type Draft = Omit<WorkoutFilters, "owner_id">
-const NO_FILTERS: Draft = { kind: "", date_from: "", date_to: "", q: "" }
+const NO_FILTERS: Draft = { date_from: "", date_to: "", q: "" }
 
 interface Props {
   /** Only this account's workouts (set from a user's details, or by clicking an owner). */
@@ -15,7 +15,7 @@ interface Props {
   onPickOwner: (id: number, label: string) => void
 }
 
-// Admins: every workout, personal or in a group, with filters, select-many delete and a CSV of the same rows.
+// Admins: every workout in every group, with filters, select-many delete and a CSV of the same rows.
 export default function ModerationWorkouts({ ownerId, onPickOwner }: Props) {
   const [draft, setDraft] = useState<Draft>(NO_FILTERS)
   const [applied, setApplied] = useState<Draft>(NO_FILTERS)
@@ -60,7 +60,7 @@ export default function ModerationWorkouts({ ownerId, onPickOwner }: Props) {
   return (
     <section className="card" aria-labelledby="mod-workouts-heading">
       <div className="toolbar">
-        <h2 id="mod-workouts-heading">Workouts</h2>
+        <h2 id="mod-workouts-heading">All workouts</h2>
         <button onClick={exportCsv} disabled={exporting || list.loading || list.total === 0}>
           {exporting ? "Exporting…" : "Export CSV"}
         </button>
@@ -76,14 +76,6 @@ export default function ModerationWorkouts({ ownerId, onPickOwner }: Props) {
             placeholder="Title, notes, owner"
             autoComplete="off"
           />
-        </div>
-        <div className="field">
-          <label htmlFor="mod-w-kind">Kind</label>
-          <select id="mod-w-kind" value={draft.kind} onChange={(e) => setDraft({ ...draft, kind: e.target.value as Draft["kind"] })}>
-            <option value="">Personal and group</option>
-            <option value="personal">Personal</option>
-            <option value="group">In a group</option>
-          </select>
         </div>
         <div className="field">
           <label htmlFor="mod-w-from">From</label>
@@ -133,7 +125,7 @@ export default function ModerationWorkouts({ ownerId, onPickOwner }: Props) {
         <ContentDeleteBar
           ids={checkedIds}
           noun="workout"
-          warning="Personal ones disappear from their owner's list, group ones from the group."
+          warning="They disappear from their groups."
           onDelete={async (ids) => (await deleteWorkouts(ids)).deleted}
           onDone={(message) => {
             setNotice(message)
@@ -195,8 +187,10 @@ export default function ModerationWorkouts({ ownerId, onPickOwner }: Props) {
                     )}
                     {w.owner_email && <div className="hint">{w.owner_email}</div>}
                   </td>
-                  <td>{w.group_name ?? <span className="hint">Personal</span>}</td>
-                  <td>{w.assigned_to_name ?? "—"}</td>
+                  <td>{w.group_name ?? "—"}</td>
+                  <td>
+                    {w.assigned_to_name ?? "—"} {w.completed_at && <span className="pill active">Done</span>}
+                  </td>
                 </tr>
               ))}
             </tbody>
