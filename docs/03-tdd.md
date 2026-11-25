@@ -1050,10 +1050,10 @@ flowchart LR
 
 - Hash with Argon2 (`argon2-cffi`) after mixing in the pepper: `argon2(HMAC-SHA256(PASSWORD_PEPPER, password))`, stored as `peppered$<argon2 hash>`. Verify on login; never log or return the hash.
 - A hash without the `peppered$` prefix was made before the pepper: it is verified as it was made, and `auth_service.authenticate()` replaces it with a peppered hash on that successful login (`security.password_needs_rehash()`). Each path runs exactly one Argon2 check, so timing does not show which kind of hash an account has.
-- Unknown email and wrong password both return `401 "Invalid email or password"`, so emails cannot be discovered.
+- Unknown email and wrong password both return `401 "Invalid email or password"`, and both are blocked with `429` after 5 in a row, so emails cannot be discovered.
 - Wrong password, on login or as the current password of a password change (`auth_service._count_wrong_password()`): `failed_login_count += 1`. At 5, set `locked_until = now + 15 min` and reset the count. While `locked_until > now`, both return `429`. A successful login or password change resets the count.
 - Stored in the database (not in memory) because serverless functions do not share memory.
-- **Built so far:** `auth_service.authenticate()` refuses a locked account before checking the password. The `+ 1` is an `UPDATE ... SET failed_login_count = failed_login_count + 1`, so parallel wrong passwords all count; the 5th answers `429` straight away. The `429` carries `Retry-After` (seconds) and the message "Too many failed logins. Try again in N minutes." Attempts while locked do not count, and the lockout only blocks new logins and password changes: tokens already issued keep working. Unknown emails are never locked (there is no row to count on), so they always get the same `401`; after 5 tries the `429` does show that an account exists, an accepted trade-off of locking per account.
+- **Built so far:** `auth_service.authenticate()` refuses a locked account before checking the password. The `+ 1` is an `UPDATE ... SET failed_login_count = failed_login_count + 1`, so parallel wrong passwords all count; the 5th answers `429` straight away. The `429` carries `Retry-After` (seconds) and the message "Too many failed logins. Try again in N minutes." Attempts while locked do not count, and the lockout only blocks new logins and password changes: tokens already issued keep working. An email with no account has no row to count on, so `_unknown_email_lock()` counts its `No account has this email` rows in the activity log: 5 within 15 minutes answer `429` (and record `account_locked` with the typed email), the block ends 15 minutes after the 5th, and attempts made while blocked are logged as `Account is locked`, which is not counted, so they do not extend it. The `429` therefore does not show whether an account exists.
 
 ### 10.3 Permission dependencies
 
@@ -1246,7 +1246,7 @@ stats = AdminStats(
 | Tokens | Section 10.1: 5-minute access token checked against its session on every request; rotating refresh token with reuse detection; `JWT_SECRET` and `PASSWORD_PEPPER` only in env vars, required on Vercel |
 | Cookies | `HttpOnly`, `Secure`, `SameSite=Strict`, path-limited |
 | CORS | Frontend and API share the Vercel origin (locally Vite proxies `/api`), so the app needs no CORS. `AllowlistCORSMiddleware` (Starlette's `CORSMiddleware` with `allow_origins=frontend_origins()`, `allow_credentials=True`, methods `GET`/`POST`/`PUT`/`PATCH`/`DELETE`, headers `Authorization`/`Content-Type`) answers only the deployed frontend (`https://2321648gymbuddy.vercel.app`, built in, so it is allowed even when the variable is not set) and what `FRONTEND_ORIGIN` lists. A request whose `Origin` is not on the list skips the middleware entirely, so it gets no CORS headers (plain Starlette would still add `Access-Control-Allow-Credentials`), and its preflight gets the app's `405`. `*` is refused at start-up |
-| Security headers | Added for all routes in `vercel.json` (below) |
+| Security headers | Added for all routes in `vercel.json` (below); the app's pages also get a Content-Security-Policy (not `/api`, whose Swagger UI loads its scripts from a CDN) |
 | Brute force | Login lockout (section 10.2) |
 | Injection | SQLModel/SQLAlchemy parameterised queries only; the member-name filter escapes `%` and `_` |
 | CSV export | Text cells starting with `=`, `+`, `-`, `@`, tab or carriage return get a leading `'` (formula injection); UTF-8 with a byte order mark so Excel reads Bengali names correctly; admins only; both exports share `csv_export.py` and are recorded in the activity log |
@@ -1259,6 +1259,10 @@ stats = AdminStats(
   {
     "source": "/((?!api/).*)",
     "headers": [{ "key": "Access-Control-Allow-Origin", "value": "https://2321648gymbuddy.vercel.app" }]
+  },
+  {
+    "source": "/((?!api/).*)",
+    "headers": [{ "key": "Content-Security-Policy", "value": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'" }]
   },
   {
     "source": "/(.*)",
@@ -1309,7 +1313,7 @@ The first admin is promoted by hand in the Supabase table editor or SQL editor (
 
 | File | Covers |
 |---|---|
-| `test_login.py` | Right password (tokens, cookie flags), any-case email, wrong password and unknown email give the same `401`, the 5th wrong password answers `429` with `Retry-After` and blocks even the right one, a right password resets the count, the failed login is logged without the password |
+| `test_login.py` | Right password (tokens, cookie flags), any-case email, wrong password and unknown email give the same `401`, the 5th wrong password answers `429` with `Retry-After` and blocks even the right one, an email with no account is blocked the same way and the block ends after 15 minutes, a right password resets the count, the failed login is logged without the password |
 | `test_tokens.py` | Missing, garbage, tampered (signature), forged (another `sub`), expired and `sid`-less tokens get `401`; `exp` is 5 minutes after `iat`; the token stops working after logout although it is still well signed; a ban answers `403` |
 | `test_refresh.py` | No cookie `204`; rotation gives a new cookie and a working token; the replaced cookie within the grace period gets a token but no cookie; after the grace period it ends the whole session for both holders; a cookie two rotations old is refused; refresh after logout or a ban is refused |
 | `test_devices.py` | Each login is a device and the one asking is marked; no token hash is sent; a refresh keeps the device; an expired refresh token is not listed; logging a device out ends its refresh and access tokens; a new login on the same browser replaces its device (also another account's, which is logged); a failed login does not |

@@ -150,6 +150,20 @@ def test_a_gym_manager_cannot_start_or_edit_a_staff_membership(admin, manager, t
         assert admin.client.patch(path, json={"notes": "Staff"}).status_code == 200
 
 
+def test_a_gym_manager_cannot_renew_a_staff_membership_with_a_payment(admin, manager, trainer):
+    admin.client.post("/api/v1/members", json={"email": trainer.email, "plan": "monthly"})
+    path = f"/api/v1/members/{trainer.id}/payments"
+    before = admin.client.get(f"/api/v1/members/{trainer.id}").json()
+    renew = manager.client.post(path, json={"amount": 14000, "method": "cash", "renew_plan": "yearly"})
+    assert renew.status_code == 403 and "admin" in renew.json()["detail"]
+    after = admin.client.get(f"/api/v1/members/{trainer.id}").json()
+    assert (after["plan"], after["expires_on"]) == (before["plan"], before["expires_on"])
+    # A payment that changes nothing on the membership is still the front desk's job, and an admin may renew.
+    assert manager.client.post(path, json={"amount": 100, "method": "cash"}).status_code == 201
+    assert admin.client.post(path, json={"amount": 14000, "method": "cash", "renew_plan": "yearly"}).status_code == 201
+    assert admin.client.get(f"/api/v1/members/{trainer.id}").json()["plan"] == "yearly"
+
+
 def test_only_an_admin_deletes_accounts(admin, manager, account):
     for key in ("rafi", "sara"):
         manager.client.post("/api/v1/members", json={"email": account(key).email, "plan": "monthly"})

@@ -17,7 +17,7 @@ from app.models import (
 )
 from app.request_info import Client
 from app.services import activity_service, member_service, plan_service
-from app.services.csv_export import describe_filters, to_csv, utc_text
+from app.services.csv_export import EXPORT_LIMIT, describe_filters, to_csv, utc_text
 
 # The staff who recorded and voided a payment: two joins on the same table, so each needs its own name.
 Recorder = aliased(User)
@@ -112,6 +112,8 @@ def record_payment(session: Session, member_id: int, data: PaymentCreate, record
     member = member_service.get_member(session, member_id)
     renewed_until = None
     if data.renew_plan:
+        # Renewing changes the membership, so it follows the same rule as editing it: a staff member's is for admins.
+        member_service.check_editable(recorded_by, member)
         days = plan_service.get_offered(session, data.renew_plan).duration_days
         # An active member renews from their current expiry, so no paid days are lost; an expired one from today.
         renewed_until = max(gym_today(), member.expires_on) + timedelta(days=days)
@@ -188,9 +190,9 @@ def void_payment(session: Session, payment_id: int, voided_by: User, reason: str
 
 
 def export_csv(session: Session, f: PaymentFilter, exported_by: User, client: Client) -> str:
-    """Every payment matching the filters as CSV, newest first (csv_export.to_csv: BOM, formula-safe cells).
+    """Every payment matching the filters as CSV, newest first, up to EXPORT_LIMIT (csv_export.to_csv: BOM, formula-safe cells).
     The download is written to the activity log."""
-    rows = session.exec(_with_names(_conditions(f))).all()
+    rows = session.exec(_with_names(_conditions(f)).limit(EXPORT_LIMIT)).all()
     text = to_csv(
         CSV_HEADER,
         (

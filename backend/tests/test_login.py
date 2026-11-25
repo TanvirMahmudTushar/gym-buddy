@@ -1,7 +1,12 @@
 # Login: the right password, a wrong one, and the lockout after 5 wrong passwords in a row (FR-13, FR-34).
-from conftest import PASSWORD
+from datetime import timedelta
 
-from app.services.auth_service import MAX_FAILED_LOGINS
+from conftest import PASSWORD
+from sqlmodel import Session, col, select, update
+
+from app.database import engine
+from app.models import ActivityLog, utc_now
+from app.services.auth_service import LOCKOUT, MAX_FAILED_LOGINS
 
 
 def test_right_password_gives_tokens_and_a_refresh_cookie(account, anon):
@@ -62,3 +67,43 @@ def test_failed_logins_are_in_the_activity_log_without_the_password(account, ano
     rows = admin.client.get("/api/v1/admin/activity", params={"event": "login_failed"}).json()["items"]
     assert len(rows) == 1 and rows[0]["actor_email"] == me.email and rows[0]["details"] == "Wrong password"
     assert "secret-guess-123" not in str(rows)
+
+
+def _try(anon, email: str, password: str = "wrong-password"):
+    return anon.post("/api/v1/auth/login", json={"email": email, "password": password})
+
+
+def test_an_email_with_no_account_is_locked_like_an_account(account, anon):
+    """Otherwise only a real account would answer 429, and the answer would tell a stranger which emails exist."""
+    ghost, real = "ghost@test.example", account("real").email
+    # Wrong passwords on a real account, from another client, do not count towards the unknown email.
+    for _ in range(MAX_FAILED_LOGINS - 1):
+        _try(anon, real)
+    codes = [_try(anon, ghost).status_code for _ in range(MAX_FAILED_LOGINS)]
+    assert codes == [401] * (MAX_FAILED_LOGINS - 1) + [429]
+
+    # The same answer as a locked account gives: 429 with Retry-After, whatever the password.
+    locked = _try(anon, ghost, PASSWORD)
+    assert locked.status_code == 429 and "Try again in" in locked.json()["detail"]
+    assert 0 < int(locked.headers["retry-after"]) <= LOCKOUT.total_seconds()
+    # Another unknown email is not affected.
+    assert _try(anon, "other-ghost@test.example").status_code == 401
+
+
+def test_the_block_on_an_unknown_email_ends_after_the_lockout_and_attempts_do_not_extend_it(account, anon):
+    admin = account("ada", role="admin")
+    ghost = "ghost@test.example"
+    for _ in range(MAX_FAILED_LOGINS):
+        _try(anon, ghost)
+    for _ in range(3):  # Made while blocked: must not push the end further out.
+        assert _try(anon, ghost).status_code == 429
+    # One lockout is recorded, not one per refused attempt.
+    rows = admin.client.get("/api/v1/admin/activity", params={"event": "account_locked"}).json()["items"]
+    assert [r["target_email"] for r in rows] == [ghost]
+
+    # 15 minutes later the five wrong attempts have aged out.
+    with Session(engine) as session:
+        session.exec(update(ActivityLog).where(col(ActivityLog.actor_email) == ghost).values(created_at=utc_now() - LOCKOUT - timedelta(seconds=1)))
+        session.commit()
+        assert session.exec(select(ActivityLog).where(col(ActivityLog.actor_email) == ghost)).first() is not None
+    assert _try(anon, ghost).status_code == 401

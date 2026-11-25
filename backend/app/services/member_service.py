@@ -93,7 +93,7 @@ def start_membership(session: Session, data: MemberCreate, recorded_by: User) ->
         raise AccountNotFoundError(data.email)
     if user.plan is not None:
         raise AlreadyMemberError(user.id)
-    _check_editable(recorded_by, user)
+    check_editable(recorded_by, user)
     plan = plan_service.get_offered(session, data.plan)
     if data.trainer_id is not None:
         trainer_service.check_trainer(session, data.trainer_id)
@@ -184,7 +184,8 @@ def list_waiting(session: Session, offset: int, limit: int, q: str | None = None
     return list(session.exec(query.offset(offset).limit(limit)).all()), total
 
 
-def _check_editable(actor: User, account: User) -> None:
+def check_editable(actor: User, account: User) -> None:
+    """Staff accounts are for admins only: a gym manager gets StaffAccountError for one."""
     if not rbac.may_edit_account(actor, account):
         raise StaffAccountError(account.id)
 
@@ -193,7 +194,7 @@ def update_member(session: Session, member_id: int, changes: dict, actor: User) 
     """Apply only the given fields. A later expires_on renews; is_frozen true / false freezes / unfreezes.
     The contact and safety details follow the same rules as the member's own edits (profile_service)."""
     member = get_member(session, member_id)
-    _check_editable(actor, member)
+    check_editable(actor, member)
     if "expires_on" in changes and changes["expires_on"] < member.joined_on:
         raise InvalidExpiryError("expires_on must be on or after joined_on")
     profile_service.check_emergency_contact(member, changes)

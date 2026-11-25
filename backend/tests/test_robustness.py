@@ -190,3 +190,44 @@ def test_a_banned_trainer_cannot_be_picked(admin, trainer):
     assert len(admin.client.get("/api/v1/trainers").json()) == 1
     admin.client.post(f"/api/v1/admin/users/{trainer.id}/ban", json={"reason": "Test"})
     assert admin.client.get("/api/v1/trainers").json() == []
+
+
+# --- Timestamps and exports ---
+
+
+def test_every_timestamp_on_a_user_is_sent_as_utc_with_a_z():
+    """A time with no zone would be read as the browser's own time, which is wrong for everyone outside UTC. Columns
+    added to an older database later have no time zone, so the value can come back naive."""
+    naive = datetime(2026, 11, 25, 10, 30, 0)
+    user = {"id": 1, "email": "a@test.example", "name": "A", "role": "user", "must_change_password": False}
+    assert models.UserRead(**user, created_at=naive).model_dump(mode="json")["created_at"] == "2026-11-25T10:30:00Z"
+    admin_view = models.AdminUserRead(
+        **user, created_at=naive, is_banned=True, banned_at=naive, ban_reason=None, plan=None, expires_on=None, is_frozen=False
+    )
+    assert admin_view.model_dump(mode="json")["banned_at"] == "2026-11-25T10:30:00Z"
+
+
+def test_every_csv_export_is_limited_to_the_newest_rows(admin, account, monkeypatch):
+    from app.services import csv_export, expense_service, payment_service, user_service
+
+    for service in (user_service, expense_service, payment_service):
+        monkeypatch.setattr(service, "EXPORT_LIMIT", 2)
+    assert csv_export.EXPORT_LIMIT == 10_000
+
+    for key in ("rafi", "sara", "omar"):
+        member = account(key)
+        admin.client.post("/api/v1/members", json={"email": member.email, "plan": "monthly", "payment_method": "cash"})
+        admin.client.post(
+            "/api/v1/expenses", json={"category": "other", "amount": 100, "spent_on": gym_today().isoformat(), "description": key}
+        )
+
+    def data_rows(path: str) -> int:
+        response = admin.client.get(path)
+        assert response.status_code == 200
+        return len(response.text.strip().splitlines()) - 1  # without the header
+
+    assert data_rows("/api/v1/admin/users/export.csv") == 2
+    assert data_rows("/api/v1/expenses/export.csv") == 2
+    assert data_rows("/api/v1/payments/export.csv") == 2
+    # The list is not limited: only the download is.
+    assert admin.client.get("/api/v1/payments").json()["total"] == 3

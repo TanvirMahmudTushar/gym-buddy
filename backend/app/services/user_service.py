@@ -19,7 +19,7 @@ from app.services import (
     trainer_service,
     workout_service,
 )
-from app.services.csv_export import describe_filters, to_csv, utc_text
+from app.services.csv_export import EXPORT_LIMIT, describe_filters, to_csv, utc_text
 from app.services.search import contains_any
 
 
@@ -102,8 +102,8 @@ def list_users(session: Session, f: UserFilter, offset: int, limit: int) -> tupl
 
 
 def export_csv(session: Session, f: UserFilter, exported_by: User, client: Client) -> str:
-    """Every user matching the filters as CSV, newest first, like the list. The download is logged."""
-    rows = session.exec(_newest_first(_conditions(f))).all()
+    """The users matching the filters as CSV, newest first like the list, up to EXPORT_LIMIT. The download is logged."""
+    rows = session.exec(_newest_first(_conditions(f)).limit(EXPORT_LIMIT)).all()
     text = to_csv(
         USERS_CSV_HEADER,
         (
