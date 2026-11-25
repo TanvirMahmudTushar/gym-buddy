@@ -109,7 +109,7 @@ export default function App() {
   // After an admin reset the password, nothing else opens until a new one is chosen (the API refuses it too).
   if (user.must_change_password)
     return (
-      <AppLayout page="account" locked>
+      <AppLayout key={user.id} page="account" locked>
         <ChoosePasswordPage />
       </AppLayout>
     )
@@ -118,7 +118,8 @@ export default function App() {
   const open = page !== "login" && page !== "signup" && canOpen(user, page)
   const PageContent = open ? PAGES[page as ProtectedPage] : NoAccessPage
   return (
-    <AppLayout page={page}>
+    // The key: after a switch to another account nothing of the first one stays on screen.
+    <AppLayout key={user.id} page={page}>
       <ErrorBoundary key={page}>
         <PageContent />
       </ErrorBoundary>

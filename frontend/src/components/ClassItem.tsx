@@ -67,6 +67,7 @@ export default function ClassItem({ gymClass: c, trainers, onChanged }: Props) {
           onClose={close}
           onConfirm={async () => {
             await deleteClass(c.id)
+            setDialog(null)
             onChanged()
           }}
         >

@@ -135,6 +135,7 @@ export default function EquipmentItem({ item, canManage, onChanged }: Props) {
           onClose={close}
           onConfirm={async () => {
             await deleteEquipment(item.id)
+            setDialog(null)
             onChanged()
           }}
         >

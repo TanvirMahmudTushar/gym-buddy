@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import Alert from "../../components/Alert"
 import ListState from "../../components/ListState"
 import PageHeader from "../../components/PageHeader"
@@ -13,6 +13,8 @@ import { hashParams } from "../../utils/hash"
 import { membersLink } from "../../utils/member"
 import { formatTime, gymToday } from "../../utils/time"
 
+const insideFromHash = () => hashParams().get("inside") === "1"
+
 /** "1 h 25 min" between checking in and out. */
 function stay(visit: CheckIn): string {
   if (!visit.checked_out_at) return ""
@@ -24,7 +26,13 @@ function stay(visit: CheckIn): string {
 export default function AttendancePage() {
   const [day, setDay] = useState(gymToday)
   // #/attendance?inside=1 (from the Dashboard) opens on who is in the gym now.
-  const [inside, setInside] = useState(() => hashParams().get("inside") === "1")
+  const [inside, setInside] = useState(insideFromHash)
+  // The menu link, followed while this page is open, shows everyone again.
+  useEffect(() => {
+    const onChange = () => setInside(insideFromHash())
+    window.addEventListener("hashchange", onChange)
+    return () => window.removeEventListener("hashchange", onChange)
+  }, [])
   const [search, setSearch] = useState("")
   const q = useDebouncedValue(search)
   const [reloadKey, setReloadKey] = useState(0)

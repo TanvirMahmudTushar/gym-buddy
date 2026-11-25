@@ -51,7 +51,7 @@ export default function ExpensesPage() {
   return (
     <div className="page">
       <PageHeader title="Expenses" subtitle="What the gym spends. Payments minus expenses is the net income on the Dashboard.">
-        <ExportButton name="expenses" load={() => exportExpensesCsv(filters)} disabled={list.total === 0} onError={setExportError} />
+        <ExportButton name="expenses" load={() => exportExpensesCsv(filters)} total={list.total} onError={setExportError} />
         <button type="button" className="primary" onClick={() => setDialog("add")}>
           <Icon name="plus" /> Add expense
         </button>

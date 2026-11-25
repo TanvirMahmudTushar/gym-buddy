@@ -11,11 +11,7 @@ import type { ActivityEntry, ActivityEvent, ActivityFilters } from "../../types/
 import { EVENTS, NO_ACTIVITY_FILTERS, activityLink, eventLabel, eventPill } from "../../utils/activity"
 import { hashDay, hashId, hashParams, replaceHash } from "../../utils/hash"
 import { describeBrowser } from "../../utils/session"
-import { count } from "../../utils/text"
 import { formatDateTime } from "../../utils/time"
-
-// The CSV holds at most this many rows (backend EXPORT_LIMIT).
-const EXPORT_LIMIT = 10_000
 
 /** The filters named in the address (#/activity?event=login_failed&q=192.0.2.66), so the Security page can link here. */
 function filtersFromHash(): ActivityFilters {
@@ -70,7 +66,7 @@ export default function ActivityPage() {
   return (
     <div className="page">
       <PageHeader title="Activity log" subtitle="Who did what, to which account, from where and when. Passwords and tokens are never recorded.">
-        <ExportButton name="activity" load={() => exportActivityCsv(filters)} disabled={list.total === 0} onError={setExportError} />
+        <ExportButton name="activity" load={() => exportActivityCsv(filters)} total={list.total} onError={setExportError} />
       </PageHeader>
       <section className="card">
         <div className="filters">
@@ -108,9 +104,6 @@ export default function ActivityPage() {
               Show everyone
             </button>
           </Alert>
-        )}
-        {list.total > EXPORT_LIMIT && (
-          <p className="hint">The CSV holds the newest {EXPORT_LIMIT.toLocaleString("en-US")} rows of {count(list.total, "event")}; narrow the dates to export older ones.</p>
         )}
         <Alert>{exportError}</Alert>
         <ListState loading={list.loading} error={list.error} isEmpty={list.items.length === 0} empty="No activity matches these filters.">

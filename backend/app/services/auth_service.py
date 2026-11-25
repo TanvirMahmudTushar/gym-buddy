@@ -3,7 +3,7 @@
 from datetime import datetime, timedelta
 
 from sqlalchemy.exc import IntegrityError
-from sqlmodel import Session, col, select, update
+from sqlmodel import Session, col, func, select, update
 
 from app.models import (
     MAX_PASSWORD_LENGTH,
@@ -56,6 +56,7 @@ class InvalidCredentialsError(Exception):
 # logins and password changes for LOCKOUT.
 MAX_FAILED_LOGINS = 5
 LOCKOUT = timedelta(minutes=15)
+LOCKED_DETAILS = f"{MAX_FAILED_LOGINS} wrong passwords in a row; logins blocked for {LOCKOUT // timedelta(minutes=1)} minutes"
 
 
 class AccountLockedError(Exception):
@@ -115,58 +116,64 @@ def _count_wrong_password(session: Session, user: User, client: Client) -> None:
         user.failed_login_count = 0
         user.locked_until = utc_now() + LOCKOUT
         session.add(user)
-        minutes = int(LOCKOUT.total_seconds() // 60)
-        activity_service.record(
-            session,
-            ActivityEvent.ACCOUNT_LOCKED,
-            client,
-            target=user,
-            details=f"{MAX_FAILED_LOGINS} wrong passwords in a row; logins blocked for {minutes} minutes",
-        )
+        activity_service.record(session, ActivityEvent.ACCOUNT_LOCKED, client, target=user, details=LOCKED_DETAILS)
         session.commit()
         raise AccountLockedError(as_utc(user.locked_until))
 
 
-def _unknown_email_lock(session: Session, email: str) -> datetime | None:
-    """An email with no account has no row to count on, so its wrong attempts are counted in the activity log: the
-    same 5 in 15 minutes as an account has. Without this, only a real account would ever answer 429, and the answer
-    would tell a stranger which emails have an account. Returns when the block ends, or None if it is not blocked."""
-    recent = session.exec(
-        select(ActivityLog.created_at)
+def _last_unknown_lock(session: Session, email: str) -> ActivityLog | None:
+    """The last time an email with no account was blocked. Such an email has no row to keep a count on, so the activity
+    log is the record."""
+    return session.exec(
+        select(ActivityLog)
         .where(
-            col(ActivityLog.event) == ActivityEvent.LOGIN_FAILED.value,
-            col(ActivityLog.actor_email) == email,
-            col(ActivityLog.details) == NO_ACCOUNT_REASON,
-            col(ActivityLog.created_at) >= utc_now() - LOCKOUT,
+            col(ActivityLog.event) == ActivityEvent.ACCOUNT_LOCKED.value,
+            col(ActivityLog.target_email) == email,
+            col(ActivityLog.target_id).is_(None),
         )
-        .order_by(col(ActivityLog.created_at).desc())
-        .limit(MAX_FAILED_LOGINS)
-    ).all()
-    # Like an account, the block ends LOCKOUT after the 5th wrong attempt, and attempts made while blocked do not extend it.
-    return as_utc(recent[0]) + LOCKOUT if len(recent) >= MAX_FAILED_LOGINS else None
+        .order_by(col(ActivityLog.id).desc())
+        .limit(1)
+    ).first()
+
+
+def _unknown_email_locked_until(session: Session, email: str) -> datetime | None:
+    """When the block on an email with no account ends, or None if it is not blocked. Without it only a real account
+    would ever answer 429, and the answer would tell a stranger which emails have an account."""
+    lock = _last_unknown_lock(session, email)
+    if lock is None:
+        return None
+    until = as_utc(lock.created_at) + LOCKOUT
+    return until if until > utc_now() else None
 
 
 def _count_unknown_email(session: Session, email: str, client: Client) -> None:
-    """The caller has added its activity row; this saves it and, on the 5th in a row, records the lockout."""
+    """The same rule as _count_wrong_password(): the 5th wrong password in a row blocks the email, however far apart
+    they were, and the count starts again after a block. The caller has added its activity row, which is saved here."""
     session.commit()
-    until = _unknown_email_lock(session, email)
-    if until is not None:
-        minutes = int(LOCKOUT.total_seconds() // 60)
+    lock = _last_unknown_lock(session, email)
+    failures = session.exec(
+        select(func.count())
+        .select_from(ActivityLog)
+        .where(
+            col(ActivityLog.event) == ActivityEvent.LOGIN_FAILED.value,
+            col(ActivityLog.actor_email) == email,
+            # An attempt made while blocked has another reason, so it does not count.
+            col(ActivityLog.details) == NO_ACCOUNT_REASON,
+            col(ActivityLog.id) > (lock.id if lock else 0),
+        )
+    ).one()
+    if failures >= MAX_FAILED_LOGINS:
         activity_service.record(
-            session,
-            ActivityEvent.ACCOUNT_LOCKED,
-            client,
-            target_email=email,
-            details=f"{MAX_FAILED_LOGINS} wrong passwords in a row; logins blocked for {minutes} minutes",
+            session, ActivityEvent.ACCOUNT_LOCKED, client, target_email=email, details=LOCKED_DETAILS
         )
         session.commit()
-        raise AccountLockedError(until)
+        raise AccountLockedError(utc_now() + LOCKOUT)
 
 
 def authenticate(session: Session, data: LoginRequest, client: Client) -> User:
     email = data.email.lower()
     user = _find_by_email(session, email)
-    if user is None and (until := _unknown_email_lock(session, email)) is not None:
+    if user is None and (until := _unknown_email_locked_until(session, email)) is not None:
         _log_failed_login(session, client, email, None, "Account is locked")
         session.commit()
         raise AccountLockedError(until)

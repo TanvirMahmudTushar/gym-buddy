@@ -72,7 +72,7 @@ These accounts are on the live site, each with the role shown. **The password (t
 | `tanim@gmail.com` | Tanim Chowdhury | User | My membership | Frozen yearly membership (cannot book or be checked in); in the shared group, read only |
 | `mitu@gmail.com` | Mitu Das | User | My membership | Signed up but no membership yet: shows on the Members page waiting list |
 
-The app never sends email and does not check that an address exists, so these accounts need no real inbox. All eight use the same password, which is given with the passwords in the submission form and the PDF report.
+The app never sends email and does not check that an address exists, so these accounts need no real inbox. All eight use the same password.
 
 ### Shared group with mixed permissions
 

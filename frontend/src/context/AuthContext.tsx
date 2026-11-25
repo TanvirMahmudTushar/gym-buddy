@@ -1,6 +1,6 @@
 import { type ReactNode, createContext, useCallback, useContext, useEffect, useMemo, useState } from "react"
 import * as authService from "../services/authService"
-import { type SessionEnd, refreshSession, setSessionHandlers, setToken } from "../services/api"
+import { type SessionEnd, refreshSession, setSession, setSessionHandlers } from "../services/api"
 import type { Me, SignupBody } from "../types/auth"
 import { errorText } from "../utils/text"
 
@@ -20,6 +20,8 @@ interface AuthValue {
   /** Ends the session on the server too, so the refresh cookie and the access token stop working. */
   logout: () => Promise<void>
   setUser: (user: Me) => void
+  /** Another tab logged in as someone else, so this tab changed to that account. */
+  switched: boolean
 }
 
 const AuthContext = createContext<AuthValue | null>(null)
@@ -32,6 +34,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [startError, setStartError] = useState("")
   const [startKey, setStartKey] = useState(0)
   const [ended, setEnded] = useState<SessionEnd | null>(null)
+  const [switched, setSwitched] = useState(false)
 
   const logout = useCallback(async () => {
     try {
@@ -39,22 +42,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch {
       // Offline: the session still ends here, and on the server when its refresh token expires.
     }
-    setToken(null)
+    setSession(null)
     setUser(null)
+    setSwitched(false)
   }, [])
 
   useEffect(() => {
     setSessionHandlers({
       onEnd: (reason) => {
-        setToken(null)
+        setSession(null)
         setUser(null)
         setEnded(reason)
       },
-      onUser: setUser,
+      onUser: (next, changed) => {
+        setUser(next)
+        if (changed) setSwitched(true)
+      },
       // The menus follow the role as it is now; if it did not change, nothing on screen does.
       onForbidden: () => void authService.getMe().then(setUser, () => undefined),
     })
     return () => setSessionHandlers(null)
+  }, [])
+
+  // The message about a switched account goes away with the next page.
+  useEffect(() => {
+    const onChange = () => setSwitched(false)
+    window.addEventListener("hashchange", onChange)
+    return () => window.removeEventListener("hashchange", onChange)
   }, [])
 
   // Pick the login back up after a reload: swap the refresh cookie for a new access token.
@@ -73,7 +87,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(async (email: string, password: string) => {
     const result = await authService.login(email, password)
-    setToken(result.access_token)
+    setSession(result)
     setUser(result.user)
     setEnded(null)
   }, [])
@@ -89,8 +103,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const retryStart = useCallback(() => setStartKey((k) => k + 1), [])
 
   const value = useMemo(
-    () => ({ user, loading, startError, retryStart, ended, login, signup, logout, setUser }),
-    [user, loading, startError, retryStart, ended, login, signup, logout],
+    () => ({ user, loading, startError, retryStart, ended, login, signup, logout, setUser, switched }),
+    [user, loading, startError, retryStart, ended, login, signup, logout, switched],
   )
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }

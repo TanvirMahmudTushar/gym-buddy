@@ -71,11 +71,18 @@ export default function PaymentsPage() {
 
   useEffect(() => replaceHash(pageLink("payments", { from: filters.date_from, to: filters.date_to })), [filters])
 
+  // The menu link, followed while this page is open, clears them.
+  useEffect(() => {
+    const onChange = () => setDraft(filtersFromHash())
+    window.addEventListener("hashchange", onChange)
+    return () => window.removeEventListener("hashchange", onChange)
+  }, [])
+
   return (
     <div className="page">
       <PageHeader title="Payments" subtitle="Payments are taken on a member's page.">
         {can(user, "payments:export") && (
-          <ExportButton name="payments" load={() => exportPaymentsCsv(filters)} disabled={list.total === 0} onError={setExportError} />
+          <ExportButton name="payments" load={() => exportPaymentsCsv(filters)} total={list.total} onError={setExportError} />
         )}
       </PageHeader>
       <section className="card">
