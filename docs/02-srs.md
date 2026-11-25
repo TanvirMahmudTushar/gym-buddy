@@ -279,7 +279,7 @@ Every Admin is also a logged-in user, so they can log out, edit their profile an
 
 > **Built so far (gym manager):** FR-30, FR-31, FR-32 and FR-42. Deleting a member also deletes their check-ins. The member's own view of their check-ins (FR-18) is built, with FR-17, FR-23 and FR-33 (see the user notes).
 
-> **Built so far (user):** FR-17, FR-18, FR-23, FR-33 and FR-41. A person with no membership yet gets a clear message with the email to give the front desk, instead of an error page. Gym managers and admins who have a membership can book through the API; the screens for booking are the User's.
+> **Built so far (user):** FR-17, FR-18, FR-23, FR-33 and FR-41. A person with no membership yet gets a clear message with the email to give the front desk, instead of an error page. The member pages (My membership, Timetable) are for every User and for staff who have a membership.
 
 ### 3.7a Plans and payments — Beta
 
@@ -509,7 +509,8 @@ A new member always starts as `Active` if `expires_on` is today or later. "Expir
 | Log out, view own profile, change own name and password | No | Yes | Yes | Yes | Yes |
 | List own sessions, log out one of them | No | Yes | Yes | Yes | Yes |
 | View own membership and check-in history | No | Yes (`404` if no membership yet) | Only with a membership | Only with a membership | Only with a membership |
-| Create, list, view, update, delete members | No | No (`403`) | No (`403`) | Yes | Yes |
+| Create, list, view, update members | No | No (`403`) | No (`403`) | Yes (staff accounts: view only, `403`) | Yes |
+| Delete a member's account, one or many | No | No (`403`) | No (`403`) | No (`403`) | Yes (not staff accounts, `400`) |
 | Start a membership on an account (by its email) | No | No (`403`) | No (`403`) | Yes | Yes |
 | Check a member in or out, list attendance and a member's visits | No | No (`403`) | No (`403`) | Yes | Yes |
 | List and view classes | No | Yes | Yes | Yes | Yes |
@@ -545,7 +546,7 @@ A new member always starts as `Active` if `expires_on` is today or later. "Expir
 | Read a group one is not in, or its workouts (workout and group endpoints) | No | No (`404`) | No (`404`) | No (`404`) | No (`404`) |
 | Moderate content: list, export and delete anyone's workouts and groups | No | No (`403`) | No (`403`) | No (`403`) | Yes (no editing) |
 
-Every endpoint except sign up, log in, refresh, health and the docs returns `401` when no valid token is sent.
+Every endpoint except sign up, log in, refresh, log out, health and the docs returns `401` when no valid token is sent.
 
 **Permissions (RBAC).** Each endpoint asks for a permission, not a role. The map from role to permissions lives in one place on the server (`backend/app/rbac.py`); the role is read from the database on every request.
 
@@ -637,7 +638,7 @@ Actions on one's own account and data (profile, password, sessions, own membersh
 | NFR-24 | Maintainability | An automated test suite (`pytest`, throwaway SQLite database) covers login and lockout, access token rejection (missing, tampered, expired, after logout), refresh rotation and reuse, at least four RBAC rules and CORS, and passes before a change is merged. | Beta |
 | NFR-23 | Security | The activity log never holds a password, a temporary password, a password hash or a token: the server builds each row's details from names, roles, reasons and ids only. | Beta |
 
-> **Built so far (security):** NFR-11 to NFR-17 (headers set for every response in `vercel.json`), NFR-20, NFR-21, NFR-22, NFR-23 and NFR-24 (`backend/tests/`, run with `pytest`; not in CI). NFR-15 now has a CORS allowlist (`FRONTEND_ORIGIN`). Schema changes are applied on start by `create_db_and_tables()` rather than Alembic (NFR-19). Production is deployed with `vercel --prod`; the project is not connected to GitHub, so a push to `main` does not deploy by itself (NFR-10).
+> **Built so far (security):** NFR-11 to NFR-17 (headers set for every response in `vercel.json`), NFR-20, NFR-21, NFR-22, NFR-23 and NFR-24 (`backend/tests/`, run with `pytest`; not in CI). NFR-15 has a CORS allowlist (the deployed frontend and `FRONTEND_ORIGIN`). Schema changes are applied on start by `create_db_and_tables()` rather than Alembic (NFR-19). The Vercel project is connected to GitHub, so a push to `main` updates production (NFR-10).
 
 ## 5. Acceptance criteria
 
@@ -710,9 +711,10 @@ Actions on one's own account and data (profile, password, sessions, own membersh
 - When an `admin` calls them, the response is `201` or `200`.
 
 **AC-14 Link account to member (FR-23)**
-- Given member `5` has no account and user A exists
-- When an admin sends `PATCH /api/v1/members/5` with `{"user_id": <A's id>}`, the response is `200`.
-- When an admin links the same user to member `6`, the response is `409`.
+*(As built: the membership is stored on the account, so it is started by email.)*
+- Given user A has an account and no membership
+- When a gym manager sends `POST /api/v1/members` with A's email and a plan, the response is `201`.
+- Sent again, the response is `409`; with an email that has no account, it is `422`.
 
 **AC-15 Create class (FR-25, FR-26)**
 - When an admin creates class "Morning Yoga" with `capacity: 2`
@@ -937,7 +939,7 @@ Actions on one's own account and data (profile, password, sessions, own membersh
 | US-10 | FR-13 – FR-16, FR-80 – FR-82 | `/api/v1/auth/login`, `/refresh`, `/logout`, `GET /api/v1/users/me`, `GET /api/v1/users/me/sessions`, `DELETE /api/v1/users/me/sessions/{id}` | Beta |
 | US-11 | FR-17, FR-18, FR-33 | `GET /api/v1/users/me/membership`, `GET /api/v1/users/me/check-ins` | Beta |
 | US-12 | FR-20 – FR-22, FR-24, FR-83 | `GET /api/v1/admin/users`, `PATCH /api/v1/admin/users/{id}/role`, `GET /api/v1/users/me` (permissions) | Beta |
-| US-13 | FR-19, FR-23, FR-24 | `/api/v1/members` (admin-only in Beta) | Beta |
+| US-13 | FR-19, FR-23, FR-24 | `/api/v1/members` (gym managers and admins; delete: admins) | Beta |
 | US-14 | FR-25, FR-27 | `POST /api/v1/classes`, `PATCH` / `DELETE /api/v1/classes/{id}` | Beta |
 | US-15 | FR-26 | `GET /api/v1/classes`, `GET /api/v1/classes/{id}` | Beta |
 | US-16 | FR-29, NFR-21 | `POST` / `DELETE /api/v1/classes/{id}/bookings` | Beta |

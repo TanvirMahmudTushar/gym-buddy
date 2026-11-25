@@ -33,7 +33,7 @@ Sections and tables are marked **MVP** or **Beta**. The MVP parts were built for
 | DB driver | `psycopg[binary]` (psycopg 3) | Standard Postgres driver for SQLAlchemy/SQLModel | MVP |
 | Database (local) | SQLite | No setup needed | MVP |
 | Frontend | Vite + React + TypeScript | Already in the repo template | MVP |
-| Hosting | Vercel | Frontend and backend in one project (`vercel.json`), deployed with `vercel --prod` | MVP |
+| Hosting | Vercel | Frontend and backend in one project (`vercel.json`), deployed on every push to `main` | MVP |
 | Schema changes | `create_db_and_tables()` on start | Creates missing tables and adds missing columns and indexes, keeping data. Alembic was planned but not adopted: every change was additive (section 12) | Beta |
 | JWT | PyJWT | Sign and verify access tokens | Beta |
 | Password hashing | `argon2-cffi` | Argon2 hashing, over HMAC-SHA256 with a pepper (section 10.2) | Beta |
@@ -127,12 +127,12 @@ backend/
   app/
     __init__.py        # loads backend/.env (developer machines only) before any module reads a variable
     config.py          # settings: load_local_env() (backend/.env, never on Vercel, never overriding) and frontend_origins() (FRONTEND_ORIGIN for CORS)
-    cors.py            # AllowlistCORSMiddleware: CORS only for FRONTEND_ORIGIN; other origins get no CORS headers
+    cors.py            # AllowlistCORSMiddleware: CORS only for the deployed frontend and FRONTEND_ORIGIN; other origins get no CORS headers
     database.py        # engine, get_session()
     models.py          # tables + Create / Update / Read schemas
     security.py        # password hashing (Argon2 + pepper), access tokens (JWT create/verify), refresh token generation and hashing
     deps.py            # get_auth (token + session check), get_current_user
-    rbac.py            # permission constants, role → permission map, require_permission(), has_permission(), is_owner()
+    rbac.py            # every role rule: permission constants, role → permission map, require_permission(), has_permission(), is_staff(), is_admin(), may_edit_account(), is_owner(), group permissions
     request_info.py    # client_ip() (X-Forwarded-For on Vercel), user_agent() and ClientDep: where a request came from, for the session list and the activity log
     routers/
       __init__.py
@@ -625,8 +625,8 @@ erDiagram
 | `SessionRead` | My sessions | `id`, `created_at`, `last_used_at`, `expires_at`, `ip`, `user_agent`, `current` (the session of this request); never the token hashes | Beta |
 | `UserRead` | User responses | `id`, `email`, `name`, `role`, `created_at` (never `password_hash`) | Beta |
 | `MeRead` | My own account (`/users/me`, login, refresh) | `UserRead` fields + `permissions` (the caller's role's permissions from `app/rbac.py`) + `plan?` | Beta |
-| `RoleUpdate` | Change role | `role` | Beta |
-| `ProfileUpdate` | Change own name | `name` | Beta |
+| `UserRoleUpdate` | Change role | `role` | Beta |
+| `UserNameUpdate` | Change own name | `name` | Beta |
 | `PasswordChange` | Change own password | `current_password`, `new_password` | Beta |
 | `ProfileRead` / `ProfileUpdate` | My contact details | `phone`, `date_of_birth` (1900-01-01 to today), `emergency_contact_name` (≤ 100), `emergency_contact_phone` (≤ 20); on update all optional, blank text becomes null, and the service checks the contact is both-or-neither against the saved values | Beta |
 | `AdminUserRead` | Admin user list | `UserRead` + `is_banned`, `banned_at`, `ban_reason`, `plan?`, `expires_on?`, `is_frozen` | Beta |
@@ -749,12 +749,11 @@ In the MVP no login is needed. In the Beta the member endpoints need `members:re
 | `POST` | `/api/v1/auth/login` | Guest | `LoginRequest` | `200` `TokenResponse` + cookie | `401`, `429` | FR-13, FR-34 |
 | `POST` | `/api/v1/auth/refresh` | Refresh cookie | — | `200` `TokenResponse` + new cookie (none when another request rotated the same token within 30 s); `204` with no cookie | `401` + cookie cleared (expired, revoked, unknown or reused) | FR-14, FR-82 |
 | `POST` | `/api/v1/auth/logout` | Refresh cookie | — | `204`, session revoked, cookie cleared (always `204`) | — | FR-15 |
-| `GET` | `/api/v1/users/me` | Member | — | `200` `MeRead` | `401` | FR-16, FR-83 |
-| `PATCH` | `/api/v1/users/me` | Member | `ProfileUpdate` | `200` `MeRead` | `422` | FR-40 |
-| `POST` | `/api/v1/users/me/password` | Any logged-in user, also while a new password is due | `PasswordChange` | `204` (every other session is revoked, this one stays; clears `must_change_password`) | `400` (wrong current password or same password), `401`, `422` | FR-41, FR-66 |
+| `GET` | `/api/v1/users/me` | Any logged-in user | — | `200` `MeRead` | `401` | FR-16, FR-83 |
+| `PATCH` | `/api/v1/users/me` | Any logged-in user | `UserNameUpdate` | `200` `MeRead` | `422` | FR-40 |
+| `POST` | `/api/v1/users/me/password` | Any logged-in user, also while a new password is due | `PasswordChange` | `204` (every other session is revoked, this one stays; clears `must_change_password`) | `400` (wrong current password or same password), `401`, `422`, `429` (locked after 5 wrong passwords) | FR-34, FR-41, FR-66 |
 | `GET` | `/api/v1/users/me/sessions` | Any logged-in user | — | `200` `SessionRead[]`, active only, most recently used first | `401` | FR-80 |
 | `DELETE` | `/api/v1/users/me/sessions/{id}` | Any logged-in user | — | `204` (that session's refresh and access tokens stop working) | `401`, `404` (not mine or not active) | FR-81 |
-| `GET` | `/api/v1/users/lookup?email` or `?id` | Gym Manager, Admin | — | `200` `AccountLookup` (`id`, `name`, `email`) | `403`, `404`, `422` | FR-23 |
 | `GET` | `/api/v1/users/me/profile` | Any logged-in user | — | `200` `ProfileRead` (my own only) | `401` | FR-77 |
 | `PATCH` | `/api/v1/users/me/profile` | Any logged-in user | `ProfileUpdate` | `200` `ProfileRead` | `401`, `422` (date of birth out of range, too long, emergency contact with only a name or a phone) | FR-76, FR-77 |
 | `GET` | `/api/v1/users/me/membership` | Any logged-in user | — | `200` `MemberRead` | `401`, `404` (no membership linked) | FR-17 |
@@ -768,8 +767,9 @@ In the MVP no login is needed. In the Beta the member endpoints need `members:re
 | `GET` | `/api/v1/members?offset&limit&status&q` | Gym Manager, Admin | — | `200` `MemberPage` (`status=expiring_soon`: soonest expiry first; `q`: name, email or phone) | `403` | FR-19, FR-53, FR-54 |
 | `GET` | `/api/v1/members/waiting?offset&limit&q` | Gym Manager, Admin | — | `200` `AccountPage` (role `user`, no plan, newest first; declared before `/{member_id}`) | `403` | FR-55 |
 | `GET` | `/api/v1/members/{id}` | Gym Manager, Admin | — | `200` `MemberRead` | `403`, `404` | FR-19 |
-| `PATCH` | `/api/v1/members/{id}` | Gym Manager, Admin | `MemberUpdate` | `200` `MemberRead` | `403`, `404`, `422` | FR-19 |
-| `DELETE` | `/api/v1/members/{id}` | Admin (`members:delete`) | — | `204` | `403`, `404` | FR-19 |
+| `PATCH` | `/api/v1/members/{id}` | Gym Manager, Admin (staff accounts: Admin) | `MemberUpdate` | `200` `MemberRead` | `403`, `404`, `422` | FR-19 |
+| `DELETE` | `/api/v1/members/{id}` | Admin (`members:delete`) | — | `204` | `400` (a gym manager or admin), `403`, `404` | FR-19 |
+| `POST` | `/api/v1/members/bulk-delete` | Admin (`members:delete`) | `MemberBulkDelete` | `200` `MemberBulkDeleteResult` (unknown ids are skipped) | `400` (one of them is a gym manager or admin: nothing is deleted), `403`, `422` | FR-06a, FR-19 |
 | `POST` | `/api/v1/members/{id}/check-ins` | Gym Manager, Admin | — | `201` `CheckInRead` | `400` (frozen: "Membership is frozen"; expired: "Membership expired on YYYY-MM-DD"), `403`, `404`, `409` (already inside) | FR-30, FR-32 |
 | `GET` | `/api/v1/members/{id}/check-ins?offset&limit` | Gym Manager, Admin | — | `200` `CheckInPage` (newest first) | `403`, `404`, `422` | FR-31 |
 | `GET` | `/api/v1/check-ins?day&inside&q&offset&limit` | Gym Manager, Admin | — | `200` `CheckInPage` (a day, today by default, newest first; `limit` up to 100, default 50) | `401`, `403`, `422` | FR-42 |
@@ -791,10 +791,10 @@ In the MVP no login is needed. In the Beta the member endpoints need `members:re
 | `GET` | `/api/v1/admin/groups/export.csv` (same filters) | Admin (`content:moderate`) | — | `200` `text/csv` `groups-YYYY-MM-DD.csv`; adds an `export` row | `401`, `403`, `422` | FR-108 |
 | `POST` / `DELETE` | `/api/v1/admin/groups/bulk-delete` / `/api/v1/admin/groups/{group_id}` | Admin (`content:moderate`) | `ContentBulkDelete` / — | `200` `ContentDeleted` / `204`; the groups' workouts and memberships go too (`group_service.delete_groups()`); one `group_delete` row each | `403`, `404` (single), `422` | FR-106, FR-107 |
 | `POST` | `/api/v1/admin/users/{user_id}/revoke-sessions` | Admin (`users:revoke_sessions`) | — | `200` `SessionsRevoked` (a `session_revoke` row when at least one ended) | `400` (yourself), `403`, `404` | FR-100 |
-| `PATCH` | `/api/v1/admin/users/{user_id}/role` | Admin | `RoleUpdate` | `200` `AdminUserRead` (from `trainer` to another role: the trainer's classes keep the name as text) | `400` (own role), `403`, `404` | FR-22, FR-67 |
+| `PATCH` | `/api/v1/admin/users/{user_id}/role` | Admin | `UserRoleUpdate` | `200` `AdminUserRead` (from `trainer` to another role: the trainer's classes keep the name as text) | `400` (own role), `403`, `404` | FR-22, FR-67 |
 | `GET` | `/api/v1/admin/stats` | Admin | — | `200` `AdminStats` | `403` | FR-35 |
 | `GET` | `/api/v1/admin/revenue` | Admin | — | `200` `RevenueStats` | `401`, `403` | FR-52 |
-| `GET` | `/api/v1/overview` | Gym Manager, Admin | — | `200` `Overview` (`payment_service.totals_since()`, `checkin_service.count_since()`, the member list's `status_filters("expiring_soon")` and `WAITING`, `class_service.list_classes(upcoming)`) | `401`, `403` | FR-62 |
+| `GET` | `/api/v1/overview` | Gym Manager, Admin | — | `200` `Overview` (`payment_service.totals_since()`, `checkin_service.today_counts()`, the member list's `status_filters("expiring_soon")` and `WAITING`, `class_service.list_classes(upcoming)`) | `401`, `403` | FR-62 |
 | `POST` | `/api/v1/admin/users/{user_id}/ban` | Admin | `BanRequest` | `200` `AdminUserRead` | `400` (self / other admin), `403`, `404` | FR-36 |
 | `POST` | `/api/v1/admin/users/{user_id}/unban` | Admin | — | `200` `AdminUserRead` | `403`, `404` | FR-38 |
 | `POST` | `/api/v1/admin/users/{user_id}/reset-password` | Admin | — | `200` `PasswordResetResult`, `Cache-Control: no-store` | `400` (self or another admin), `403`, `404` | FR-64 |
@@ -1016,13 +1016,14 @@ Free-tier Supabase projects pause after a week with no activity; open the dashbo
 
 ```mermaid
 flowchart LR
-    PR[Pull request merged] --> Main[main on GitHub]
-    Main -->|git pull| Dev[Developer machine]
-    Dev -->|vercel --prod| Prod[Vercel production URL]
+    Branch[Pushed branch] -->|Vercel builds| Preview[Preview URL]
+    Branch --> PR[Pull request merged] --> Main[main on GitHub]
+    Main -->|Vercel builds| Prod[Vercel production URL]
     Prod --> DB[(Supabase)]
 ```
 
-- The Vercel project is not connected to GitHub, so merging into `main` does not deploy by itself. Production is deployed from an up-to-date `main` with `vercel --prod` (or by connecting the repository under Project → **Settings** → **Git**).
+- The Vercel project is connected to GitHub (Project → **Settings** → **Git**): a push to `main` deploys production, and every other pushed branch gets a preview. The result is a status on the commit; a failed one leaves the last good deployment in place.
+- Vercel checks `vercel.json` against its schema (https://openapi.vercel.sh/vercel.json) before building. `pytest` and `npm run build` do not read that file, so the preview must have deployed before a pull request is merged.
 - Environment variables from section 8 are set in the Vercel project settings; `JWT_SECRET` and `PASSWORD_PEPPER` must be set before the first deploy that needs them, or every logged-in request returns `500`.
 - The first request after a deploy runs `create_db_and_tables()`, which brings the Supabase schema up to date (section 12); there is no separate migration step.
 - Demo data for the live site is made with `scripts/seed_demo.py` (README, **Demo data**), which uses the public API like any other client.
@@ -1041,7 +1042,7 @@ flowchart LR
 - **Refresh rotation:** `session_service.rotate()` finds the session by the cookie's hash and replaces the hash with a new token's in one `UPDATE ... WHERE id = ? AND token_hash = <old hash>`. If that matches no row, another request rotated first: this one still gets an access token but no new cookie, so the browser keeps the winner's cookie. The session id stays the same, so `sid` in new access tokens does not change.
 - **Reuse detection:** the replaced hash is kept in `previous_token_hash`. Sent again within `ROTATION_GRACE` (30 s, for example two tabs refreshing at once), it gets an access token without a new cookie. Sent later, only a copy can hold it, so the whole session is revoked (`401`) and both holders must log in again. Only the last replaced hash is kept: a token two or more rotations old matches no row, so it is refused like an unknown token (`401`) but does not end the session.
 - **Revoke:** logout (`POST /auth/logout`, by the cookie), `DELETE /users/me/sessions/{id}`, a password change (every session but the caller's), an admin reset or a ban (every session) set `revoked_at`. The access tokens of a revoked session fail on their next request, because `get_auth()` checks the session; there is no wait for `exp`.
-- **Expiry:** after 15 minutes the API answers `401`. `services/api.ts` then calls `refreshSession()` once (all requests failing together share one promise) and repeats the request. If the refresh fails, `AuthContext.endSession()` shows Log in. On page load the app always calls refresh (scripts cannot see the HttpOnly cookie); with no cookie the answer is `204`, so a visitor sees no console error, and "Loading…" covers the wait instead of a flash of the Log in page.
+- **Expiry:** after 15 minutes the API answers `401`. `services/api.ts` then calls `refreshSession()` once (all requests failing together share one promise) and repeats the request. If the refresh fails, `AuthContext` (the `onEnd` handler it gives `setSessionHandlers()`) shows Log in. On page load the app always calls refresh (scripts cannot see the HttpOnly cookie); with no cookie the answer is `204`, so a visitor sees no console error, and "Loading…" covers the wait instead of a flash of the Log in page.
 - The `role` claim is only informational; permission checks always use the role loaded from the database, so a role change applies on the next request.
 
 ### 10.2 Passwords and login lockout
@@ -1049,9 +1050,9 @@ flowchart LR
 - Hash with Argon2 (`argon2-cffi`) after mixing in the pepper: `argon2(HMAC-SHA256(PASSWORD_PEPPER, password))`, stored as `peppered$<argon2 hash>`. Verify on login; never log or return the hash.
 - A hash without the `peppered$` prefix was made before the pepper: it is verified as it was made, and `auth_service.authenticate()` replaces it with a peppered hash on that successful login (`security.password_needs_rehash()`). Each path runs exactly one Argon2 check, so timing does not show which kind of hash an account has.
 - Unknown email and wrong password both return `401 "Invalid email or password"`, so emails cannot be discovered.
-- Wrong password: `failed_login_count += 1`. At 5, set `locked_until = now + 15 min` and reset the count. While `locked_until > now`, login returns `429`. A successful login resets the count.
+- Wrong password, on login or as the current password of a password change (`auth_service._count_wrong_password()`): `failed_login_count += 1`. At 5, set `locked_until = now + 15 min` and reset the count. While `locked_until > now`, both return `429`. A successful login or password change resets the count.
 - Stored in the database (not in memory) because serverless functions do not share memory.
-- **Built so far:** `auth_service.authenticate()` refuses a locked account before checking the password. The `+ 1` is an `UPDATE ... SET failed_login_count = failed_login_count + 1`, so parallel wrong passwords all count; the 5th answers `429` straight away. The `429` carries `Retry-After` (seconds) and the message "Too many failed logins. Try again in N minutes." Attempts while locked do not count, and the lockout only blocks new logins: tokens already issued keep working. Unknown emails are never locked (there is no row to count on), so they always get the same `401`; after 5 tries the `429` does show that an account exists, an accepted trade-off of locking per account.
+- **Built so far:** `auth_service.authenticate()` refuses a locked account before checking the password. The `+ 1` is an `UPDATE ... SET failed_login_count = failed_login_count + 1`, so parallel wrong passwords all count; the 5th answers `429` straight away. The `429` carries `Retry-After` (seconds) and the message "Too many failed logins. Try again in N minutes." Attempts while locked do not count, and the lockout only blocks new logins and password changes: tokens already issued keep working. Unknown emails are never locked (there is no row to count on), so they always get the same `401`; after 5 tries the `429` does show that an account exists, an accepted trade-off of locking per account.
 
 ### 10.3 Permission dependencies
 
@@ -1062,13 +1063,13 @@ class Permission(str, Enum):
     MEMBERS_READ = "members:read"
     CLASSES_TEACH = "classes:teach"
     USERS_BAN = "users:ban"
-    ...                                   # 25 in all (SRS 3.11)
+    ...                                   # 26 in all (SRS 3.11)
 
 ROLE_PERMISSIONS = {
     "user": frozenset(),                  # only their own account and data
     "trainer": frozenset({CLASSES_TEACH, CLIENTS_READ, GROUPS_CREATE, EQUIPMENT_READ}),
     "gym_manager": _GYM_MANAGER,          # 10 permissions
-    "admin": _GYM_MANAGER | {...},        # those + 13 admin permissions
+    "admin": _GYM_MANAGER | {...},        # those + 14 admin permissions
 }
 
 def require_permission(*permissions: Permission):
@@ -1122,7 +1123,7 @@ def ban_user(user_id: int, session: SessionDep, admin: Banner, body: BanRequest 
 | `GET /admin/activity`, `GET /admin/activity/export.csv`, `GET /admin/activity/security` | `activity:read` |
 | `/workouts/*`, `/groups/*` | `CurrentUser`, then the group permissions below (`rbac.group_permissions()`) inside the service |
 
-Helpers: `has_permission(user, p)`; `roles_with(p)` for queries (the trainer list is every account whose role holds `classes:teach`); `is_owner(user, owner_id)` for records that belong to someone, where the caller answers `404` for a private record and `403` for a public one (a class). `rbac.py` imports `app.deps`, so nothing `app.deps` imports may import `rbac.py`.
+Helpers: `has_permission(user, p)`; `roles_with(p)` and `plain_roles()` for queries (the trainer list is every account whose role holds `classes:teach`); `is_staff(user)` and `is_admin(user)`, worked out from the permissions; `may_edit_account(actor, account)` (a staff account: admins only); `is_owner(user, owner_id)` for records that belong to someone, where the caller answers `404` for a private record and `403` for a public one (a class). `rbac.py` imports `app.deps`, so nothing `app.deps` imports may import `rbac.py`.
 
 **Group permissions (training groups).** A second, per-group layer lives in the same module:
 
@@ -1214,17 +1215,19 @@ stats = AdminStats(
 | `signup` | `auth_service.signup()` (flushed first for the new id) | the new account / — | — |
 | `login` | `session_service.start_session()`, with the new session | the account / — | — |
 | `login_failed` | `auth_service.authenticate()` | the account if one has the email, with the typed email / — | `Wrong password`, `No account has this email`, `Account is locked` or `Account is banned` |
-| `account_locked` | `auth_service._record_failed_login()` on the 5th wrong password | — / the account | `5 wrong passwords in a row; logins blocked for 15 minutes` |
+| `account_locked` | `auth_service._count_wrong_password()` on the 5th wrong password | — / the account | `5 wrong passwords in a row; logins blocked for 15 minutes` |
 | `logout` | `session_service.logout()`, only for a session that was still open | the account / — | — |
 | `session_revoke` | `session_service.revoke_own_session()`; `rotate()` when a replaced refresh token comes back after the grace period | the owner / —; or — / the owner (the IP is whoever sent the old token) | the session id and its address, or why the server ended it |
-| `password_change`, `password_change_failed` | `auth_service.change_password()` | the account / — | how many other sessions were logged out; or `Current password was wrong` / `New password was the same as the current one` |
+| `password_change`, `password_change_failed` | `auth_service.change_password()` | the account / — | how many other sessions were logged out; or `Current password was wrong` / `New password was too short or too long` / `New password was the same as the current one` / `Account is locked` |
 | `password_reset` | `user_service.reset_password()` | the admin / the account | `Temporary password issued; sessions ended: N` (never the password) |
 | `role_change` | `user_service.change_role()`, only when the role differs | the admin / the account | `user → trainer` |
 | `ban`, `unban` | `user_service.ban_user()`, `unban_user()`, only when the state changes | the admin / the account | the reason and how many sessions ended |
-| `account_delete` | `member_service.delete_member()`, `bulk_delete_members()` (one row each) | the gym manager or admin / the email only | the person's name and how it was deleted |
+| `account_delete` | `member_service.delete_member()`, `bulk_delete_members()` (one row each) | the admin / the email only | the person's name and how it was deleted |
 | `export` | `payment_service.export_csv()`, `expense_service.export_csv()`, `activity_service.export_csv()`, `user_service.export_csv()`, `moderation_service.export_*_csv()`, after the rows are read | the admin / — | the file, the row count and the filters |
 | `group_member_remove`, `booking_cancel` | `group_service.remove_member()`, `class_service.cancel_booking()` | whoever did it / the person affected, when it is someone else | the group, or the class and its time |
-| `workout_delete`, `group_delete` | `moderation_service.delete_workouts()` / `delete_groups()`, one row per item, in the delete's transaction (`workout_service` and `group_service` log the owner's own deletes) | the admin / the owner (by email if the account is gone) | the title, date and personal or group; or the group's name and how many workouts went with it |
+| `workout_delete`, `group_delete` | `moderation_service.delete_workouts()` / `delete_groups()`, one row per item, in the delete's transaction (`workout_service` and `group_service` log the owner's own deletes) | the admin / the owner (by email if the account is gone) | the title, date and group; or the group's name and how many workouts went with it |
+| `class_delete`, `equipment_delete`, `announcement_delete`, `plan_delete`, `expense_delete` | the delete in `class_service`, `equipment_service`, `announcement_service`, `plan_service`, `expense_service` | whoever did it / — | what was deleted (a class: its time and how many bookings went with it) |
+| `payment_void` | `payment_service`, when a payment is voided | the admin / — | the amount, the member's name and the reason |
 
 - **Client address:** routes take `ClientDep` (`app/request_info.py`), a `Client(ip, user_agent)` built from the request, and pass it to the service. On Vercel (`VERCEL` is set) the IP is the first address in `X-Forwarded-For`, which the platform overwrites; elsewhere it is the connection's address, because the header could be made up. Both are cut to the column lengths.
 - **No secrets (NFR-23):** `record()` takes no request body. Every `details` text is built in the service from names, roles, reasons, ids and counts; no service passes a password, the temporary password, a token or a hash. The end-to-end check scans every row for the passwords and tokens it used.
@@ -1250,6 +1253,10 @@ stats = AdminStats(
 
 ```json
 "headers": [
+  {
+    "source": "/((?!api/).*)",
+    "headers": [{ "key": "Access-Control-Allow-Origin", "value": "https://2321648gymbuddy.vercel.app" }]
+  },
   {
     "source": "/(.*)",
     "headers": [
@@ -1304,10 +1311,12 @@ The first admin is promoted by hand in the Supabase table editor or SQL editor (
 | `test_refresh.py` | No cookie `204`; rotation gives a new cookie and a working token; the replaced cookie within the grace period gets a token but no cookie; after the grace period it ends the whole session for both holders; a cookie two rotations old is refused; refresh after logout or a ban is refused |
 | `test_rbac.py` | Every admin `GET` route without a path parameter (found from the OpenAPI schema) is `403` for a user, trainer and gym manager, `200` for an admin, `401` for a visitor; staff routes; a role change applies with the same token; a user cannot start a group; another person's session is `404`; a group and its workouts are `404` to outsiders (an admin too); a group member without `can_update` gets `403`, then `200` once ticked; only the owner renames or deletes a group; an admin cannot ban another admin or themself, nor change their own role; a bulk ban skips the admin |
 | `test_gym.py` | Plans (add, retire, delete, in use), a membership with its first payment, check-in and check-out, class attendance, a trainer's own clients, marking a workout done, equipment services and faults, expenses and net income, a user's record counts |
+| `test_robustness.py` | Ids, offsets and dates no column can hold are `422`, never `500`; a validation error is one sentence without the password; no class in the past; days are the gym's days; every delete and void is logged; a user's newest records; moderation filters; logout with a just-replaced token |
+| `test_rules.py` | The final spec's rules over the OpenAPI schema: every endpoint but sign in, refresh, log out and the health check is `401` for a visitor, every staff and admin endpoint `403` for a plain user; nobody gives themself a role; role names are compared only in `rbac.py`; only a group's owner deletes a workout; a gym manager cannot delete accounts or edit staff accounts; every failed password change is recorded and guessing is locked out; leaving, removing and cancelling are logged; the Dashboard's 7-day counts; the deployed frontend is always allowed by CORS |
 | `test_startup.py` | A start with nothing to change runs one query; an older schema version is checked and filled in again; a deleted plan stays deleted; the login check is one query; a token does not open another account's session |
 | `test_cors.py` | `FRONTEND_ORIGIN` gets `Access-Control-Allow-Origin` and credentials, and its preflight is allowed; other origins (including look-alikes and `null`) and their preflights get no `Access-Control-*` header; `*` is never sent |
 | `test_config.py` | `.env` fills in missing variables but never overrides, is never read on Vercel, may be absent; `FRONTEND_ORIGIN` lists, trailing slashes, `*` and scheme-less values refused, defaults locally and on Vercel |
 
-Run: `pip install -r requirements-dev.txt` (adds `pytest` and `httpx` to `requirements.txt`; Vercel installs only `requirements.txt`), then `pytest` in `backend/`. 74 tests, all passing. Not in CI (out of scope).
+Run: `pip install -r requirements-dev.txt` (adds `pytest` and `httpx` to `requirements.txt`; Vercel installs only `requirements.txt`), then `pytest` in `backend/`. 113 tests, all passing on SQLite and PostgreSQL. Not in CI (out of scope).
 
 **Smoke test through the public API.** `scripts/seed_demo.py` (README, **Demo data**) signs accounts up, gives roles, starts memberships, takes payments, checks members in and out, creates classes, books them, posts announcements, adds equipment and expenses, and sets up a training group with mixed permissions, stopping at the first unexpected status code. Run against a fresh local backend and then again, it creates everything once and nothing the second time. Its results were checked by role: each account's role and landing page, `403` when a group member without `update` edits a group workout, `404` for someone outside the group, a class at capacity, and the Overview numbers (`check_ins_today`, `expiring_soon`, `waiting`, `payments_today`) matching the seeded data.
