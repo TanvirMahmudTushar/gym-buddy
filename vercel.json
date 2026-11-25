@@ -30,10 +30,6 @@
     {
       "source": "/(.*)",
       "headers": [
-    {
-      "source": "/((?!api/).*)",
-      "headers": [{ "key": "Access-Control-Allow-Origin", "value": "https://2321648gymbuddy.vercel.app" }]
-    },
         { "key": "X-Content-Type-Options", "value": "nosniff" },
         { "key": "X-Frame-Options", "value": "DENY" },
         { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
