@@ -43,7 +43,7 @@ The mid-term MVP was a member CRUD API with a one-page front end. The final rele
 | Roles and permissions | 4 roles, 26 permissions, plus 5 per-group permissions |
 | Requirements | 121 functional (FR-01 to FR-121) and 24 non-functional, traced to 37 user stories |
 | Front end | 23 pages, 61 components, 18 service modules |
-| Tests | 121 automated backend tests (pytest), passing on SQLite; 113 of them also run on PostgreSQL |
+| Tests | 136 automated backend tests (pytest), passing on SQLite; 113 of them also run on PostgreSQL |
 | GitHub | One issue and one pull request into `main` for each piece of work, each from its own branch. The gym management rework (#76) was committed to `main` directly |
 | Code | about 7,400 lines of Python in the backend and 9,300 lines of TypeScript in the front end |
 
@@ -108,7 +108,7 @@ The PRD planned the MVP and the Beta from the start, and the final release cover
 | Workout plans | **Added**: training groups run by trainers and staff, with per-member permissions, assigned workouts and marking them done. A private workout diary was built first (PR #70) and then removed: nobody at the gym could see it, so it did not help run the gym |
 | Equipment tracking | **Added**: the equipment list, reported faults, and services with the next due date |
 | Password reset | **Added** as an admin reset with a one-time temporary password (no email reset) |
-| Automated tests | **Added**: a pytest suite (121 tests). CI is still not set up |
+| Automated tests | **Added**: a pytest suite (136 tests). CI is still not set up |
 
 Still out of scope: online payments, email or SMS, email verification and self-service password reset, QR check-in, waiting lists for full classes, recurring classes, and diet plans.
 
@@ -186,7 +186,7 @@ The server never asks "is this an admin?". Every protected endpoint names a perm
 | Privacy | NFR-20 | Phone, date of birth, emergency contact and notes only for staff and the person themself |
 | Consistency | NFR-21 | Booking locks the class row, counts and inserts in one transaction |
 | Audit | NFR-23 | Activity log rows never hold a password, token or hash |
-| Maintainability | NFR-08, NFR-24 | Routers → services → database layers; 121 automated tests |
+| Maintainability | NFR-08, NFR-24 | Routers → services → database layers; 136 automated tests |
 | Secrets | NFR-05 | Only in Vercel environment variables; `backend/.env.example` holds placeholders only |
 
 One NFR was changed during the project and is recorded in the SRS: schema changes are applied by the app on start rather than by Alembic (NFR-19, see section 8).
@@ -317,18 +317,19 @@ On start the backend creates any missing table, adds any missing column and give
 
 ## 6. Testing and quality
 
-**Automated tests.** `backend/tests/` has 121 pytest tests that run against a throwaway SQLite database (or, with `TEST_DATABASE_URL`, an empty PostgreSQL one), emptied before each test, with test-only secrets, so they never touch real data:
+**Automated tests.** `backend/tests/` has 136 pytest tests that run against a throwaway SQLite database (or, with `TEST_DATABASE_URL`, an empty PostgreSQL one), emptied before each test, with test-only secrets, so they never touch real data:
 
 | File | What it proves |
 |---|---|
-| `test_login.py` | Correct login and cookie flags; wrong password and unknown email look the same; the 5th wrong password locks the account (or the unknown email), even against the right password; the failed login is logged without the password |
+| `test_login.py` | Correct login and cookie flags; wrong password and unknown email look the same; the 5th wrong password locks the account (or the unknown email), even against the right password; the failed login is logged without the password; a role typed wrongly in the database is a plain User |
 | `test_tokens.py` | Missing, tampered, forged and expired tokens get `401`; a token stops working after logout; a banned user gets `403` |
 | `test_refresh.py` | Rotation, the 30-second grace period, reuse ending the whole session, and refresh refused after logout or a ban |
 | `test_devices.py` | Login devices follow the refresh tokens: a refresh keeps the device, an expired token or a logout removes it, and a new login on the same browser replaces it |
 | `test_rbac.py` | Every admin route is `403` for the other three roles and `401` for a visitor; a role change applies with the same token; another person's session is `404` and member record `403`; members cannot start a group; a group and its workouts are `404` to outsiders, even an admin; group permissions; admins cannot ban each other |
 | `test_gym.py` | Plans (add, retire, delete rules), a membership paid in the same step, check-in and check-out, class attendance (own class only, not a day before), a trainer's own clients only, marking a workout done (assignee only), equipment services and faults, expenses and net income, a user's record counts |
-| `test_robustness.py` | Ids, offsets and dates no column can hold are `422`, never `500`; a validation error is one sentence without the password; no class in the past; days are the gym's days; every delete and void is logged; a user's newest records; moderation filters; logout with a just-replaced token |
-| `test_rules.py` | The final spec's rules: every endpoint but sign in, refresh, log out and the health check is `401` for a visitor; every staff and admin endpoint is `403` for a plain user; nobody gives themself a role; role names are compared only in `rbac.py`; only a group's owner deletes a workout; gym managers cannot edit staff accounts or delete accounts; every failed password change is recorded and guessing is locked out; leaving, removing and cancelling are logged; the deployed frontend is always allowed by CORS |
+| `test_robustness.py` | Ids, offsets and dates no column can hold are `422`, never `500`; a validation error is one sentence without the password; no class in the past; days are the gym's days; every delete and void is logged; a user's newest records; moderation filters; logout with a just-replaced token; times sent as UTC; every CSV stops at its limit |
+| `test_rules.py` | The final spec's rules: every endpoint but sign in, refresh, log out and the health check is `401` for a visitor; every staff and admin endpoint is `403` for a plain user; nobody gives themself a role; role names are compared only in `rbac.py`; only a group's owner deletes a workout; gym managers cannot edit staff accounts, renew their memberships or delete accounts; every failed password change is recorded and guessing is locked out; leaving, removing and cancelling are logged; the deployed frontend is always allowed by CORS |
+| `test_security_view.py` | The Security page: failed logins, rejected tokens and denied requests by address; a tampered token is logged and an expired one is not; a flood of bad tokens cannot fill the log |
 | `test_startup.py` | A normal start and the login check are one query each; an older schema is filled in again; a token does not open another account's session |
 | `test_cors.py` | Only an allowed origin gets CORS headers; look-alike origins and `null` get none; `*` is never sent |
 | `test_config.py` | Settings loading and the `FRONTEND_ORIGIN` rules |

@@ -342,7 +342,7 @@ Example body for `POST`:
 
 ## Tests
 
-The backend has a pytest suite in `backend/tests/` (login, token rejection, refresh rotation and reuse, RBAC, the gym's day to day, bad input and error responses, the delete log, the final spec's rules on every endpoint (`test_rules.py`), start-up, CORS and the settings). It runs against a throwaway SQLite database that is emptied before every test, with test-only secrets, so it never touches `backend/gym_buddy.db`, Supabase or your `.env`.
+The backend has a pytest suite in `backend/tests/` (login, token rejection, refresh rotation and reuse, RBAC, the gym's day to day, bad input and error responses, the delete log, the final spec's rules on every endpoint (`test_rules.py`), the Security page, start-up, CORS and the settings). It runs against a throwaway SQLite database that is emptied before every test, with test-only secrets, so it never touches `backend/gym_buddy.db`, Supabase or your `.env`.
 
 ```bash
 cd backend
