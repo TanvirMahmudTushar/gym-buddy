@@ -27,6 +27,8 @@ export type ActivityEvent =
   | "payment_void"
   | "group_member_remove"
   | "booking_cancel"
+  | "auth_rejected"
+  | "access_denied"
 
 /** One security event: who did it, to which account, from where and when. */
 export interface ActivityEntry {
@@ -58,12 +60,24 @@ export interface ActivityFilters {
   q: string
 }
 
-export interface FailedLoginsByIp {
+export interface EventCount {
+  event: ActivityEvent
+  count: number
+}
+
+export interface HostileByIp {
   /** null when the address was not known. */
   ip: string | null
+  /** Failed logins, rejected tokens and denied requests from this address. */
   count: number
-  /** How many different emails were tried from this address. */
+  /** How many of each, the most first. */
+  events: EventCount[]
+  /** How many different emails were tried or used from this address. */
   accounts: number
+  /** The most recent of them (at most 5). */
+  emails: string[]
+  /** The browser of one of the requests. */
+  user_agent: string | null
   last_at: string
 }
 
@@ -77,16 +91,15 @@ export interface FailedLoginsByAccount {
   last_at: string
 }
 
-/** Failed logins since `since`: the 10 addresses and 10 accounts with the most. */
-export interface FailedLoginWindow {
-  since: string
-  total: number
-  lockouts: number
-  by_ip: FailedLoginsByIp[]
-  by_account: FailedLoginsByAccount[]
-}
-
+/** Hostile requests in the last `hours` hours: the 10 addresses and 10 emails with the most, each with at least `min_count`. */
 export interface SecuritySummary {
-  last_24_hours: FailedLoginWindow
-  last_7_days: FailedLoginWindow
+  since: string
+  hours: number
+  min_count: number
+  /** Every failed login, rejected token and denied request in the window. */
+  total: number
+  failed_logins: number
+  lockouts: number
+  by_ip: HostileByIp[]
+  by_account: FailedLoginsByAccount[]
 }

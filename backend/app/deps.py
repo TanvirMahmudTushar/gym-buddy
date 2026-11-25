@@ -6,8 +6,9 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.database import SessionDep
 from app.models import User
-from app.security import InvalidTokenError, read_access_token
-from app.services import session_service
+from app.request_info import ClientDep
+from app.security import ExpiredTokenError, InvalidTokenError, read_access_token
+from app.services import activity_service, session_service
 from app.services.auth_service import ACCOUNT_BANNED_MESSAGE, MUST_CHANGE_PASSWORD_MESSAGE
 
 # auto_error is off so a missing token gives our own 401 (HTTPBearer alone would answer 403).
@@ -27,6 +28,7 @@ class Auth(NamedTuple):
 
 def get_auth(
     session: SessionDep,
+    client: ClientDep,
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
 ) -> Auth:
     if credentials is None:
@@ -34,7 +36,13 @@ def get_auth(
     # A missing, tampered or expired token, or one without a session id, is refused here.
     try:
         user_id, session_id = read_access_token(credentials.credentials)
+    except ExpiredTokenError:
+        # Normal: an access token lasts 5 minutes and the app then refreshes it. Not logged.
+        raise _unauthorized() from None
     except InvalidTokenError:
+        # Someone sent a token we never made (or one cut short): logged for the Security page.
+        activity_service.record_auth_rejected(session, client)
+        session.commit()
         raise _unauthorized() from None
     # Looked up on every request, so a deleted user or a changed role takes effect straight away.
     user, login = session_service.get_login(session, user_id, session_id)

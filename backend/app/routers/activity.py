@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, Query, Response
 
 from app.database import SessionDep
 from app.models import ActivityFilter, ActivityPage, SecuritySummary, User, gym_today
-from app.params import Limit, Offset
+from app.params import Hours, Limit, MinCount, Offset
 from app.rbac import Permission, require_permission
 from app.request_info import ClientDep
 from app.services import activity_service
@@ -34,10 +34,11 @@ def list_activity(
 
 
 @router.get("/security", response_model=SecuritySummary, dependencies=[READ_ACTIVITY])
-def security_summary(session: SessionDep) -> dict:
-    """Failed logins in the last 24 hours and the last 7 days, with the 10 IP addresses and the 10 accounts with
-    the most, and how many lockouts there were."""
-    return activity_service.security_summary(session)
+def security_summary(session: SessionDep, hours: Hours = 24, min_count: MinCount = 3) -> dict:
+    """Hostile requests in the last `hours` hours (1 to 168): the 10 IP addresses with the most failed logins, rejected
+    tokens and denied requests, and the 10 emails with the most failed logins, each with at least `min_count`. Also how
+    many lockouts there were."""
+    return activity_service.security_summary(session, hours, min_count)
 
 
 @router.get(

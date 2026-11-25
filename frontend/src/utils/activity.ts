@@ -8,6 +8,8 @@ export const EVENTS: { value: ActivityEvent; label: string; look?: "bad" | "info
   { value: "login", label: "Login" },
   { value: "login_failed", label: "Failed login", look: "bad" },
   { value: "account_locked", label: "Account locked", look: "bad" },
+  { value: "auth_rejected", label: "Token rejected", look: "bad" },
+  { value: "access_denied", label: "Access denied", look: "bad" },
   { value: "logout", label: "Logout" },
   { value: "session_revoke", label: "Session ended" },
   { value: "password_change", label: "Password changed" },

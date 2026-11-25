@@ -1003,6 +1003,10 @@ class ActivityEvent(str, Enum):
     # Someone was removed from a group, or left it; a class booking was cancelled, by the member or by staff.
     GROUP_MEMBER_REMOVE = "group_member_remove"
     BOOKING_CANCEL = "booking_cancel"
+    # A request whose access token was tampered with or malformed (an expired one is normal and not logged).
+    AUTH_REJECTED = "auth_rejected"
+    # A logged-in account asked for something its role has no permission for (403).
+    ACCESS_DENIED = "access_denied"
 
 
 class ActivityLog(SQLModel, table=True):
@@ -1065,12 +1069,24 @@ class ActivityFilter(SQLModel):
         return self
 
 
-class FailedLoginsByIp(SQLModel):
+class EventCount(SQLModel):
+    event: ActivityEvent
+    count: int
+
+
+class HostileByIp(SQLModel):
     # None: the address was not known.
     ip: str | None
+    # Failed logins, rejected tokens and denied requests from this address.
     count: int
-    # How many different emails were tried from this address: many points to someone trying a list of accounts.
+    # How many of each, the most first.
+    events: list[EventCount]
+    # How many different emails were tried or used from this address: many points to someone trying a list of accounts.
     accounts: int
+    # The most recent of them (at most 5).
+    emails: list[str]
+    # The browser of one of the requests.
+    user_agent: str | None
     last_at: UtcDateTime
 
 
@@ -1085,20 +1101,20 @@ class FailedLoginsByAccount(SQLModel):
     last_at: UtcDateTime
 
 
-class FailedLoginWindow(SQLModel):
-    """Failed logins since `since`, grouped by IP address and by account, the most first (10 of each)."""
+class SecuritySummary(SQLModel):
+    """Hostile requests in the last `hours` hours: by IP address (all kinds) and by email (failed logins only), the
+    most first (10 of each). Only addresses and emails with at least `min_count` are listed."""
 
     since: UtcDateTime
+    hours: int
+    min_count: int
+    # Every failed login, rejected token and denied request in the window, whoever it came from.
     total: int
+    failed_logins: int
     # How many times an account was locked after 5 wrong passwords in a row.
     lockouts: int
-    by_ip: list[FailedLoginsByIp]
+    by_ip: list[HostileByIp]
     by_account: list[FailedLoginsByAccount]
-
-
-class SecuritySummary(SQLModel):
-    last_24_hours: FailedLoginWindow
-    last_7_days: FailedLoginWindow
 
 
 # --- Training groups and their workouts (final spec 2.2) ---

@@ -16,8 +16,19 @@ from app.services.search import contains_any
 
 # The CSV holds at most this many rows (newest first), so one download cannot outgrow a serverless function.
 EXPORT_LIMIT = 10_000
-# How many addresses and accounts the Security page lists for each window.
+# How many addresses and accounts the Security page lists.
 TOP_GROUPS = 10
+# What the Security page counts as a hostile request. A lockout is only the result of failed logins, so it is not one.
+HOSTILE_EVENTS = [
+    ActivityEvent.LOGIN_FAILED.value,
+    ActivityEvent.AUTH_REJECTED.value,
+    ActivityEvent.ACCESS_DENIED.value,
+]
+# One address gets at most one auth_rejected row in this time.
+AUTH_REJECTED_INTERVAL = timedelta(minutes=1)
+# The emails shown for each address, and the most rows read to find them.
+EMAILS_SHOWN = 5
+EMAIL_ROWS = 1000
 
 CSV_HEADER = [
     "id",
@@ -58,6 +69,19 @@ def record(
             user_agent=client.user_agent if client else None,
         )
     )
+
+
+def record_auth_rejected(session: Session, client: Client) -> None:
+    """Log a rejected access token, but at most once a minute for each address. Anyone can send a made-up token, so
+    without this a script could add a row for every request. The caller commits. A flood still shows on the Security page,
+    but as one row a minute, so its count is lower than the number of requests."""
+    recent = [
+        col(ActivityLog.event) == ActivityEvent.AUTH_REJECTED.value,
+        col(ActivityLog.created_at) >= utc_now() - AUTH_REJECTED_INTERVAL,
+        col(ActivityLog.ip) == client.ip if client.ip else col(ActivityLog.ip).is_(None),
+    ]
+    if _count(session, *recent) == 0:
+        record(session, ActivityEvent.AUTH_REJECTED, client, details="The access token was not valid")
 
 
 def _conditions(f: ActivityFilter) -> list:
@@ -123,20 +147,75 @@ def _count(session: Session, *conditions) -> int:
     return session.exec(select(func.count()).select_from(ActivityLog).where(*conditions)).one()
 
 
-def _failed_logins_since(session: Session, since: datetime) -> dict:
-    failed = [col(ActivityLog.event) == ActivityEvent.LOGIN_FAILED.value, col(ActivityLog.created_at) >= since]
+def _by_ip(session: Session, hostile: list, min_count: int) -> list[dict]:
+    """The addresses with the most hostile requests, each with what happened, the emails and a browser. One grouped
+    query ranks the addresses; two more, limited to those addresses, fill in the rest."""
     count = func.count().label("n")
     last_at = func.max(ActivityLog.created_at).label("last_at")
-
-    by_ip = session.exec(
-        select(ActivityLog.ip, count, func.count(func.distinct(ActivityLog.actor_email)), last_at)
-        .where(*failed)
+    top = session.exec(
+        select(
+            ActivityLog.ip,
+            count,
+            func.count(func.distinct(ActivityLog.actor_email)),
+            func.max(ActivityLog.user_agent),
+            last_at,
+        )
+        .where(*hostile)
         .group_by(col(ActivityLog.ip))
+        .having(func.count() >= min_count)
         .order_by(count.desc(), last_at.desc())
         .limit(TOP_GROUPS)
     ).all()
+    if not top:
+        return []
+
+    # `ip = NULL` never matches, so an unknown address is matched with IS NULL.
+    known = [row[0] for row in top if row[0] is not None]
+    on_these = col(ActivityLog.ip).in_(known)
+    if len(known) < len(top):
+        on_these = or_(on_these, col(ActivityLog.ip).is_(None))
+
+    events: dict[str | None, list[tuple[str, int]]] = {}
+    for ip, event, n in session.exec(
+        select(ActivityLog.ip, ActivityLog.event, func.count())
+        .where(*hostile, on_these)
+        .group_by(col(ActivityLog.ip), col(ActivityLog.event))
+    ).all():
+        events.setdefault(ip, []).append((event, n))
+
+    # Most recent first. Capped, so an address trying thousands of emails cannot make this query large.
+    emails: dict[str | None, list[str]] = {}
+    newest = func.max(ActivityLog.created_at)
+    for ip, email, _ in session.exec(
+        select(ActivityLog.ip, ActivityLog.actor_email, newest)
+        .where(*hostile, on_these, col(ActivityLog.actor_email).is_not(None))
+        .group_by(col(ActivityLog.ip), col(ActivityLog.actor_email))
+        .order_by(newest.desc())
+        .limit(EMAIL_ROWS)
+    ).all():
+        if len(emails.setdefault(ip, [])) < EMAILS_SHOWN:
+            emails[ip].append(email)
+
+    return [
+        {
+            "ip": ip,
+            "count": n,
+            "events": [{"event": e, "count": c} for e, c in sorted(events.get(ip, []), key=lambda ec: -ec[1])],
+            "accounts": accounts,
+            "emails": emails.get(ip, []),
+            "user_agent": agent,
+            "last_at": last,
+        }
+        for ip, n, accounts, agent, last in top
+    ]
+
+
+def _by_account(session: Session, since: datetime, min_count: int) -> list[dict]:
+    """The emails with the most failed logins. Rejected tokens and denied requests carry no typed email."""
+    count = func.count().label("n")
+    last_at = func.max(ActivityLog.created_at).label("last_at")
     # actor_id is set when the email belongs to an account; max() picks it out of the group (the rest are null).
-    by_account = session.exec(
+    rows = session.exec(
         select(
             ActivityLog.actor_email,
             func.max(ActivityLog.actor_id),
@@ -144,29 +223,31 @@ def _failed_logins_since(session: Session, since: datetime) -> dict:
             func.count(func.distinct(ActivityLog.ip)),
             last_at,
         )
-        .where(*failed)
+        .where(col(ActivityLog.event) == ActivityEvent.LOGIN_FAILED.value, col(ActivityLog.created_at) >= since)
         .group_by(col(ActivityLog.actor_email))
+        .having(func.count() >= min_count)
         .order_by(count.desc(), last_at.desc())
         .limit(TOP_GROUPS)
     ).all()
+    return [
+        {"email": email or "", "user_id": user_id, "count": n, "ips": ips, "last_at": last}
+        for email, user_id, n, ips, last in rows
+    ]
+
+
+def security_summary(session: Session, hours: int, min_count: int) -> dict:
+    """Failed logins, rejected tokens and denied requests in the last `hours` hours (rolling, from now), by IP address
+    and, for failed logins, by email. Only those with at least `min_count` are listed."""
+    since = utc_now() - timedelta(hours=hours)
+    in_window = col(ActivityLog.created_at) >= since
+    hostile = [col(ActivityLog.event).in_(HOSTILE_EVENTS), in_window]
     return {
         "since": since,
-        "total": _count(session, *failed),
-        "lockouts": _count(
-            session, col(ActivityLog.event) == ActivityEvent.ACCOUNT_LOCKED.value, col(ActivityLog.created_at) >= since
-        ),
-        "by_ip": [{"ip": ip, "count": n, "accounts": accounts, "last_at": last} for ip, n, accounts, last in by_ip],
-        "by_account": [
-            {"email": email or "", "user_id": user_id, "count": n, "ips": ips, "last_at": last}
-            for email, user_id, n, ips, last in by_account
-        ],
-    }
-
-
-def security_summary(session: Session) -> dict:
-    """Failed logins in the last 24 hours and the last 7 days (rolling, from now), by IP address and by account."""
-    now = utc_now()
-    return {
-        "last_24_hours": _failed_logins_since(session, now - timedelta(hours=24)),
-        "last_7_days": _failed_logins_since(session, now - timedelta(days=7)),
+        "hours": hours,
+        "min_count": min_count,
+        "total": _count(session, *hostile),
+        "failed_logins": _count(session, col(ActivityLog.event) == ActivityEvent.LOGIN_FAILED.value, in_window),
+        "lockouts": _count(session, col(ActivityLog.event) == ActivityEvent.ACCOUNT_LOCKED.value, in_window),
+        "by_ip": _by_ip(session, hostile, min_count),
+        "by_account": _by_account(session, since, min_count),
     }

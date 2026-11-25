@@ -31,6 +31,10 @@ class InvalidTokenError(Exception):
     """The token is missing, malformed, expired or not signed with our secret."""
 
 
+class ExpiredTokenError(InvalidTokenError):
+    """The token was ours and is only out of date. This happens every few minutes, so it is not a sign of an attack."""
+
+
 def _env_secret(name: str) -> str | None:
     """The env var when it is at least 32 bytes long. Required on Vercel; None on a developer machine without it."""
     value = os.getenv(name)
@@ -118,12 +122,15 @@ def create_access_token(user_id: int, role: str, session_id: int) -> str:
 
 def read_access_token(token: str) -> tuple[int, int]:
     """Return the user id and the session id, or raise InvalidTokenError: a bad signature (tampered), an expired
-    token, or a missing claim (such as a token from before sessions existed)."""
+    token (ExpiredTokenError, a kind of InvalidTokenError), or a missing claim (such as a token from before sessions
+    existed)."""
     try:
         payload = jwt.decode(
             token, _jwt_secret(), algorithms=[ALGORITHM], options={"require": ["sub", "sid", "iat", "exp"]}
         )
         return int(payload["sub"]), int(payload["sid"])
+    except jwt.ExpiredSignatureError as exc:
+        raise ExpiredTokenError from exc
     except (jwt.PyJWTError, ValueError, TypeError) as exc:
         raise InvalidTokenError from exc
 

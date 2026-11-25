@@ -15,10 +15,13 @@
 from collections.abc import Callable
 from enum import Enum
 
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 
+from app.database import SessionDep
 from app.deps import CurrentUser
-from app.models import GroupMember, User
+from app.models import ActivityEvent, GroupMember, User
+from app.request_info import ClientDep
+from app.services import activity_service
 
 
 class Permission(str, Enum):
@@ -140,12 +143,17 @@ def is_owner(user: User, owner_id: int | None) -> bool:
     return owner_id is not None and owner_id == user.id
 
 
-def require_permission(*permissions: Permission) -> Callable[[User], User]:
+def require_permission(*permissions: Permission) -> Callable[..., User]:
     """A dependency: the caller must hold at least one of these permissions, or gets 403. It builds on
-    get_current_user, so a missing or bad token gets 401 first and a banned account 403."""
+    get_current_user, so a missing or bad token gets 401 first and a banned account 403. A refusal is written to the
+    activity log (access_denied) for the Security page."""
 
-    def check(user: CurrentUser) -> User:
+    def check(user: CurrentUser, request: Request, session: SessionDep, client: ClientDep) -> User:
         if not any(has_permission(user, permission) for permission in permissions):
+            needs = " or ".join(permission.value for permission in permissions)
+            details = f"{request.method} {request.url.path} needs {needs}"
+            activity_service.record(session, ActivityEvent.ACCESS_DENIED, client, actor=user, details=details)
+            session.commit()
             raise HTTPException(status_code=403, detail="You do not have permission to do this")
         return user
 

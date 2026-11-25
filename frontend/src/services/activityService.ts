@@ -26,4 +26,6 @@ export function listActivity(filters: ActivityFilters, offset: number): Promise<
 /** Every matching row (up to 10,000), newest first. The download is itself written to the log. */
 export const exportActivityCsv = (filters: ActivityFilters) => requestBlob(`${BASE}/export.csv?${filterParams(filters)}`)
 
-export const getSecuritySummary = () => request<SecuritySummary>(`${BASE}/security`)
+/** Hostile requests in the last `hours` hours (1 to 168), for addresses and emails with at least `minCount`. */
+export const getSecuritySummary = (hours: number, minCount: number) =>
+  request<SecuritySummary>(`${BASE}/security?hours=${hours}&min_count=${minCount}`)
