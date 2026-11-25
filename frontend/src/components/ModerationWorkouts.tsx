@@ -1,214 +1,164 @@
-import { type FormEvent, useEffect, useMemo, useState } from "react"
+import { type ReactNode, useState } from "react"
+import { useDebouncedValue } from "../hooks/useDebouncedValue"
 import { usePagedList } from "../hooks/usePagedList"
+import { useSelection } from "../hooks/useSelection"
 import { deleteWorkouts, exportWorkoutsCsv, listWorkouts } from "../services/moderationService"
-import type { WorkoutFilters } from "../types/moderation"
-import { errorText, formatDate, todayUtc } from "../utils/member"
-import { saveFile } from "../utils/payment"
-import ContentDeleteBar from "./ContentDeleteBar"
+import type { ModerationWorkout, WorkoutFilters } from "../types/moderation"
+import type { WorkoutStatus } from "../types/workout"
+import { usersLink } from "../utils/auth"
+import { count } from "../utils/text"
+import { formatDate } from "../utils/time"
+import { WORKOUT_STATUSES } from "../utils/workout"
+import Alert from "./Alert"
+import BulkDelete from "./BulkDelete"
+import ConfirmModal from "./ConfirmModal"
+import ExportButton from "./ExportButton"
+import ListState from "./ListState"
+import PageHeader from "./PageHeader"
+import Pager from "./Pager"
+import TickAll from "./TickAll"
 
-type Draft = Omit<WorkoutFilters, "owner_id">
-const NO_FILTERS: Draft = { date_from: "", date_to: "", q: "" }
+const NO_FILTERS: WorkoutFilters = { owner_id: null, group_id: null, status: "", date_from: "", date_to: "", q: "" }
 
 interface Props {
-  /** Only this account's workouts (set from a user's details, or by clicking an owner). */
+  tabs: ReactNode
+  /** Only this account's workouts (from a user's details). */
   ownerId: number | null
-  onPickOwner: (id: number, label: string) => void
+  /** Only this group's workouts (from All groups). */
+  groupId: number | null
 }
 
-// Admins: every workout in every group, with filters, select-many delete and a CSV of the same rows.
-export default function ModerationWorkouts({ ownerId, onPickOwner }: Props) {
-  const [draft, setDraft] = useState<Draft>(NO_FILTERS)
-  const [applied, setApplied] = useState<Draft>(NO_FILTERS)
-  const filters = useMemo<WorkoutFilters>(() => ({ ...applied, owner_id: ownerId }), [applied, ownerId])
+// Admins: every workout in every group, with filters, delete one or many, and a CSV of the same rows.
+export default function ModerationWorkouts({ tabs, ownerId, groupId }: Props) {
+  const [draft, setDraft] = useState<WorkoutFilters>({ ...NO_FILTERS, owner_id: ownerId, group_id: groupId })
+  const filters = useDebouncedValue(draft)
   const [reloadKey, setReloadKey] = useState(0)
   const list = usePagedList(listWorkouts, filters, reloadKey)
-  const [checkedIds, setCheckedIds] = useState<number[]>([])
+  const selection = useSelection(list.items.map((w) => w.id))
+  const [deleting, setDeleting] = useState<ModerationWorkout | null>(null)
   const [notice, setNotice] = useState("")
-  const [filterError, setFilterError] = useState("")
-  const [exporting, setExporting] = useState(false)
   const [exportError, setExportError] = useState("")
 
-  // Ticks belong to the rows on screen, so they are cleared whenever the list loads again.
-  useEffect(() => setCheckedIds([]), [filters, reloadKey])
-
-  function apply(e: FormEvent) {
-    e.preventDefault()
-    if (draft.date_from && draft.date_to && draft.date_from > draft.date_to) {
-      setFilterError("The From date must be on or before the To date.")
-      return
-    }
-    setFilterError("")
-    setNotice("")
-    setApplied({ ...draft, q: draft.q.trim() })
+  async function remove(ids: number[]) {
+    const { deleted } = await deleteWorkouts(ids)
+    setNotice(`Deleted ${count(deleted, "workout")}. It is recorded in the activity log.`)
+    setReloadKey((k) => k + 1)
   }
-
-  async function exportCsv() {
-    setExporting(true)
-    setExportError("")
-    try {
-      saveFile(await exportWorkoutsCsv(filters), `workouts-${todayUtc()}.csv`)
-    } catch (err) {
-      setExportError(errorText(err))
-    } finally {
-      setExporting(false)
-    }
-  }
-
-  const allChecked = list.items.length > 0 && list.items.every((w) => checkedIds.includes(w.id))
-  const toggle = (id: number) => setCheckedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
 
   return (
-    <section className="card" aria-labelledby="mod-workouts-heading">
-      <div className="toolbar">
-        <h2 id="mod-workouts-heading">All workouts</h2>
-        <button onClick={exportCsv} disabled={exporting || list.loading || list.total === 0}>
-          {exporting ? "Exporting…" : "Export CSV"}
-        </button>
-      </div>
-      <form className="filters" onSubmit={apply} noValidate aria-label="Filter workouts">
-        <div className="field">
-          <label htmlFor="mod-w-q">Search</label>
-          <input
-            id="mod-w-q"
-            value={draft.q}
-            onChange={(e) => setDraft({ ...draft, q: e.target.value })}
-            maxLength={100}
-            placeholder="Title, notes, owner"
-            autoComplete="off"
-          />
-        </div>
-        <div className="field">
-          <label htmlFor="mod-w-from">From</label>
-          <input id="mod-w-from" type="date" value={draft.date_from} onChange={(e) => setDraft({ ...draft, date_from: e.target.value })} />
-        </div>
-        <div className="field">
-          <label htmlFor="mod-w-to">To</label>
-          <input id="mod-w-to" type="date" value={draft.date_to} onChange={(e) => setDraft({ ...draft, date_to: e.target.value })} />
-        </div>
-        <div className="actions">
-          <button className="primary" type="submit" disabled={list.loading}>
-            Apply
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setDraft(NO_FILTERS)
-              setApplied(NO_FILTERS)
-              setFilterError("")
-            }}
-            disabled={list.loading}
-          >
+    <>
+      <PageHeader title="Training" subtitle="Moderation: every workout in every training group.">
+        <ExportButton name="workouts" load={() => exportWorkoutsCsv(filters)} disabled={list.total === 0} onError={setExportError} />
+      </PageHeader>
+      {tabs}
+      <section className="card">
+        <div className="filters">
+          <div className="field grow">
+            <label htmlFor="mod-w-q">Search</label>
+            <input id="mod-w-q" type="search" value={draft.q} onChange={(e) => setDraft({ ...draft, q: e.target.value })} maxLength={100} placeholder="Title, notes or owner" autoComplete="off" />
+          </div>
+          <div className="field">
+            <label htmlFor="mod-w-status">Status</label>
+            <select id="mod-w-status" value={draft.status} onChange={(e) => setDraft({ ...draft, status: e.target.value as WorkoutStatus | "" })}>
+              <option value="">Any</option>
+              {WORKOUT_STATUSES.map((s) => (
+                <option key={s.value} value={s.value}>
+                  {s.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="field">
+            <label htmlFor="mod-w-from">From</label>
+            <input id="mod-w-from" type="date" max={draft.date_to || undefined} value={draft.date_from} onChange={(e) => setDraft({ ...draft, date_from: e.target.value })} />
+          </div>
+          <div className="field">
+            <label htmlFor="mod-w-to">To</label>
+            <input id="mod-w-to" type="date" min={draft.date_from || undefined} value={draft.date_to} onChange={(e) => setDraft({ ...draft, date_to: e.target.value })} />
+          </div>
+          <button type="button" onClick={() => setDraft(NO_FILTERS)}>
             Clear
           </button>
         </div>
-      </form>
-      {filterError && (
-        <p className="error" role="alert">
-          {filterError}
-        </p>
-      )}
-      <p className="summary" aria-live="polite">
-        <strong>{list.total}</strong> workout{list.total === 1 ? "" : "s"}
-        <span className="hint"> · dates are the workout's date</span>
-      </p>
-      {(list.error || exportError) && (
-        <p className="error" role="alert">
-          {list.error || exportError}
-        </p>
-      )}
-      {notice && (
-        <p className="hint" role="status">
-          {notice}
-        </p>
-      )}
-      {checkedIds.length > 0 && (
-        <ContentDeleteBar
-          ids={checkedIds}
-          noun="workout"
-          warning="They disappear from their groups."
-          onDelete={async (ids) => (await deleteWorkouts(ids)).deleted}
-          onDone={(message) => {
-            setNotice(message)
-            setReloadKey((k) => k + 1)
-          }}
-          onClear={() => setCheckedIds([])}
-        />
-      )}
-      {list.loading && list.items.length === 0 ? (
-        <p className="empty">Loading workouts…</p>
-      ) : list.items.length === 0 ? (
-        <p className="empty">No workouts match these filters.</p>
-      ) : (
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th className="check">
-                  <input
-                    type="checkbox"
-                    aria-label="Select all workouts shown"
-                    checked={allChecked}
-                    ref={(el) => {
-                      if (el) el.indeterminate = checkedIds.length > 0 && !allChecked
-                    }}
-                    onChange={() => setCheckedIds(allChecked ? [] : list.items.map((w) => w.id))}
-                  />
-                </th>
-                <th>Date</th>
-                <th>Workout</th>
-                <th>Owner</th>
-                <th>Group</th>
-                <th>Assigned to</th>
-              </tr>
-            </thead>
-            <tbody>
-              {list.items.map((w) => (
-                <tr key={w.id}>
-                  <td className="check">
-                    <input type="checkbox" aria-label={`Select ${w.title}`} checked={checkedIds.includes(w.id)} onChange={() => toggle(w.id)} />
-                  </td>
-                  <td>{formatDate(w.workout_date)}</td>
-                  <td className="wrap">
-                    <strong className="wrap-text">{w.title}</strong>
-                    {w.notes && <div className="hint wrap-text">{w.notes.length > 120 ? `${w.notes.slice(0, 120)}…` : w.notes}</div>}
-                  </td>
-                  <td className="wrap">
-                    {w.owner_id !== null ? (
-                      <button
-                        type="button"
-                        className="linklike"
-                        title="Show only this person's content"
-                        onClick={() => onPickOwner(w.owner_id ?? 0, w.owner_name ?? `account #${w.owner_id}`)}
-                      >
-                        {w.owner_name}
-                      </button>
-                    ) : (
-                      <span className="hint">Deleted account</span>
-                    )}
-                    {w.owner_email && <div className="hint">{w.owner_email}</div>}
-                  </td>
-                  <td>{w.group_name ?? "—"}</td>
-                  <td>
-                    {w.assigned_to_name ?? "—"} {w.completed_at && <span className="pill active">Done</span>}
-                  </td>
+        {filters.owner_id && <Alert kind="info">Only workouts added by account #{filters.owner_id}. Clear the filters to see everyone's.</Alert>}
+        {filters.group_id && <Alert kind="info">Only the workouts of one group. Clear the filters to see every group's.</Alert>}
+        <Alert kind="success">{notice}</Alert>
+        <Alert>{exportError}</Alert>
+        <BulkDelete selection={selection} noun="workout" warning="They disappear from their groups." onDelete={remove} />
+        <ListState loading={list.loading} error={list.error} isEmpty={list.items.length === 0} empty="No workouts match these filters.">
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <TickAll selection={selection} label="Select all workouts shown" />
+                  <th>Workout</th>
+                  <th>Date</th>
+                  <th>Group</th>
+                  <th>Owner</th>
+                  <th>Assigned to</th>
+                  <th className="act">
+                    <span className="visually-hidden">Action</span>
+                  </th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {list.items.map((w) => (
+                  <tr key={w.id}>
+                    <td className="tick" data-label="Select">
+                      <input type="checkbox" aria-label={`Select ${w.title}`} checked={selection.has(w.id)} onChange={() => selection.toggle(w.id)} />
+                    </td>
+                    <td className="name">
+                      {w.title}
+                      {w.notes && <span className="hint">{w.notes.length > 90 ? `${w.notes.slice(0, 90)}…` : w.notes}</span>}
+                    </td>
+                    <td data-label="Date" className="nowrap">
+                      {formatDate(w.workout_date)}
+                    </td>
+                    <td data-label="Group">{w.group_name ?? "—"}</td>
+                    <td data-label="Owner">
+                      {w.owner_id !== null ? (
+                        <span>
+                          <a href={usersLink(w.owner_id)}>{w.owner_name}</a>
+                          <span className="hint">{w.owner_email}</span>
+                        </span>
+                      ) : (
+                        "Deleted account"
+                      )}
+                    </td>
+                    <td data-label="Assigned to">
+                      <span>
+                        {w.assigned_to_name ?? "—"} {w.completed_at && <span className="pill good">Done</span>}
+                      </span>
+                    </td>
+                    <td className="act">
+                      <div className="actions">
+                        <button type="button" className="small danger" onClick={() => setDeleting(w)}>
+                          Delete
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <Pager {...list} onChange={list.goTo} />
+        </ListState>
+      </section>
+      {deleting && (
+        <ConfirmModal
+          title={`Delete "${deleting.title}"?`}
+          confirmLabel="Delete workout"
+          busyLabel="Deleting…"
+          onClose={() => setDeleting(null)}
+          onConfirm={async () => {
+            await remove([deleting.id])
+            setDeleting(null)
+          }}
+        >
+          It disappears from {deleting.group_name ? `the group "${deleting.group_name}"` : "the app"}. This cannot be undone.
+        </ConfirmModal>
       )}
-      {list.items.length > 0 && (
-        <div className="list-foot">
-          <span>
-            Showing {list.items.length} of {list.total}
-          </span>
-          {list.items.length < list.total && (
-            <button onClick={list.loadMore} disabled={list.loadingMore}>
-              {list.loadingMore ? "Loading…" : "Load more"}
-            </button>
-          )}
-        </div>
-      )}
-    </section>
+    </>
   )
 }

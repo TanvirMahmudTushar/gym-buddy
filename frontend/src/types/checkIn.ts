@@ -1,4 +1,6 @@
 // Check-in types matching the FastAPI schemas (TDD 5.3).
+import type { Page } from "./page"
+
 export interface CheckIn {
   id: number
   member_id: number
@@ -9,9 +11,4 @@ export interface CheckIn {
   recorded_by_name: string | null
 }
 
-export interface CheckInPage {
-  items: CheckIn[]
-  total: number
-  offset: number
-  limit: number
-}
+export type CheckInPage = Page<CheckIn>

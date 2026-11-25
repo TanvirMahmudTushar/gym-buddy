@@ -1,8 +1,9 @@
 # Refresh token rotation and reuse detection (FR-14, FR-82, NFR-13, NFR-14).
 from datetime import timedelta
 
-from app.services import session_service
 from conftest import new_client
+
+from app.services import session_service
 
 REFRESH = "/api/v1/auth/refresh"
 ME = "/api/v1/users/me"

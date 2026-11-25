@@ -1,5 +1,6 @@
 // fetch helpers for content moderation: /api/v1/admin/workouts and /api/v1/admin/groups (needs content:moderate).
-import type { GroupFilters, ModerationGroup, ModerationWorkout, Page, WorkoutFilters } from "../types/moderation"
+import type { GroupFilters, ModerationGroup, ModerationWorkout, WorkoutFilters } from "../types/moderation"
+import type { Page } from "../types/page"
 import { request, requestBlob } from "./api"
 
 const BASE = "/api/v1/admin"
@@ -8,10 +9,7 @@ const PAGE_SIZE = 20
 /** Only the filters that are set go into the query string. The list and the CSV use the same ones. */
 function params(filters: WorkoutFilters | GroupFilters): URLSearchParams {
   const query = new URLSearchParams()
-  if (filters.owner_id) query.set("owner_id", String(filters.owner_id))
-  if (filters.date_from) query.set("date_from", filters.date_from)
-  if (filters.date_to) query.set("date_to", filters.date_to)
-  if (filters.q.trim()) query.set("q", filters.q.trim())
+  for (const [key, value] of Object.entries(filters)) if (value) query.set(key, String(value).trim())
   return query
 }
 

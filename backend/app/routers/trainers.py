@@ -3,10 +3,11 @@
 # A class's bookings stay under /api/v1/classes/{class_id}/bookings, which a trainer may read for their own classes.
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends
 
 from app.database import SessionDep
 from app.models import ClassPage, ClientPage, TrainerRead, User
+from app.params import Limit, Offset
 from app.rbac import Permission, require_permission
 from app.services import class_service, trainer_service
 from app.services.class_service import When
@@ -30,8 +31,8 @@ def list_my_classes(
     session: SessionDep,
     trainer: Teacher,
     when: When = "upcoming",
-    offset: Annotated[int, Query(ge=0)] = 0,
-    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    offset: Offset = 0,
+    limit: Limit = 20,
 ) -> dict:
     """The classes I teach: upcoming ones soonest first (the default), or past ones latest first. Trainers only."""
     items, total = class_service.list_trainer_classes(session, trainer.id, when, offset, limit)
@@ -42,8 +43,8 @@ def list_my_classes(
 def list_my_clients(
     session: SessionDep,
     trainer: ClientReader,
-    offset: Annotated[int, Query(ge=0)] = 0,
-    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    offset: Offset = 0,
+    limit: Limit = 20,
 ) -> dict:
     """The members I am the personal trainer of, by name, with their phone, membership and last visit. Never anyone
     else's clients, and no payments, notes or date of birth."""

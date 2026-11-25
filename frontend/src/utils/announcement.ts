@@ -1,14 +1,14 @@
 // Small display helpers for announcements.
 import type { Announcement } from "../types/announcement"
-import { formatDate, formatDateTime, todayUtc } from "./member"
+import { formatDate, formatDateTime, gymToday } from "./time"
 
-/** Past its end date: the same UTC "today" the backend uses, so members stop seeing it at the same moment. */
-export const hasEnded = (a: Announcement) => a.ends_on !== null && a.ends_on < todayUtc()
+/** Past its end date: the same "today" the backend uses, so members stop seeing it at the same moment. */
+export const hasEnded = (a: Announcement) => a.ends_on !== null && a.ends_on < gymToday()
 
-/** "Posted 21 Nov, 10:30 by Rahim · edited". */
+/** "25 Nov 2026, 10:30 by Rahim, edited". */
 export function postedNote(a: Announcement): string {
   const by = a.posted_by_name ? ` by ${a.posted_by_name}` : ""
-  return `Posted ${formatDateTime(a.posted_at)}${by}${a.updated_at ? " · edited" : ""}`
+  return `${formatDateTime(a.posted_at)}${by}${a.updated_at ? ", edited" : ""}`
 }
 
 /** "Shows until 30 Nov 2026", "Ended 20 Nov 2026" or "No end date". */

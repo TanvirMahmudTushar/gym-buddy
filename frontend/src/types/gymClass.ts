@@ -1,4 +1,6 @@
 // Class types matching the FastAPI schemas (TDD 5.3).
+import type { Page } from "./page"
+
 export interface GymClass {
   id: number
   name: string
@@ -17,12 +19,7 @@ export interface GymClass {
   updated_at: string
 }
 
-export interface ClassPage {
-  items: GymClass[]
-  total: number
-  offset: number
-  limit: number
-}
+export type ClassPage = Page<GymClass>
 
 /** The fields a gym manager sets when creating or editing a class. */
 export interface ClassBody {
@@ -76,16 +73,6 @@ export interface BookedClass {
   attended: boolean | null
 }
 
-export interface BookedClassPage {
-  items: BookedClass[]
-  total: number
-  offset: number
-  limit: number
-}
+export type BookedClassPage = Page<BookedClass>
 
-export interface BookingPage {
-  items: Booking[]
-  total: number
-  offset: number
-  limit: number
-}
+export type BookingPage = Page<Booking>

@@ -1,6 +1,8 @@
 import { type FormEvent, useState } from "react"
 import type { Announcement, AnnouncementBody } from "../types/announcement"
-import { todayUtc } from "../utils/member"
+import { gymToday } from "../utils/time"
+import FieldError from "./FieldError"
+import FormActions from "./FormActions"
 
 interface Props {
   /** The announcement being edited; leave out to post a new one. */
@@ -8,7 +10,7 @@ interface Props {
   saving: boolean
   error: string
   onSave: (body: AnnouncementBody) => void
-  onCancel?: () => void
+  onCancel: () => void
 }
 
 type Errors = Partial<Record<"title" | "message" | "ends_on", string>>
@@ -22,8 +24,7 @@ export default function AnnouncementForm({ announcement, saving, error, onSave, 
     ends_on: announcement?.ends_on ?? "",
   })
   const [errors, setErrors] = useState<Errors>({})
-  const id = editing ? `edit-announcement-${announcement.id}` : "add-announcement"
-  const today = todayUtc()
+  const today = gymToday()
   // An ended announcement keeps its old date until someone picks a new one, so it can still be edited.
   const endChanged = !editing || form.ends_on !== (announcement.ends_on ?? "")
   const set = (key: keyof typeof form) => (e: { target: { value: string } }) =>
@@ -47,54 +48,30 @@ export default function AnnouncementForm({ announcement, saving, error, onSave, 
 
   return (
     <form className="fields" onSubmit={handleSubmit} noValidate>
-      <div className="field">
-        <label htmlFor={`${id}-title`}>Title</label>
-        <input id={`${id}-title`} value={form.title} onChange={set("title")} maxLength={100} placeholder="Eid holiday hours" autoComplete="off" />
-        {errors.title && <span className="field-error">{errors.title}</span>}
-      </div>
-      <div className="field">
-        <label htmlFor={`${id}-ends`}>Show until (optional)</label>
-        <input
-          id={`${id}-ends`}
-          type="date"
-          min={endChanged ? today : undefined}
-          value={form.ends_on}
-          onChange={set("ends_on")}
-          aria-describedby={`${id}-ends-hint`}
-        />
-        <span id={`${id}-ends-hint`} className="hint">
-          The last day it shows (UTC). Leave empty to keep it up until you delete it.
-        </span>
-        {errors.ends_on && <span className="field-error">{errors.ends_on}</span>}
+      <div className="field wide">
+        <label htmlFor="announcement-title">Title</label>
+        <input id="announcement-title" value={form.title} onChange={set("title")} maxLength={100} placeholder="Eid holiday hours" autoComplete="off" autoFocus />
+        <FieldError>{errors.title}</FieldError>
       </div>
       <div className="field wide">
-        <label htmlFor={`${id}-message`}>Message</label>
+        <label htmlFor="announcement-message">Message</label>
         <textarea
-          id={`${id}-message`}
+          id="announcement-message"
           value={form.message}
           onChange={set("message")}
           maxLength={1000}
           rows={4}
           placeholder="The gym opens 10:00 to 16:00 on Eid day and the day after."
         />
-        {errors.message && <span className="field-error">{errors.message}</span>}
+        <FieldError>{errors.message}</FieldError>
       </div>
-      <div className="field wide actions">
-        <button className="primary" type="submit" disabled={saving}>
-          {saving ? "Saving…" : editing ? "Save announcement" : "Post announcement"}
-        </button>
-        {onCancel && (
-          <button type="button" onClick={onCancel} disabled={saving}>
-            Cancel
-          </button>
-        )}
-        <span className="hint">Members see it on My membership; staff on the Overview.</span>
+      <div className="field">
+        <label htmlFor="announcement-ends">Show until (optional)</label>
+        <input id="announcement-ends" type="date" min={endChanged ? today : undefined} value={form.ends_on} onChange={set("ends_on")} />
+        <FieldError>{errors.ends_on}</FieldError>
+        {!errors.ends_on && <span className="hint">Empty: it stays up until you delete it.</span>}
       </div>
-      {error && (
-        <p className="error wide-error" role="alert">
-          {error}
-        </p>
-      )}
+      <FormActions label={editing ? "Save changes" : "Post announcement"} saving={saving} error={error} onCancel={onCancel} />
     </form>
   )
 }

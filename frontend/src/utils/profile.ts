@@ -1,6 +1,6 @@
 // The contact and safety details form, shared by My account and the staff Edit member form, with the API's checks.
 import type { Profile } from "../types/profile"
-import { formatDate, todayUtc } from "./member"
+import { formatDate, gymToday } from "./time"
 
 export const EARLIEST_BIRTH_DATE = "1900-01-01"
 
@@ -26,17 +26,17 @@ export const toProfileBody = (f: ProfileForm): Profile => ({
 
 export function checkProfile(f: ProfileForm): ProfileErrors {
   const errors: ProfileErrors = {}
-  if (f.date_of_birth && (f.date_of_birth < EARLIEST_BIRTH_DATE || f.date_of_birth > todayUtc()))
+  if (f.date_of_birth && (f.date_of_birth < EARLIEST_BIRTH_DATE || f.date_of_birth > gymToday()))
     errors.date_of_birth = `Pick a date between ${formatDate(EARLIEST_BIRTH_DATE)} and today.`
   if (!f.emergency_contact_name.trim() !== !f.emergency_contact_phone.trim())
     errors.emergency_contact = "Give the emergency contact both a name and a phone, or leave both empty."
   return errors
 }
 
-/** Whole years from the date of birth to today (UTC). */
-export function age(dateOfBirth: string): number {
+/** Whole years from the date of birth to today. */
+function age(dateOfBirth: string): number {
   const [by, bm, bd] = dateOfBirth.split("-").map(Number)
-  const [ty, tm, td] = todayUtc().split("-").map(Number)
+  const [ty, tm, td] = gymToday().split("-").map(Number)
   return ty - by - (tm < bm || (tm === bm && td < bd) ? 1 : 0)
 }
 

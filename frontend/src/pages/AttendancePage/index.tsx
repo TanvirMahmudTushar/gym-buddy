@@ -1,10 +1,17 @@
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useMemo, useState } from "react"
+import Alert from "../../components/Alert"
+import ListState from "../../components/ListState"
+import PageHeader from "../../components/PageHeader"
+import Pager from "../../components/Pager"
 import QuickCheckIn from "../../components/QuickCheckIn"
 import { useDebouncedValue } from "../../hooks/useDebouncedValue"
 import { usePagedList } from "../../hooks/usePagedList"
+import { useSave } from "../../hooks/useSave"
 import { checkOut, listCheckIns } from "../../services/checkInService"
 import type { CheckIn } from "../../types/checkIn"
-import { errorText, formatTime, hashParams, membersLink, todayUtc } from "../../utils/member"
+import { hashParams } from "../../utils/hash"
+import { membersLink } from "../../utils/member"
+import { formatTime, gymToday } from "../../utils/time"
 
 /** "1 h 25 min" between checking in and out. */
 function stay(visit: CheckIn): string {
@@ -15,43 +22,42 @@ function stay(visit: CheckIn): string {
 
 // The front desk's attendance screen: check members in and out, see who is inside, and look up any day.
 export default function AttendancePage() {
-  const [day, setDay] = useState(todayUtc)
+  const [day, setDay] = useState(gymToday)
   // #/attendance?inside=1 (from the Dashboard) opens on who is in the gym now.
   const [inside, setInside] = useState(() => hashParams().get("inside") === "1")
   const [search, setSearch] = useState("")
   const q = useDebouncedValue(search)
   const [reloadKey, setReloadKey] = useState(0)
-  const [busyId, setBusyId] = useState<number | null>(null)
-  const [actionError, setActionError] = useState("")
+  const { saving, error, run } = useSave()
 
-  const isToday = day === todayUtc()
+  const isToday = day === gymToday()
   const filters = useMemo(() => ({ day, inside: inside && isToday, q }), [day, inside, isToday, q])
   const list = usePagedList(listCheckIns, filters, reloadKey)
   const reload = useCallback(() => setReloadKey((k) => k + 1), [])
 
-  useEffect(() => {
-    window.history.replaceState(null, "", inside && isToday ? "#/attendance?inside=1" : "#/attendance")
-  }, [inside, isToday])
-
-  async function leave(visit: CheckIn) {
-    setBusyId(visit.id)
-    setActionError("")
-    try {
+  const leave = (visit: CheckIn) =>
+    run(async () => {
       await checkOut(visit.id)
       reload()
-    } catch (err) {
-      setActionError(errorText(err))
-    } finally {
-      setBusyId(null)
-    }
-  }
+    })
+
+  const empty = q
+    ? "No visit matches this search."
+    : filters.inside
+      ? "Nobody is in the gym right now."
+      : isToday
+        ? "Nobody has checked in today yet."
+        : "Nobody checked in on this day."
 
   return (
-    <div className="column">
+    <div className="page">
+      <PageHeader title="Attendance" subtitle="Check members in when they arrive and out when they leave." />
       <QuickCheckIn onCheckedIn={reload} />
-      <section className="card" aria-labelledby="attendance-heading">
+      <section className="card">
         <div className="toolbar">
-          <h2 id="attendance-heading">Attendance {list.total > 0 && <span className="hint">({list.total})</span>}</h2>
+          <h2>
+            {isToday ? "Today" : "Visits"} {list.total > 0 && <span className="hint">({list.total})</span>}
+          </h2>
           <div className="chips" role="group" aria-label="Which visits to show">
             <button type="button" className="chip" aria-pressed={!filters.inside} onClick={() => setInside(false)}>
               Everyone
@@ -61,7 +67,7 @@ export default function AttendancePage() {
               className="chip"
               aria-pressed={filters.inside}
               onClick={() => {
-                setDay(todayUtc())
+                setDay(gymToday())
                 setInside(true)
               }}
             >
@@ -72,9 +78,9 @@ export default function AttendancePage() {
         <div className="filters">
           <div className="field">
             <label htmlFor="attendance-day">Day</label>
-            <input id="attendance-day" type="date" value={day} max={todayUtc()} onChange={(e) => setDay(e.target.value || todayUtc())} />
+            <input id="attendance-day" type="date" value={day} max={gymToday()} onChange={(e) => setDay(e.target.value || gymToday())} />
           </div>
-          <div className="field">
+          <div className="field grow">
             <label htmlFor="attendance-q">Member</label>
             <input
               id="attendance-q"
@@ -87,18 +93,8 @@ export default function AttendancePage() {
             />
           </div>
         </div>
-        {(list.error || actionError) && (
-          <p className="error" role="alert">
-            {list.error || actionError}
-          </p>
-        )}
-        {list.loading && list.items.length === 0 ? (
-          <p className="empty">Loading visits…</p>
-        ) : list.items.length === 0 ? (
-          <p className="empty">
-            {q ? "No visit matches this search." : filters.inside ? "Nobody is in the gym right now." : isToday ? "Nobody has checked in today yet." : "Nobody checked in on this day."}
-          </p>
-        ) : (
+        <Alert>{error}</Alert>
+        <ListState loading={list.loading} error={list.error} isEmpty={list.items.length === 0} empty={empty}>
           <div className="table-wrap">
             <table>
               <thead>
@@ -106,7 +102,11 @@ export default function AttendancePage() {
                   <th>Member</th>
                   <th>In</th>
                   <th>Out</th>
+                  <th>Stayed</th>
                   <th>Recorded by</th>
+                  <th className="act">
+                    <span className="visually-hidden">Action</span>
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -115,40 +115,28 @@ export default function AttendancePage() {
                     <td className="name">
                       <a href={membersLink({ member: v.member_id })}>{v.member_name}</a>
                     </td>
-                    <td>{formatTime(v.checked_in_at)}</td>
-                    <td>
-                      {v.checked_out_at ? (
-                        <>
-                          {formatTime(v.checked_out_at)} <span className="hint">({stay(v)})</span>
-                        </>
-                      ) : isToday ? (
-                        <button type="button" onClick={() => leave(v)} disabled={busyId !== null}>
-                          {busyId === v.id ? "Checking out…" : "Check out"}
-                        </button>
-                      ) : (
-                        <span className="hint">Not recorded</span>
+                    <td data-label="In">{formatTime(v.checked_in_at)}</td>
+                    <td data-label="Out">
+                      {v.checked_out_at ? formatTime(v.checked_out_at) : isToday ? <span className="pill good">In the gym</span> : "Not recorded"}
+                    </td>
+                    <td data-label="Stayed">{stay(v) || "—"}</td>
+                    <td data-label="Recorded by">{v.recorded_by_name ?? "—"}</td>
+                    <td className="act">
+                      {!v.checked_out_at && isToday && (
+                        <div className="actions">
+                          <button type="button" className="small" onClick={() => leave(v)} disabled={saving}>
+                            Check out
+                          </button>
+                        </div>
                       )}
                     </td>
-                    <td>{v.recorded_by_name ?? "—"}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-        )}
-        <p className="hint">Times are in your local time; a day is a UTC day.</p>
-        {list.items.length > 0 && (
-          <div className="list-foot">
-            <span>
-              Showing {list.items.length} of {list.total}
-            </span>
-            {list.items.length < list.total && (
-              <button onClick={list.loadMore} disabled={list.loadingMore}>
-                {list.loadingMore ? "Loading…" : "Load more"}
-              </button>
-            )}
-          </div>
-        )}
+          <Pager {...list} onChange={list.goTo} />
+        </ListState>
       </section>
     </div>
   )

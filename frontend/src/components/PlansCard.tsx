@@ -7,15 +7,18 @@ export default function PlansCard({ currentPlan }: { currentPlan?: Plan }) {
   const { offered } = usePlans()
 
   return (
-    <section className="card" aria-labelledby="plans-heading">
-      <h2 id="plans-heading">Plans and prices</h2>
-      <ul className="visit-list">
+    <section className="card">
+      <h2>Plans and prices</h2>
+      <ul className="rows">
         {offered.map((p) => (
           <li key={p.plan}>
-            <span className="wrap-text">
-              <strong>{p.name}</strong> <span className="hint">· {p.duration_days} days</span>
-              {p.plan === currentPlan && <span className="pill active plan-current">Your plan</span>}
-              {p.description && <div className="hint">{p.description}</div>}
+            <span>
+              <span className="row-title">
+                {p.name} {p.plan === currentPlan && <span className="pill good">Your plan</span>}
+              </span>
+              <span className="hint">
+                {p.duration_days} days{p.description ? ` · ${p.description}` : ""}
+              </span>
             </span>
             <strong>{formatMoney(p.price)}</strong>
           </li>
@@ -23,7 +26,7 @@ export default function PlansCard({ currentPlan }: { currentPlan?: Plan }) {
       </ul>
       <p className="hint">
         {currentPlan
-          ? "To renew, pay at the front desk. The plan's days are added to your expiry date, or to today if it has already passed, so no paid days are lost."
+          ? "Renew at the front desk. The plan's days are added to your expiry date, so no paid days are lost."
           : "Pick a plan and pay at the front desk to start your membership."}
       </p>
     </section>

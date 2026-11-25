@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState } from "react"
-import SecurityTabs from "../../components/SecurityTabs"
+import Alert from "../../components/Alert"
+import PageHeader from "../../components/PageHeader"
 import Stat from "../../components/Stat"
 import { getSecuritySummary } from "../../services/activityService"
 import type { FailedLoginWindow, SecuritySummary } from "../../types/activity"
 import { FAILED_LOGIN_ALERT, activityLink } from "../../utils/activity"
-import { errorText, formatDateTime } from "../../utils/member"
+import { errorText } from "../../utils/text"
+import { formatDateTime, gymDay } from "../../utils/time"
 
 type WindowKey = "last_24_hours" | "last_7_days"
 
@@ -13,21 +15,15 @@ const WINDOWS: { key: WindowKey; label: string }[] = [
   { key: "last_7_days", label: "Last 7 days" },
 ]
 
-/** The Activity page's From date for a window: the UTC day it starts on, so the list includes all of it. */
-const fromDay = (w: FailedLoginWindow) => w.since.slice(0, 10)
+/** The Activity page's From date for a window: the day it starts on, so the list includes all of it. */
+const fromDay = (w: FailedLoginWindow) => gymDay(w.since)
 
 /** As many failures as one lockout takes is worth a look, so the row is flagged. */
 function Count({ value }: { value: number }) {
   return (
-    <>
-      {value}
-      {value >= FAILED_LOGIN_ALERT && (
-        <>
-          {" "}
-          <span className="pill banned">Watch</span>
-        </>
-      )}
-    </>
+    <span>
+      {value} {value >= FAILED_LOGIN_ALERT && <span className="pill bad">Watch</span>}
+    </span>
   )
 }
 
@@ -38,7 +34,7 @@ function ByAddress({ window: w }: { window: FailedLoginWindow }) {
       <table>
         <thead>
           <tr>
-            <th>Address</th>
+            <th>IP address</th>
             <th>Failed logins</th>
             <th>Accounts tried</th>
             <th>Last attempt</th>
@@ -48,17 +44,13 @@ function ByAddress({ window: w }: { window: FailedLoginWindow }) {
           {w.by_ip.map((row) => (
             <tr key={row.ip ?? "unknown"}>
               <td className="name">
-                {row.ip ? (
-                  <a href={activityLink({ event: "login_failed", q: row.ip, date_from: fromDay(w) })}>{row.ip}</a>
-                ) : (
-                  <span className="hint">Unknown address</span>
-                )}
+                {row.ip ? <a href={activityLink({ event: "login_failed", q: row.ip, date_from: fromDay(w) })}>{row.ip}</a> : "Unknown address"}
               </td>
-              <td>
+              <td data-label="Failed logins">
                 <Count value={row.count} />
               </td>
-              <td>{row.accounts}</td>
-              <td>{formatDateTime(row.last_at)}</td>
+              <td data-label="Accounts tried">{row.accounts}</td>
+              <td data-label="Last attempt">{formatDateTime(row.last_at)}</td>
             </tr>
           ))}
         </tbody>
@@ -83,7 +75,7 @@ function ByAccount({ window: w }: { window: FailedLoginWindow }) {
         <tbody>
           {w.by_account.map((row) => (
             <tr key={row.email}>
-              <td className="name wrap">
+              <td className="name">
                 {/* An account's link uses its id (exact); an email with no account can only be searched for. */}
                 <a
                   href={activityLink(
@@ -94,13 +86,13 @@ function ByAccount({ window: w }: { window: FailedLoginWindow }) {
                 >
                   {row.email}
                 </a>
-                {row.user_id === null && <div className="hint">No account has this email</div>}
+                {row.user_id === null && <span className="hint">No account has this email</span>}
               </td>
-              <td>
+              <td data-label="Failed logins">
                 <Count value={row.count} />
               </td>
-              <td>{row.ips}</td>
-              <td>{formatDateTime(row.last_at)}</td>
+              <td data-label="Addresses">{row.ips}</td>
+              <td data-label="Last attempt">{formatDateTime(row.last_at)}</td>
             </tr>
           ))}
         </tbody>
@@ -132,69 +124,59 @@ export default function SecurityPage() {
     void load()
   }, [load])
 
-  const day = summary?.last_24_hours
-  const week = summary?.last_7_days
   const shown = summary?.[windowKey]
 
   return (
-    <div className="column">
-      <div className="toolbar">
-        <h2>Security</h2>
-        <div className="actions">
-          <SecurityTabs current="security" />
-          <button onClick={load} disabled={loading}>
-            {loading ? "Refreshing…" : "Refresh"}
-          </button>
-        </div>
-      </div>
-      {error && (
-        <p className="error" role="alert">
-          {error}
-        </p>
-      )}
-      {!summary && loading && <p className="empty">Loading failed logins…</p>}
-      {day && week && shown && (
+    <div className="page">
+      <PageHeader title="Security" subtitle={`Failed logins. ${FAILED_LOGIN_ALERT} wrong passwords in a row lock an account for 15 minutes.`}>
+        <button type="button" onClick={load} disabled={loading}>
+          {loading ? "Refreshing…" : "Refresh"}
+        </button>
+      </PageHeader>
+      <Alert>{error}</Alert>
+      {!summary && loading && <p className="empty">Loading…</p>}
+      {summary && shown && (
         <>
-          <section className="card" aria-labelledby="security-totals">
-            <h2 id="security-totals">Failed logins</h2>
-            <dl className="stats">
-              <Stat label="Last 24 hours" value={day.total} href={activityLink({ event: "login_failed", date_from: fromDay(day) })} />
-              <Stat label="Last 7 days" value={week.total} href={activityLink({ event: "login_failed", date_from: fromDay(week) })} />
-              <Stat
-                label="Lockouts, 24 hours"
-                value={day.lockouts}
-                alert
-                href={activityLink({ event: "account_locked", date_from: fromDay(day) })}
-              />
-              <Stat label="Lockouts, 7 days" value={week.lockouts} href={activityLink({ event: "account_locked", date_from: fromDay(week) })} />
-            </dl>
-            <p className="hint">
-              A failed login is a wrong password, an email with no account, or a login to a locked or banned account.
-              {` ${FAILED_LOGIN_ALERT}`} wrong passwords in a row lock an account for 15 minutes. Many accounts tried
-              from one address, or one account tried from many addresses, points to someone guessing passwords.
-            </p>
-          </section>
-          <section className="card" aria-labelledby="security-groups">
-            <div className="toolbar">
-              <h2 id="security-groups">Where they came from</h2>
-              <div className="chips" role="group" aria-label="Which period to show">
-                {WINDOWS.map((w) => (
-                  <button key={w.key} type="button" className="chip" aria-pressed={windowKey === w.key} onClick={() => setWindowKey(w.key)}>
-                    {w.label}
-                  </button>
-                ))}
-              </div>
+          <section className="card">
+            <div className="stats">
+              {WINDOWS.map((w) => (
+                <Stat
+                  key={w.key}
+                  label={`Failed logins, ${w.label.toLowerCase()}`}
+                  value={summary[w.key].total}
+                  href={activityLink({ event: "login_failed", date_from: fromDay(summary[w.key]) })}
+                />
+              ))}
+              {WINDOWS.map((w) => (
+                <Stat
+                  key={w.key}
+                  label={`Lockouts, ${w.label.toLowerCase()}`}
+                  value={summary[w.key].lockouts}
+                  alert
+                  href={activityLink({ event: "account_locked", date_from: fromDay(summary[w.key]) })}
+                />
+              ))}
             </div>
-            <p className="hint">
-              The 10 addresses and the 10 emails with the most failed logins since {formatDateTime(shown.since)}. Rows
-              with {FAILED_LOGIN_ALERT} or more are marked <span className="pill banned">Watch</span>. Open one to see
-              each attempt with its browser.
-            </p>
-            <h3>By address</h3>
+          </section>
+          <div className="chips" role="group" aria-label="Which period to show">
+            {WINDOWS.map((w) => (
+              <button key={w.key} type="button" className="chip" aria-pressed={windowKey === w.key} onClick={() => setWindowKey(w.key)}>
+                {w.label}
+              </button>
+            ))}
+          </div>
+          <section className="card">
+            <h2>By IP address</h2>
             <ByAddress window={shown} />
-            <h3>By account</h3>
+          </section>
+          <section className="card">
+            <h2>By account</h2>
             <ByAccount window={shown} />
           </section>
+          <p className="hint">
+            The 10 addresses and the 10 emails with the most failed logins. Many accounts tried from one address, or one account tried from many
+            addresses, points to someone guessing passwords.
+          </p>
         </>
       )}
     </div>

@@ -1,4 +1,5 @@
 // Activity log and security view types, matching the FastAPI schemas (TDD 5.3).
+import type { Page } from "./page"
 
 /** The event names from backend/app/models.py (ActivityEvent). */
 export type ActivityEvent =
@@ -19,6 +20,11 @@ export type ActivityEvent =
   | "expense_delete"
   | "workout_delete"
   | "group_delete"
+  | "class_delete"
+  | "equipment_delete"
+  | "announcement_delete"
+  | "plan_delete"
+  | "payment_void"
 
 /** One security event: who did it, to which account, from where and when. */
 export interface ActivityEntry {
@@ -37,14 +43,9 @@ export interface ActivityEntry {
   user_agent: string | null
 }
 
-export interface ActivityPage {
-  items: ActivityEntry[]
-  total: number
-  offset: number
-  limit: number
-}
+export type ActivityPage = Page<ActivityEntry>
 
-/** The filter form. Empty text means "any"; dates are UTC days, both included. */
+/** The filter form. Empty text means "any"; dates are days at the gym, both included. */
 export interface ActivityFilters {
   event: ActivityEvent | ""
   /** Rows where this account acted or was acted on. */

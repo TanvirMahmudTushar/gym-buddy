@@ -2,7 +2,9 @@
 # (SRS FR-72 to FR-76). Used by the routes in app/routers/announcements.py.
 from sqlmodel import Session, col, func, or_, select
 
-from app.models import Announcement, AnnouncementCreate, User, utc_now, utc_today
+from app.models import ActivityEvent, Announcement, AnnouncementCreate, User, gym_today, utc_now
+from app.request_info import Client
+from app.services import activity_service
 
 
 class AnnouncementNotFoundError(Exception):
@@ -10,8 +12,8 @@ class AnnouncementNotFoundError(Exception):
 
 
 def _is_current():
-    """Not past its end date. The end date is a UTC day and still counts; no end date means it never ends."""
-    return or_(col(Announcement.ends_on).is_(None), col(Announcement.ends_on) >= utc_today())
+    """Not past its end date. The end date still counts; no end date means it never ends."""
+    return or_(col(Announcement.ends_on).is_(None), col(Announcement.ends_on) >= gym_today())
 
 
 def _read(announcement: Announcement, posted_by_name: str | None) -> dict:
@@ -69,6 +71,10 @@ def update_announcement(session: Session, announcement_id: int, changes: dict) -
     return _read(announcement, _poster_name(session, announcement))
 
 
-def delete_announcement(session: Session, announcement_id: int) -> None:
-    session.delete(_get(session, announcement_id))
+def delete_announcement(session: Session, announcement_id: int, actor: User, client: Client) -> None:
+    announcement = _get(session, announcement_id)
+    activity_service.record(
+        session, ActivityEvent.ANNOUNCEMENT_DELETE, client, actor=actor, details=announcement.title
+    )
+    session.delete(announcement)
     session.commit()

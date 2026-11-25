@@ -1,9 +1,14 @@
 import { type FormEvent, useState } from "react"
+import { useSave } from "../hooks/useSave"
 import { deleteEquipment, recordService, reportFault, updateEquipment } from "../services/equipmentService"
 import type { Equipment } from "../types/equipment"
 import { categoryLabel, isServiceDue, statusInfo } from "../utils/equipment"
-import { errorText, formatDate, formatDateTime } from "../utils/member"
+import { formatDate } from "../utils/time"
+import Alert from "./Alert"
+import ConfirmModal from "./ConfirmModal"
 import EquipmentForm from "./EquipmentForm"
+import FormActions from "./FormActions"
+import Modal from "./Modal"
 
 interface Props {
   item: Equipment
@@ -15,134 +20,126 @@ interface Props {
 
 // One machine (or set): whether it works, its reported fault and its next service.
 export default function EquipmentItem({ item, canManage, onChanged }: Props) {
-  const [mode, setMode] = useState<"view" | "edit" | "report" | "delete">("view")
+  const [dialog, setDialog] = useState<"edit" | "report" | "delete" | null>(null)
   const [issue, setIssue] = useState("")
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState("")
+  const { saving, error, setError, run } = useSave()
   const status = statusInfo(item.status)
 
-  async function run(action: () => Promise<unknown>) {
-    setBusy(true)
-    setError("")
-    try {
+  const act = (action: () => Promise<unknown>) =>
+    run(async () => {
       await action()
-      setMode("view")
+      setDialog(null)
       setIssue("")
       onChanged()
-    } catch (err) {
-      setError(errorText(err))
-    } finally {
-      setBusy(false)
-    }
-  }
+    })
 
-  const back = () => {
-    setMode("view")
+  function close() {
+    setDialog(null)
     setError("")
   }
 
   function submitReport(e: FormEvent) {
     e.preventDefault()
-    if (!issue.trim()) {
-      setError("Say what is wrong.")
-      return
-    }
-    void run(() => reportFault(item.id, issue.trim()))
+    if (!issue.trim()) return setError("Say what is wrong.")
+    void act(() => reportFault(item.id, issue.trim()))
   }
 
-  if (mode === "edit")
-    return (
-      <li className="class-item">
-        <h3>Edit equipment</h3>
-        <EquipmentForm item={item} saving={busy} error={error} onSave={(body) => run(() => updateEquipment(item.id, body))} onCancel={back} />
-      </li>
-    )
-
   return (
-    <li className="class-item">
-      <div className="toolbar">
-        <h3 className="wrap-text">
-          {item.name} {item.quantity > 1 && <span className="hint">× {item.quantity}</span>}
-        </h3>
+    <li className="item">
+      <div className="item-head">
+        <div>
+          <h2>
+            {item.name} {item.quantity > 1 && <span className="hint">× {item.quantity}</span>}
+          </h2>
+          <span className="hint">{categoryLabel(item.category)}</span>
+        </div>
         <span className={status.pill}>{status.label}</span>
       </div>
-      <p className="hint">
-        {categoryLabel(item.category)}
-        {item.purchased_on && ` · bought ${formatDate(item.purchased_on)}`}
-        {item.last_serviced_on && ` · last serviced ${formatDate(item.last_serviced_on)}`}
-        {item.next_service_on && (
-          <>
-            {" "}
-            · next service {formatDate(item.next_service_on)} {isServiceDue(item) && <span className="pill expired">Due</span>}
-          </>
-        )}
-      </p>
       {item.issue && (
-        <p className="wrap-text">
-          <strong>Fault:</strong> {item.issue}{" "}
-          <span className="hint">
-            reported{item.reported_by_name && ` by ${item.reported_by_name}`}
-            {item.reported_at && ` on ${formatDateTime(item.reported_at)}`}
-          </span>
-        </p>
+        <Alert kind="error">
+          {item.issue} {item.reported_by_name && `(${item.reported_by_name}${item.reported_at ? `, ${formatDate(item.reported_at)}` : ""})`}
+        </Alert>
       )}
-      {item.notes && <p className="announcement-message hint">{item.notes}</p>}
-      {mode === "view" && (
-        <div className="actions">
-          <button type="button" onClick={() => setMode("report")} disabled={busy}>
-            Report a fault
-          </button>
-          {canManage && (
+      {(item.next_service_on || item.last_serviced_on || item.purchased_on) && (
+        <dl className="facts">
+          {item.next_service_on && (
             <>
-              {item.status === "out_of_order" && (
-                <button type="button" onClick={() => run(() => updateEquipment(item.id, { status: "maintenance" }))} disabled={busy}>
-                  Being repaired
-                </button>
-              )}
-              <button type="button" onClick={() => run(() => recordService(item.id))} disabled={busy}>
-                {item.status === "working" ? "Serviced today" : "Fixed today"}
-              </button>
-              <button type="button" onClick={() => setMode("edit")} disabled={busy}>
-                Edit
-              </button>
-              <button type="button" className="danger" onClick={() => setMode("delete")} disabled={busy}>
-                Delete
-              </button>
+              <dt>Next service</dt>
+              <dd>
+                {formatDate(item.next_service_on)} {isServiceDue(item) && <span className="pill warn">Due</span>}
+              </dd>
             </>
           )}
-        </div>
+          {item.last_serviced_on && (
+            <>
+              <dt>Last serviced</dt>
+              <dd>{formatDate(item.last_serviced_on)}</dd>
+            </>
+          )}
+          {item.purchased_on && (
+            <>
+              <dt>Bought</dt>
+              <dd>{formatDate(item.purchased_on)}</dd>
+            </>
+          )}
+        </dl>
       )}
-      {mode === "report" && (
-        <form className="inline" onSubmit={submitReport} noValidate>
-          <div className="field">
-            <label htmlFor={`issue-${item.id}`}>What is wrong?</label>
-            <input id={`issue-${item.id}`} value={issue} onChange={(e) => setIssue(e.target.value)} maxLength={500} autoFocus autoComplete="off" />
-          </div>
-          <button type="submit" className="primary" disabled={busy}>
-            {busy ? "Reporting…" : "Report"}
+      {item.notes && <p className="prose hint">{item.notes}</p>}
+      {dialog === null && <Alert>{error}</Alert>}
+      <div className="actions">
+        {canManage && (
+          <button type="button" className="small" onClick={() => act(() => recordService(item.id))} disabled={saving}>
+            {item.status === "working" ? "Serviced" : "Fixed"}
           </button>
-          <button type="button" onClick={back} disabled={busy}>
-            Cancel
+        )}
+        {canManage && item.status === "out_of_order" && (
+          <button type="button" className="small" onClick={() => act(() => updateEquipment(item.id, { status: "maintenance" }))} disabled={saving}>
+            Being repaired
           </button>
-        </form>
-      )}
-      {mode === "delete" && (
-        <div className="confirm" role="alertdialog" aria-labelledby={`delete-equipment-${item.id}`}>
-          <span id={`delete-equipment-${item.id}`}>Delete {item.name} from the equipment list? This cannot be undone.</span>
-          <div className="actions">
-            <button type="button" className="danger solid" onClick={() => run(() => deleteEquipment(item.id))} disabled={busy}>
-              {busy ? "Deleting…" : "Yes, delete"}
+        )}
+        <button type="button" className="small" onClick={() => setDialog("report")} disabled={saving}>
+          Report fault
+        </button>
+        {canManage && (
+          <>
+            <button type="button" className="small" onClick={() => setDialog("edit")} disabled={saving}>
+              Edit
             </button>
-            <button type="button" onClick={back} disabled={busy}>
-              Keep it
+            <button type="button" className="small danger" onClick={() => setDialog("delete")} disabled={saving}>
+              Delete
             </button>
-          </div>
-        </div>
+          </>
+        )}
+      </div>
+      {dialog === "edit" && (
+        <Modal title={`Edit ${item.name}`} onClose={close}>
+          <EquipmentForm item={item} saving={saving} error={error} onSave={(body) => act(() => updateEquipment(item.id, body))} onCancel={close} />
+        </Modal>
       )}
-      {error && (
-        <p className="error" role="alert">
-          {error}
-        </p>
+      {dialog === "report" && (
+        <Modal title={`Report a fault: ${item.name}`} onClose={close} narrow>
+          <form className="fields" onSubmit={submitReport} noValidate>
+            <div className="field wide">
+              <label htmlFor="equipment-issue">What is wrong?</label>
+              <textarea id="equipment-issue" value={issue} onChange={(e) => setIssue(e.target.value)} maxLength={500} autoFocus />
+            </div>
+            <FormActions label="Report fault" saving={saving} error={error} onCancel={close} />
+          </form>
+        </Modal>
+      )}
+      {dialog === "delete" && (
+        <ConfirmModal
+          title={`Delete ${item.name}?`}
+          confirmLabel="Delete"
+          busyLabel="Deleting…"
+          onClose={close}
+          onConfirm={async () => {
+            await deleteEquipment(item.id)
+            onChanged()
+          }}
+        >
+          It leaves the equipment list. This cannot be undone.
+        </ConfirmModal>
       )}
     </li>
   )

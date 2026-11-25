@@ -1,7 +1,7 @@
 // fetch helpers for equipment: /api/v1/equipment. Trainers read the list and report faults; gym managers and admins
 // manage it.
 import type { Equipment, EquipmentBody, EquipmentFilters, EquipmentStatus } from "../types/equipment"
-import type { Page } from "../types/moderation"
+import type { Page } from "../types/page"
 import { request } from "./api"
 
 const BASE = "/api/v1/equipment"

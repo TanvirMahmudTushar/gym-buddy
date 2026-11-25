@@ -3,13 +3,15 @@
 # Routes only handle HTTP; the rules live in app/services/announcement_service.py.
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 
 from app import rbac
 from app.database import SessionDep
 from app.deps import CurrentUser
 from app.models import AnnouncementCreate, AnnouncementPage, AnnouncementRead, AnnouncementUpdate, User
+from app.params import Limit, Offset, RowId
 from app.rbac import Permission, require_permission
+from app.request_info import ClientDep
 from app.services import announcement_service
 
 router = APIRouter(prefix="/api/v1/announcements", tags=["announcements"])
@@ -23,10 +25,10 @@ def list_announcements(
     session: SessionDep,
     user: CurrentUser,
     include_ended: bool = False,
-    offset: Annotated[int, Query(ge=0)] = 0,
-    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    offset: Offset = 0,
+    limit: Limit = 20,
 ) -> dict:
-    """Newest first. Only current ones (no end date, or an end date of today or later, UTC) unless
+    """Newest first. Only current ones (no end date, or an end date of today or later) unless
     include_ended=true, which needs announcements:manage (403 for the rest)."""
     # The route is open to everyone logged in, so this one option is checked here, with the same permission.
     if include_ended and not rbac.has_permission(user, Permission.ANNOUNCEMENTS_MANAGE):
@@ -37,16 +39,17 @@ def list_announcements(
 
 @router.post("", status_code=201, response_model=AnnouncementRead)
 def create_announcement(body: AnnouncementCreate, session: SessionDep, poster: Poster) -> dict:
-    """ends_on is the last day it shows (UTC); left out, it shows until it is deleted. A day before today returns 422."""
+    """ends_on is the last day it shows; left out, it shows until it is deleted. A day before today returns 422."""
     return announcement_service.create_announcement(session, body, poster)
 
 
 @router.patch("/{announcement_id}", response_model=AnnouncementRead, dependencies=[MANAGE_ANNOUNCEMENTS])
-def update_announcement(announcement_id: int, body: AnnouncementUpdate, session: SessionDep) -> dict:
+def update_announcement(announcement_id: RowId, body: AnnouncementUpdate, session: SessionDep) -> dict:
     """Only the fields sent change. ends_on null removes the end date; a day before today returns 422."""
     return announcement_service.update_announcement(session, announcement_id, body.model_dump(exclude_unset=True))
 
 
-@router.delete("/{announcement_id}", status_code=204, dependencies=[MANAGE_ANNOUNCEMENTS])
-def delete_announcement(announcement_id: int, session: SessionDep) -> None:
-    announcement_service.delete_announcement(session, announcement_id)
+@router.delete("/{announcement_id}", status_code=204)
+def delete_announcement(announcement_id: RowId, session: SessionDep, poster: Poster, client: ClientDep) -> None:
+    """Written to the activity log."""
+    announcement_service.delete_announcement(session, announcement_id, poster, client)

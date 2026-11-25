@@ -1,11 +1,11 @@
-# Revenue for the admin dashboard (SRS FR-52). Days and months are UTC calendar days, the same calendar the
+# Revenue for the admin dashboard (SRS FR-52). Days and months are the gym's calendar days, the same calendar the
 # payments list filters use, so every number here matches the payments list for the same dates.
 # Voided payments are never counted. Net income is revenue minus the expenses dated in the same month.
 from datetime import date, timedelta
 
 from sqlmodel import Session, col, func, select
 
-from app.models import Payment, start_of_day, utc_today
+from app.models import Payment, gym_today, start_of_day
 from app.services import expense_service
 
 METHOD_ORDER = ["cash", "card", "bank_transfer", "mobile_banking"]
@@ -33,7 +33,7 @@ def _month_start(day: date, months_back: int = 0) -> date:
 
 
 def revenue_stats(session: Session) -> dict:
-    today = utc_today()
+    today = gym_today()
     since_30 = today - timedelta(days=LAST_DAYS - 1)  # 30 days counting today
 
     by_method = dict.fromkeys(METHOD_ORDER, (0, 0))

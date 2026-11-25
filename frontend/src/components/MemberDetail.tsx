@@ -1,238 +1,158 @@
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { usePlans } from "../context/PlansContext"
+import { useSave } from "../hooks/useSave"
+import { ApiError } from "../services/api"
 import { cancelMemberBooking, deleteMember, getMember, listMemberBookings, updateMember } from "../services/memberService"
 import type { Member, MemberUpdate } from "../types/member"
-import { errorText, formatDate, memberStatus } from "../utils/member"
+import { expiresSoonNote, memberStatus, membersLink } from "../utils/member"
 import { birthDateText, emergencyContactText } from "../utils/profile"
-import BookingsSection from "./BookingsSection"
-import CheckInSection from "./CheckInSection"
+import { errorText } from "../utils/text"
+import { formatDate } from "../utils/time"
+import Alert from "./Alert"
+import BookingsCard from "./BookingsCard"
+import CheckInCard from "./CheckInCard"
+import ConfirmModal from "./ConfirmModal"
 import EditMemberForm from "./EditMemberForm"
-import PaymentSection from "./PaymentSection"
+import Modal from "./Modal"
+import PageHeader from "./PageHeader"
+import PaymentCard from "./PaymentCard"
 import StatusPill from "./StatusPill"
 
-interface Props {
-  memberId: number | null
-  onChanged: (member: Member) => void
-  onDeleted: () => void
-}
+const BACK = { href: membersLink(), label: "All members" }
 
-export default function MemberDetail({ memberId, onChanged, onDeleted }: Props) {
+// One member: the membership and contact details, with their visits, bookings and payments.
+export default function MemberDetail({ memberId }: { memberId: number }) {
   const { planLabel } = usePlans()
   const [member, setMember] = useState<Member | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState("")
-  const [editing, setEditing] = useState(false)
-  const [confirmingDelete, setConfirmingDelete] = useState(false)
-  const [renewDate, setRenewDate] = useState("")
-  const [busy, setBusy] = useState(false)
-  const [actionError, setActionError] = useState("")
+  const [loadError, setLoadError] = useState("")
+  const [dialog, setDialog] = useState<"edit" | "delete" | null>(null)
+  const { saving, error, setError, run } = useSave()
 
-  // Read single: fetch the selected member by id whenever the selection changes.
-  useEffect(() => {
-    setMember(null)
-    setError("")
-    setEditing(false)
-    setConfirmingDelete(false)
-    setActionError("")
-    if (memberId === null) return
-    let ignore = false
-    setLoading(true)
-    getMember(memberId)
-      .then((m) => {
-        if (ignore) return
-        setMember(m)
-        setRenewDate(m.expires_on)
-      })
-      .catch((err) => !ignore && setError(errorText(err)))
-      .finally(() => !ignore && setLoading(false))
-    return () => {
-      ignore = true
+  const load = useCallback(async () => {
+    try {
+      setMember(await getMember(memberId))
+    } catch (err) {
+      setLoadError(err instanceof ApiError && err.status === 404 ? "This member does not exist. Their account may have been deleted." : errorText(err))
     }
   }, [memberId])
 
-  // Update: send only the changed fields, then show the saved member and refresh the list.
-  async function save(changes: MemberUpdate) {
-    if (!member) return
-    setBusy(true)
-    setActionError("")
-    try {
-      const updated = await updateMember(member.id, changes)
-      setMember(updated)
-      setRenewDate(updated.expires_on)
-      setEditing(false)
-      onChanged(updated)
-    } catch (err) {
-      setActionError(errorText(err))
-    } finally {
-      setBusy(false)
-    }
-  }
+  useEffect(() => {
+    void load()
+  }, [load])
 
-  // A payment that renewed the membership changed the expiry (and plan), so load the member again.
-  async function refreshMember() {
-    if (!member) return
-    try {
-      const fresh = await getMember(member.id)
-      setMember(fresh)
-      setRenewDate(fresh.expires_on)
-      onChanged(fresh)
-    } catch {
-      // The old details stay on screen; the next reload shows the new ones.
-    }
-  }
+  const save = (changes: MemberUpdate) =>
+    run(async () => {
+      setMember(await updateMember(memberId, changes))
+      setDialog(null)
+    })
 
-  function renew() {
-    if (!member) return
-    if (!renewDate || renewDate < member.joined_on) {
-      setActionError(`Pick an expiry date on or after ${formatDate(member.joined_on)}.`)
-      return
-    }
-    save({ expires_on: renewDate })
-  }
-
-  async function remove() {
-    if (!member) return
-    setBusy(true)
-    setActionError("")
-    try {
-      await deleteMember(member.id)
-      onDeleted()
-    } catch (err) {
-      setActionError(errorText(err))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  if (memberId === null)
+  if (!member)
     return (
-      <section className="card panel">
-        <h2>Member details</h2>
-        <p className="empty">Select a member to see their details.</p>
-      </section>
+      <div className="page">
+        <PageHeader title="Member" back={BACK} />
+        {loadError ? <Alert>{loadError}</Alert> : <p className="empty">Loading…</p>}
+      </div>
     )
 
-  if (loading || !member)
-    return (
-      <section className="card panel">
-        <h2>Member details</h2>
-        {error ? <p className="error">{error}</p> : <p className="empty">Loading…</p>}
-      </section>
-    )
-
-  if (editing)
-    return (
-      <section className="card panel" aria-labelledby="edit-heading">
-        <div className="detail-head">
-          <h2 id="edit-heading">Edit member</h2>
-          <StatusPill status={memberStatus(member)} />
-        </div>
-        <EditMemberForm
-          member={member}
-          saving={busy}
-          onSave={save}
-          onCancel={() => {
-            setEditing(false)
-            setActionError("")
-          }}
-        />
-        {actionError && <p className="error">{actionError}</p>}
-      </section>
-    )
-
+  const soon = expiresSoonNote(member)
   return (
-    <section className="card panel" aria-labelledby="detail-heading">
-      <div className="detail-head">
-        <h2 id="detail-heading">{member.name}</h2>
-        <StatusPill status={memberStatus(member)} />
-      </div>
-      <dl>
-        <dt>ID</dt>
-        <dd>{member.id}</dd>
-        <dt>Email</dt>
-        <dd>{member.email}</dd>
-        <dt>Phone</dt>
-        <dd>{member.phone || "Not provided"}</dd>
-        <dt>Date of birth</dt>
-        <dd>{member.date_of_birth ? birthDateText(member.date_of_birth) : "Not provided"}</dd>
-        <dt>Emergency contact</dt>
-        <dd className="wrap-text">{emergencyContactText(member) ?? "Not provided"}</dd>
-        <dt>Plan</dt>
-        <dd>{planLabel(member.plan)}</dd>
-        <dt>Joined</dt>
-        <dd>{formatDate(member.joined_on)}</dd>
-        <dt>Expires</dt>
-        <dd>{formatDate(member.expires_on)}</dd>
-        <dt>Trainer</dt>
-        <dd>{member.trainer_name ?? "None"}</dd>
-        <dt>Notes</dt>
-        <dd>{member.notes || "None"}</dd>
-      </dl>
-      <hr className="separator" />
-      <CheckInSection key={member.id} member={member} />
-      <hr className="separator" />
-      <BookingsSection
-        key={`bookings-${member.id}`}
-        variant="panel"
-        title="Bookings"
-        load={(when, offset, limit) => listMemberBookings(member.id, when, offset, limit)}
-        cancel={(classId) => cancelMemberBooking(member.id, classId)}
-        emptyText="No upcoming classes booked."
-      />
-      <hr className="separator" />
-      <PaymentSection key={`pay-${member.id}`} member={member} onRecorded={(renewed) => renewed && refreshMember()} />
-      <hr className="separator" />
-      <div className="inline">
-        <div className="field">
-          <label htmlFor="renew-date">Renew until</label>
-          <input
-            id="renew-date"
-            type="date"
-            value={renewDate}
-            min={member.joined_on}
-            onChange={(e) => setRenewDate(e.target.value)}
-          />
-        </div>
-        <button type="button" onClick={renew} disabled={busy || renewDate === member.expires_on}>
-          Renew
-        </button>
-      </div>
-      <div className="actions">
-        <button
-          type="button"
-          onClick={() => {
-            setEditing(true)
-            setConfirmingDelete(false)
-            setActionError("")
-          }}
-          disabled={busy}
-        >
+    <div className="page">
+      <PageHeader
+        back={BACK}
+        title={
+          <>
+            {member.name} <StatusPill status={memberStatus(member)} />
+          </>
+        }
+        subtitle={member.email}
+      >
+        <button type="button" onClick={() => setDialog("edit")}>
           Edit
         </button>
-        <button type="button" onClick={() => save({ is_frozen: !member.is_frozen })} disabled={busy}>
+        <button type="button" onClick={() => save({ is_frozen: !member.is_frozen })} disabled={saving}>
           {member.is_frozen ? "Unfreeze" : "Freeze"}
         </button>
-        <button type="button" className="danger" onClick={() => setConfirmingDelete(true)} disabled={busy}>
+        <button type="button" className="danger" onClick={() => setDialog("delete")}>
           Delete
         </button>
-      </div>
-      {confirmingDelete && (
-        <div className="confirm" role="alertdialog" aria-labelledby="confirm-text">
-          <span id="confirm-text">
-            Delete {member.name}'s account? They can no longer log in, and their check-ins and bookings are removed.
-            Payments stay on record. This cannot be undone.
-          </span>
-          <div className="actions">
-            <button type="button" className="danger solid" onClick={remove} disabled={busy}>
-              {busy ? "Deleting…" : "Yes, delete"}
-            </button>
-            <button type="button" onClick={() => setConfirmingDelete(false)} disabled={busy}>
-              Keep member
-            </button>
-          </div>
+      </PageHeader>
+      {dialog === null && <Alert>{error}</Alert>}
+      <div className="split">
+        <div className="column">
+          <section className="card">
+            <h2>Membership</h2>
+            <dl className="facts">
+              <dt>Plan</dt>
+              <dd>{planLabel(member.plan)}</dd>
+              <dt>Joined</dt>
+              <dd>{formatDate(member.joined_on)}</dd>
+              <dt>Expires</dt>
+              <dd>
+                {formatDate(member.expires_on)} {soon && <span className="hint">({soon})</span>}
+              </dd>
+              <dt>Trainer</dt>
+              <dd>{member.trainer_name ?? "None"}</dd>
+              <dt>Notes</dt>
+              <dd className="prose">{member.notes || "None"}</dd>
+            </dl>
+          </section>
+          <section className="card">
+            <h2>Contact</h2>
+            <dl className="facts">
+              <dt>Phone</dt>
+              <dd>{member.phone || "Not given"}</dd>
+              <dt>Date of birth</dt>
+              <dd>{member.date_of_birth ? birthDateText(member.date_of_birth) : "Not given"}</dd>
+              <dt>Emergency</dt>
+              <dd>{emergencyContactText(member) ?? "Not given"}</dd>
+            </dl>
+          </section>
+          <PaymentCard member={member} onRenewed={load} />
         </div>
+        <div className="column">
+          <CheckInCard member={member} />
+          <BookingsCard
+            title="Bookings"
+            load={(when, offset, limit) => listMemberBookings(memberId, when, offset, limit)}
+            cancel={(classId) => cancelMemberBooking(memberId, classId)}
+            emptyText="No upcoming classes booked."
+          />
+        </div>
+      </div>
+      {dialog === "edit" && (
+        <Modal
+          title={`Edit ${member.name}`}
+          onClose={() => {
+            setDialog(null)
+            setError("")
+          }}
+        >
+          <EditMemberForm
+            member={member}
+            saving={saving}
+            error={error}
+            onSave={save}
+            onCancel={() => {
+              setDialog(null)
+              setError("")
+            }}
+          />
+        </Modal>
       )}
-      {actionError && <p className="error">{actionError}</p>}
-    </section>
+      {dialog === "delete" && (
+        <ConfirmModal
+          title={`Delete ${member.name}'s account?`}
+          confirmLabel="Delete account"
+          busyLabel="Deleting…"
+          onClose={() => setDialog(null)}
+          onConfirm={async () => {
+            await deleteMember(memberId)
+            window.location.hash = membersLink()
+          }}
+        >
+          They can no longer log in, and their check-ins and bookings are removed. Payments stay on record. This cannot be undone.
+        </ConfirmModal>
+      )}
+    </div>
   )
 }

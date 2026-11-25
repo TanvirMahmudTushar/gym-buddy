@@ -1,73 +1,73 @@
 import { useState } from "react"
+import Alert from "../../components/Alert"
+import ConfirmModal from "../../components/ConfirmModal"
+import Icon from "../../components/Icon"
+import Modal from "../../components/Modal"
+import PageHeader from "../../components/PageHeader"
 import PlanForm from "../../components/PlanForm"
 import { usePlans } from "../../context/PlansContext"
+import { useSave } from "../../hooks/useSave"
 import { createPlan, deletePlan, updatePlan } from "../../services/planService"
 import type { MembershipPlan, PlanBody } from "../../types/payment"
-import { errorText } from "../../utils/member"
 import { formatMoney } from "../../utils/payment"
 
 // One plan: its price and length, with Edit, Retire (or Offer again) and Delete.
 function PlanItem({ plan, onSaved }: { plan: MembershipPlan; onSaved: () => Promise<void> }) {
-  const [editing, setEditing] = useState(false)
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState("")
+  const [dialog, setDialog] = useState<"edit" | "delete" | null>(null)
+  const { saving, error, setError, run } = useSave()
 
-  async function run(action: () => Promise<unknown>) {
-    setBusy(true)
-    setError("")
-    try {
+  const act = (action: () => Promise<unknown>) =>
+    run(async () => {
       await action()
-      setEditing(false)
+      setDialog(null)
       await onSaved()
-    } catch (err) {
-      setError(errorText(err))
-    } finally {
-      setBusy(false)
-    }
+    })
+
+  function close() {
+    setDialog(null)
+    setError("")
   }
 
-  if (editing)
-    return (
-      <li className="class-item">
-        <PlanForm
-          plan={plan}
-          saving={busy}
-          error={error}
-          onSave={(body) => run(() => updatePlan(plan.plan, body))}
-          onCancel={() => {
-            setEditing(false)
-            setError("")
-          }}
-        />
-      </li>
-    )
-
   return (
-    <li className="class-item">
-      <div className="toolbar">
-        <h3 className="wrap-text">
-          {plan.name} {!plan.is_active && <span className="pill neutral">Retired</span>}
-        </h3>
-        <strong>
-          {formatMoney(plan.price)} <span className="hint">for {plan.duration_days} days</span>
-        </strong>
+    <li className="item">
+      <div className="item-head">
+        <h2>{plan.name}</h2>
+        {!plan.is_active && <span className="pill">Retired</span>}
       </div>
+      <p className="summary">
+        <strong>{formatMoney(plan.price)}</strong> <span className="hint">for {plan.duration_days} days</span>
+      </p>
       {plan.description && <p className="wrap-text">{plan.description}</p>}
+      {dialog === null && <Alert>{error}</Alert>}
       <div className="actions">
-        <button type="button" onClick={() => setEditing(true)} disabled={busy}>
+        <button type="button" className="small" onClick={() => setDialog("edit")} disabled={saving}>
           Edit
         </button>
-        <button type="button" onClick={() => run(() => updatePlan(plan.plan, { is_active: !plan.is_active }))} disabled={busy}>
+        <button type="button" className="small" onClick={() => act(() => updatePlan(plan.plan, { is_active: !plan.is_active }))} disabled={saving}>
           {plan.is_active ? "Retire" : "Offer again"}
         </button>
-        <button type="button" className="danger" onClick={() => run(() => deletePlan(plan.plan))} disabled={busy}>
+        <button type="button" className="small danger" onClick={() => setDialog("delete")} disabled={saving}>
           Delete
         </button>
       </div>
-      {error && (
-        <p className="error" role="alert">
-          {error}
-        </p>
+      {dialog === "edit" && (
+        <Modal title={`Edit ${plan.name}`} onClose={close}>
+          <PlanForm plan={plan} saving={saving} error={error} onSave={(body) => act(() => updatePlan(plan.plan, body))} onCancel={close} />
+        </Modal>
+      )}
+      {dialog === "delete" && (
+        <ConfirmModal
+          title={`Delete ${plan.name}?`}
+          confirmLabel="Delete plan"
+          busyLabel="Deleting…"
+          onClose={close}
+          onConfirm={async () => {
+            await deletePlan(plan.plan)
+            await onSaved()
+          }}
+        >
+          Only a plan nobody ever had can be deleted; retire it instead if members or payments have it. This cannot be undone.
+        </ConfirmModal>
       )}
     </li>
   )
@@ -76,47 +76,42 @@ function PlanItem({ plan, onSaved }: { plan: MembershipPlan; onSaved: () => Prom
 // Admins only: the membership plans the gym sells.
 export default function PlansPage() {
   const { plans, reload } = usePlans()
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState("")
-  // Changing this remounts the add form, which clears it after a plan is added.
-  const [formKey, setFormKey] = useState(0)
+  const [adding, setAdding] = useState(false)
+  const { saving, error, setError, run } = useSave()
 
-  async function add(body: PlanBody) {
-    setSaving(true)
+  function close() {
+    setAdding(false)
     setError("")
-    try {
-      await createPlan(body)
-      setFormKey((k) => k + 1)
-      await reload()
-    } catch (err) {
-      setError(errorText(err))
-    } finally {
-      setSaving(false)
-    }
   }
 
+  const add = (body: PlanBody) =>
+    run(async () => {
+      await createPlan(body)
+      close()
+      await reload()
+    })
+
   return (
-    <div className="column narrow-wide">
-      <section className="card" aria-labelledby="plans-heading">
-        <h2 id="plans-heading">Membership plans</h2>
-        <p className="hint">
-          The price fills in the amount when staff take a payment; the days decide how far a new membership or a renewal
-          runs. Payments already taken are not changed. Retire a plan to stop selling it: members who have it keep it. Only a plan nobody ever had can be deleted.
-        </p>
-        {plans.length === 0 ? (
-          <p className="empty">No plans yet. Add the first one below.</p>
-        ) : (
-          <ul className="class-list">
-            {plans.map((p) => (
-              <PlanItem key={p.plan} plan={p} onSaved={reload} />
-            ))}
-          </ul>
-        )}
-      </section>
-      <section className="card" aria-labelledby="add-plan-heading">
-        <h2 id="add-plan-heading">Add a plan</h2>
-        <PlanForm key={formKey} saving={saving} error={error} onSave={add} />
-      </section>
+    <div className="page">
+      <PageHeader title="Plans" subtitle="What the gym sells. Retire a plan to stop selling it: members who have it keep it, and payments already taken do not change.">
+        <button type="button" className="primary" onClick={() => setAdding(true)}>
+          <Icon name="plus" /> Add plan
+        </button>
+      </PageHeader>
+      {plans.length === 0 ? (
+        <p className="empty">No plans yet. Add the first one.</p>
+      ) : (
+        <ul className="card-grid">
+          {plans.map((p) => (
+            <PlanItem key={p.plan} plan={p} onSaved={reload} />
+          ))}
+        </ul>
+      )}
+      {adding && (
+        <Modal title="Add a plan" onClose={close}>
+          <PlanForm saving={saving} error={error} onSave={add} onCancel={close} />
+        </Modal>
+      )}
     </div>
   )
 }

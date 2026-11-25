@@ -7,13 +7,16 @@ from sqlmodel import Session, col, func, select
 
 from app.models import (
     SERVICE_DUE_DAYS,
+    ActivityEvent,
     Equipment,
     EquipmentCreate,
     EquipmentFilter,
     User,
+    gym_today,
     utc_now,
-    utc_today,
 )
+from app.request_info import Client
+from app.services import activity_service
 from app.services.search import contains_any
 
 Reporter = aliased(User)
@@ -28,7 +31,7 @@ class EquipmentNotFoundError(Exception):
 
 def _service_due():
     """Overdue, or due today or in the next 7 days. No service date never matches."""
-    return col(Equipment.next_service_on) <= utc_today() + timedelta(days=SERVICE_DUE_DAYS)
+    return col(Equipment.next_service_on) <= gym_today() + timedelta(days=SERVICE_DUE_DAYS)
 
 
 def _read(item: Equipment, reported_by_name: str | None) -> dict:
@@ -37,7 +40,11 @@ def _read(item: Equipment, reported_by_name: str | None) -> dict:
 
 def _with_reporter(filters: list):
     # Outer join: most equipment has no reported fault.
-    return select(Equipment, Reporter.name).join(Reporter, col(Equipment.reported_by) == col(Reporter.id), isouter=True).where(*filters)
+    return (
+        select(Equipment, Reporter.name)
+        .join(Reporter, col(Equipment.reported_by) == col(Reporter.id), isouter=True)
+        .where(*filters)
+    )
 
 
 def _get(session: Session, equipment_id: int) -> Equipment:
@@ -56,7 +63,7 @@ def _set_next_service(item: Equipment) -> None:
     if item.service_every_days is None:
         item.next_service_on = None
         return
-    base = item.last_serviced_on or item.purchased_on or utc_today()
+    base = item.last_serviced_on or item.purchased_on or gym_today()
     item.next_service_on = base + timedelta(days=item.service_every_days)
 
 
@@ -129,14 +136,16 @@ def record_service(session: Session, equipment_id: int) -> dict:
     """Serviced or repaired today: it works again, the fault is cleared and the next service is counted from today."""
     item = _get(session, equipment_id)
     item.status = "working"
-    item.last_serviced_on = utc_today()
+    item.last_serviced_on = gym_today()
     _clear_fault(item)
     _set_next_service(item)
     return _save(session, item)
 
 
-def delete_equipment(session: Session, equipment_id: int) -> None:
-    session.delete(_get(session, equipment_id))
+def delete_equipment(session: Session, equipment_id: int, actor: User, client: Client) -> None:
+    item = _get(session, equipment_id)
+    activity_service.record(session, ActivityEvent.EQUIPMENT_DELETE, client, actor=actor, details=item.name)
+    session.delete(item)
     session.commit()
 
 

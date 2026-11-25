@@ -2,42 +2,49 @@
 // (GET /users/me), so the menu always matches what the API allows. Hiding a page is not the security: the API
 // checks the same permission on every request (backend/app/rbac.py).
 import type { Me, Permission, Role } from "../types/auth"
+import { pageLink } from "./hash"
 
 export const ROLES: { value: Role; label: string; description: string }[] = [
-  { value: "user", label: "User", description: "A gym member: sees their own membership, books classes and follows the workouts assigned to them." },
-  { value: "trainer", label: "Trainer", description: "Teaches classes and marks who came, sees their own clients, and runs training groups." },
-  { value: "gym_manager", label: "Gym Manager", description: "Runs the gym day to day: members, attendance, payments, classes, equipment and announcements." },
-  { value: "admin", label: "Admin", description: "Everything a Gym Manager can do, plus plans, expenses, reports, users and roles, and the security log." },
+  { value: "user", label: "User", description: "A gym member: their own membership, class bookings and workouts." },
+  { value: "trainer", label: "Trainer", description: "Teaches classes, sees their own clients and runs training groups." },
+  { value: "gym_manager", label: "Gym Manager", description: "Runs the gym day to day: members, attendance, payments, classes and equipment." },
+  { value: "admin", label: "Admin", description: "Everything a Gym Manager can do, plus plans, expenses, users and roles, and the security log." },
 ]
 
 export const roleLabel = (role: Role) => ROLES.find((r) => r.value === role)?.label ?? role
 
 /** The Users page, or one user's details on it: #/users?user=5. */
-export const usersLink = (id: number | null) => (id === null ? "#/users" : `#/users?user=${id}`)
+export const usersLink = (id: number | null = null) => pageLink("users", { user: id })
 
 /** True when the logged-in person's role holds this permission. */
 export const can = (user: Me | null, permission: Permission) => user?.permissions.includes(permission) ?? false
 
-export type Page = "login" | "signup" | ProtectedPage
-export type ProtectedPage =
-  | "dashboard"
-  | "members"
-  | "attendance"
-  | "payments"
-  | "classes"
-  | "training"
-  | "equipment"
-  | "announcements"
-  | "plans"
-  | "expenses"
-  | "users"
-  | "activity"
-  | "security"
-  | "my-classes"
-  | "clients"
-  | "membership"
-  | "timetable"
-  | "account"
+/** Every page, with its name in the menu and the browser's title bar. */
+export const PAGE_TITLES = {
+  login: "Log in",
+  signup: "Sign up",
+  dashboard: "Dashboard",
+  members: "Members",
+  attendance: "Attendance",
+  payments: "Payments",
+  classes: "Classes",
+  training: "Training",
+  equipment: "Equipment",
+  announcements: "Announcements",
+  plans: "Plans",
+  expenses: "Expenses",
+  users: "Users",
+  activity: "Activity log",
+  security: "Security",
+  "my-classes": "My classes",
+  clients: "My clients",
+  membership: "My membership",
+  timetable: "Book a class",
+  account: "My account",
+}
+
+export type Page = keyof typeof PAGE_TITLES
+export type ProtectedPage = Exclude<Page, "login" | "signup">
 
 /** What each page needs: the permission of the API calls it makes. */
 const PAGE_ACCESS: Record<ProtectedPage, (user: Me) => boolean> = {

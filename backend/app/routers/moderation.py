@@ -3,7 +3,7 @@
 # Routes only handle HTTP; the queries live in app/services/moderation_service.py.
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from app.database import SessionDep
 from app.models import (
@@ -14,8 +14,9 @@ from app.models import (
     ModerationWorkoutFilter,
     ModerationWorkoutPage,
     User,
-    utc_today,
+    gym_today,
 )
+from app.params import Limit, Offset, RowId
 from app.rbac import Permission, require_permission
 from app.request_info import ClientDep
 from app.services import moderation_service
@@ -27,10 +28,6 @@ READ = Depends(require_permission(Permission.CONTENT_MODERATE))
 Moderator = Annotated[User, Depends(require_permission(Permission.CONTENT_MODERATE))]
 WorkoutFilters = Annotated[ModerationWorkoutFilter, Query()]
 GroupFilters = Annotated[ModerationGroupFilter, Query()]
-# The id columns are 32-bit integers, so a larger id is refused as invalid instead of reaching the database.
-RowId = Annotated[int, Path(ge=1, le=2_147_483_647)]
-Offset = Annotated[int, Query(ge=0)]
-Limit = Annotated[int, Query(ge=1, le=100)]
 CSV_RESPONSE = {200: {"content": {"text/csv": {}}, "description": "The matching rows as CSV"}}
 
 
@@ -40,7 +37,7 @@ def _csv(content: str, name: str) -> Response:
         media_type="text/csv; charset=utf-8",
         # People's names and emails: no cache on the way may keep a copy.
         headers={
-            "Content-Disposition": f'attachment; filename="{name}-{utc_today().isoformat()}.csv"',
+            "Content-Disposition": f'attachment; filename="{name}-{gym_today().isoformat()}.csv"',
             "Cache-Control": "no-store",
         },
     )
@@ -76,7 +73,7 @@ def delete_workout(workout_id: RowId, session: SessionDep, admin: Moderator, cli
 @router.get("/groups", response_model=ModerationGroupPage, dependencies=[READ])
 def list_groups(session: SessionDep, filters: GroupFilters, offset: Offset = 0, limit: Limit = 20) -> dict:
     """Every training group, newest first, with its owner and how many people and workouts it has. owner_id,
-    date_from and date_to (the UTC day it was made) and q (group name, owner's name or email) combine."""
+    date_from and date_to (the day it was made) and q (group name, owner's name or email) combine."""
     items, total = moderation_service.list_groups(session, filters, offset, limit)
     return {"items": items, "total": total, "offset": offset, "limit": limit}
 

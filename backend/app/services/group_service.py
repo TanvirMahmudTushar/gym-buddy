@@ -10,8 +10,10 @@ from sqlalchemy.orm import aliased
 from sqlmodel import Session, col, delete, func, select, update
 
 from app import rbac
-from app.models import GroupMember, GroupMemberAdd, TrainingGroup, User, Workout
+from app.models import ActivityEvent, GroupMember, GroupMemberAdd, TrainingGroup, User, Workout
 from app.rbac import GroupPermission
+from app.request_info import Client
+from app.services import activity_service
 
 
 class GroupNotFoundError(Exception):
@@ -153,11 +155,12 @@ def rename_group(session: Session, user: User, group_id: int, name: str) -> dict
     return get_group(session, user, group_id)
 
 
-def delete_group(session: Session, user: User, group_id: int) -> None:
+def delete_group(session: Session, user: User, group_id: int, client: Client) -> None:
     """Deletes the group with its workouts and memberships. The database cascades too, but SQLite does not
     enforce that by default, so the rows are deleted here."""
     group, permissions = access(session, user, group_id)
     require(permissions, GroupPermission.MANAGE)
+    activity_service.record(session, ActivityEvent.GROUP_DELETE, client, actor=user, details=group.name)
     delete_groups(session, [group.id])
     session.commit()
 

@@ -1,8 +1,10 @@
 import { useState } from "react"
 import type { RevenueStats } from "../types/payment"
-import { formatDate } from "../utils/member"
-import { formatMoney, methodLabel } from "../utils/payment"
+import { formatMoney, methodLabel, paymentsLink } from "../utils/payment"
+import { count } from "../utils/text"
+import { gymToday } from "../utils/time"
 import BarList from "./BarList"
+import Stat from "./Stat"
 
 /** A round number at or just above the largest value, so the axis reads 0 / half / top in clean steps. */
 function niceMax(value: number): number {
@@ -14,7 +16,7 @@ function niceMax(value: number): number {
 
 /** Axis ticks: in full under 10,000, compact (12K) once the axis reaches it. */
 function tickLabel(value: number, top: number): string {
-  if (top < 10_000) return value.toLocaleString("en-US")
+  if (top < 10_000 || value === 0) return value.toLocaleString("en-US")
   return `${Number((value / 1000).toFixed(1))}K`
 }
 
@@ -80,26 +82,34 @@ function MonthChart({ months }: { months: RevenueStats["months"] }) {
       )}
       <details className="chart-table">
         <summary>Show as a table, with expenses and net income</summary>
-        <table>
-          <thead>
-            <tr>
-              <th>Month</th>
-              <th>Revenue</th>
-              <th>Expenses</th>
-              <th>Net</th>
-            </tr>
-          </thead>
-          <tbody>
-            {months.map((m) => (
-              <tr key={m.month}>
-                <td>{monthName(m.month, "long")}</td>
-                <td>{formatMoney(m.amount)}</td>
-                <td>{formatMoney(m.expenses)}</td>
-                <td>{formatMoney(m.net)}</td>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Month</th>
+                <th className="number">Revenue</th>
+                <th className="number">Expenses</th>
+                <th className="number">Net</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {months.map((m) => (
+                <tr key={m.month}>
+                  <td className="name">{monthName(m.month, "long")}</td>
+                  <td data-label="Revenue" className="number">
+                    {formatMoney(m.amount)}
+                  </td>
+                  <td data-label="Expenses" className="number">
+                    {formatMoney(m.expenses)}
+                  </td>
+                  <td data-label="Net" className="number">
+                    {formatMoney(m.net)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </details>
     </>
   )
@@ -113,7 +123,7 @@ function MethodBars({ methods }: { methods: RevenueStats["by_method"] }) {
       bars={methods.map((m) => ({
         key: m.method,
         name: methodLabel(m.method),
-        note: `${m.count} payment${m.count === 1 ? "" : "s"}`,
+        note: count(m.count, "payment"),
         value: m.amount,
         label: formatMoney(m.amount),
       }))}
@@ -121,49 +131,32 @@ function MethodBars({ methods }: { methods: RevenueStats["by_method"] }) {
   )
 }
 
-// Admins only: money taken and spent, from the same payments and expenses (and the same UTC days) as their pages.
-export default function RevenueCard({ revenue }: { revenue: RevenueStats }) {
+// Admins only: money taken and spent, from the same payments and expenses as their pages. Voided payments never count.
+export default function RevenueCard({ revenue: r }: { revenue: RevenueStats }) {
+  const today = gymToday()
   return (
-    <section className="card" aria-labelledby="stats-revenue">
-      <h2 id="stats-revenue">Revenue and net income</h2>
-      <dl className="stats">
-        <div className="stat">
-          <dt>Today</dt>
-          <dd>{formatMoney(revenue.today)}</dd>
-        </div>
-        <div className="stat">
-          <dt>This month</dt>
-          <dd>{formatMoney(revenue.this_month)}</dd>
-        </div>
-        <div className="stat">
-          <dt>Expenses this month</dt>
-          <dd>
-            <a href="#/expenses">{formatMoney(revenue.expenses_this_month)}</a>
-          </dd>
-        </div>
-        <div className={revenue.net_this_month < 0 ? "stat alert" : "stat"}>
-          <dt>Net this month</dt>
-          <dd>{formatMoney(revenue.net_this_month)}</dd>
-        </div>
-        <div className="stat">
-          <dt>Last 30 days</dt>
-          <dd>{formatMoney(revenue.last_30_days)}</dd>
-        </div>
-      </dl>
-      <div className="revenue-grid">
+    <section className="card">
+      <div className="toolbar">
+        <h2>Revenue and net income</h2>
+        <a href="#/payments">All payments</a>
+      </div>
+      <div className="stats">
+        <Stat label="Today" value={formatMoney(r.today)} href={paymentsLink(today, today)} />
+        <Stat label="Last 30 days" value={formatMoney(r.last_30_days)} href={paymentsLink(r.last_30_days_from, today)} />
+        <Stat label="This month" value={formatMoney(r.this_month)} href={paymentsLink(`${today.slice(0, 7)}-01`, today)} />
+        <Stat label="Expenses this month" value={formatMoney(r.expenses_this_month)} href="#/expenses" />
+        <Stat label="Net this month" value={formatMoney(r.net_this_month)} />
+      </div>
+      <div className="split">
         <div className="stack">
           <h3>Last 30 days by method</h3>
-          <MethodBars methods={revenue.by_method} />
+          <MethodBars methods={r.by_method} />
         </div>
         <div className="stack">
-          <h3>Revenue, last 6 months (৳)</h3>
-          <MonthChart months={revenue.months} />
+          <h3>Last 6 months (taka)</h3>
+          <MonthChart months={r.months} />
         </div>
       </div>
-      <p className="hint">
-        Whole taka by UTC day, voided payments left out. The last 30 days run from {formatDate(revenue.last_30_days_from)} to
-        today. <a href="#/payments">Open the payments page</a>
-      </p>
     </section>
   )
 }

@@ -123,7 +123,7 @@ sequenceDiagram
 
 ```
 backend/
-  main.py              # creates the app, includes routers, maps service errors to status codes, health check
+  main.py              # creates the app: CORS, routers, error handlers, health check
   app/
     __init__.py        # loads backend/.env (developer machines only) before any module reads a variable
     config.py          # settings: load_local_env() (backend/.env, never on Vercel, never overriding) and frontend_origins() (FRONTEND_ORIGIN for CORS)
@@ -176,7 +176,7 @@ backend/
       group_service.py   # training groups: access() and require() on rbac.group_permissions(), list with counts, members, delete_for_accounts(); raises GroupNotFoundError / GroupPermissionError / GroupOwnerError
       moderation_service.py # admin lists, CSVs and deletes of anyone's workouts and groups (one activity row per delete)
       workout_service.py # workouts in groups: lists, add, edit, assign, mark done, delete; raises WorkoutNotFoundError / NotAssignedToYouError / AssigneeNotInGroupError
-  tests/               # pytest suite (section 14): conftest.py, test_login.py, test_tokens.py, test_refresh.py, test_rbac.py, test_gym.py, test_startup.py, test_cors.py, test_config.py
+  tests/               # pytest suite (section 14): conftest.py, test_login.py, test_tokens.py, test_refresh.py, test_rbac.py, test_gym.py, test_startup.py, test_robustness.py, test_cors.py, test_config.py
   .env.example         # the four variables with placeholders only (copy to backend/.env)
   requirements-dev.txt # -r requirements.txt + pytest, httpx (not installed by Vercel)
   pytest.ini
@@ -191,7 +191,7 @@ frontend/
     services/          # fetch calls to the API; api.ts keeps the access token in memory and refreshes it once on a 401
     types/             # TypeScript types
     utils/             # display helpers; membersLink() builds the #/members?filter=&member= address
-    hooks/             # usePagedList (Load more); useDebouncedValue: search boxes ask the API once typing pauses
+    hooks/             # usePagedList (Previous / Next); useDebouncedValue: search boxes ask the API once typing pauses
 scripts/
   seed_demo.py         # demo accounts and sample data through the public API (standard library only; not deployed)
 docs/
@@ -201,7 +201,7 @@ docs/
   FINAL_REPORT.md
 ```
 
-Keep routers thin: validate input, check permissions through dependencies, then call a function in `services/`. The service holds the business rules and the database queries and raises plain Python errors (`MemberNotFoundError`, `InvalidExpiryError`); `main.py` turns them into the 404 and 422 responses.
+Keep routers thin: validate input, check permissions through dependencies, then call a function in `services/`. The service holds the business rules and the database queries and raises plain Python errors (`MemberNotFoundError`, `InvalidExpiryError`); `errors.py` turns them into the 404 and 422 responses.
 
 ## 5. Data model
 
@@ -380,7 +380,7 @@ Voiding is a conditional `UPDATE ... WHERE voided_at IS NULL`, so voiding twice 
 | `id` | integer | Primary key |
 | `title` | varchar(100) | Not null, 1–100 characters after trimming |
 | `message` | varchar(1000) | Not null, 1–1,000 characters after trimming; line breaks are kept |
-| `ends_on` | date | Nullable: the last UTC day it shows, inclusive (like `expires_on`). `null` = shows until deleted. Not before today when sent |
+| `ends_on` | date | Nullable: the last day it shows, inclusive (like `expires_on`). `null` = shows until deleted. Not before today when sent |
 | `posted_by` | integer | FK → `app_user.id`, nullable, on delete set null (the service sets it to null before deleting an account, since SQLite does not enforce it) |
 | `posted_at` | timestamp (UTC) | Not null, indexed (`ix_announcement_posted_at`): the lists are newest first |
 | `updated_at` | timestamp (UTC) | Nullable: set on every edit, `null` until then |
@@ -607,7 +607,7 @@ erDiagram
 - Gym managers and admins (`members:read`): every member, through `/members`.
 - Trainers and other users: none (`403` on `/members`).
 
-**A membership is "valid"** when `plan` is set, `is_frozen` is false and `expires_on >= today` (UTC). Booking a class and checking in both require a valid membership.
+**A membership is "valid"** when `plan` is set, `is_frozen` is false and `expires_on >= today`. Booking a class and checking in both require a valid membership.
 
 ### 5.3 Schemas
 
@@ -636,11 +636,11 @@ erDiagram
 | `BulkUserAction` | Bulk ban / unban | `ids` (1 to 100 account ids; duplicates count once), `reason?` (≤ 500) | Beta |
 | `BulkBanResult` / `BulkUnbanResult` | Bulk ban / unban response | `banned` (or `unbanned`): the ids changed; `skipped: [{id, name?, reason}]` | Beta |
 | `SessionsRevoked` | End a user's sessions | `revoked` (how many active sessions ended) | Beta |
-| `ModerationWorkoutFilter` / `ModerationGroupFilter` | Moderation filters for the lists and CSVs | workouts: `owner_id?`, `group_id?`, `date_from?`, `date_to?` (the workout's date), `q?`; groups: `owner_id?`, `date_from?`, `date_to?` (UTC day made), `q?`; `date_from` after `date_to` is `422` | Beta |
+| `ModerationWorkoutFilter` / `ModerationGroupFilter` | Moderation filters for the lists and CSVs | workouts: `owner_id?`, `group_id?`, `status?`, `date_from?`, `date_to?` (the workout's date), `q?`; groups: `owner_id?`, `date_from?`, `date_to?` (the day it was made), `q?`; `date_from` after `date_to` is `422` | Beta |
 | `ModerationWorkoutRead` / `ModerationWorkoutPage` | Admin workout list | `WorkoutRead` + `owner_email?`; page: `items`, `total`, `offset`, `limit` | Beta |
 | `ModerationGroupRead` / `ModerationGroupPage` | Admin group list | `id`, `name`, `owner_id`, `owner_name`, `owner_email`, `created_at`, `member_count` (owner included), `workout_count` | Beta |
 | `ContentBulkDelete` / `ContentDeleted` | Delete many | `ids` (1 to 100) / `deleted` (how many; unknown ids skipped) | Beta |
-| `AdminUserDetail` | A user's details | `AdminUserRead` + `joined_on?`, `locked_until?`, `sessions: AdminSessionRead[]` (`id`, `created_at`, `last_used_at`, `expires_at`, `ip?`, `user_agent?`), `records {visits, bookings, payments, workouts_added, workouts_assigned, workouts_completed}`, `groups [{id, name, is_owner, member_count}]`, `recent_activity: ActivityRead[]` (10); never the password hash | Beta |
+| `AdminUserDetail` | A user's details | `AdminUserRead` + `joined_on?`, `locked_until?`, `password_changed_at?`, `sessions: AdminSessionRead[]` (`id`, `created_at`, `last_used_at`, `expires_at`, `ip?`, `user_agent?`), `records {visits, bookings, payments, workouts_added, workouts_assigned, workouts_completed}`, `recent_records {workouts, bookings, visits, payments}` (5 newest of each), `groups [{id, name, is_owner, member_count}]`, `recent_activity: ActivityRead[]` (10); never the password hash | Beta |
 | `PasswordResetResult` | Admin password reset | `user: AdminUserRead`, `temporary_password` (shown once) | Beta |
 | `AdminStats` | Dashboard | `members {total, active, expired, frozen, new_last_7_days, expiring_soon}`, `classes {total, upcoming}`, `check_ins {today, last_7_days, inside_now, by_day [{day, count}]}`, `users {total, users, trainers, gym_managers, admins, banned, new_last_7_days}`, `workouts {total, last_7_days, completed}`, `groups {total}`, `equipment {total, needs_attention, service_due}` | Beta |
 | `Overview` | Front desk part of the Dashboard | `check_ins_today`, `inside_now`, `expiring_soon`, `waiting`, `payments_today {count, amount}`, `equipment_attention`, `equipment_service_due`, `next_classes: ClassRead[]` (5) | Beta |
@@ -655,7 +655,7 @@ erDiagram
 | `BookedClassRead` / `BookedClassPage` | A member's bookings | `class_id`, `class_name`, `starts_at`, `duration_minutes`, `trainer_name?`, `booked_at`, `attended?` | Beta |
 | `PaymentCreate` / `PaymentRead` / `PaymentPage` | Record and list payments | create: `amount`, `method`, `note?`, `renew_plan?`; read: `id`, `member_id?`, `member_name`, `amount`, `method`, `plan?`, `note?`, `paid_at`, `renewed_until?`, `recorded_by_name?`, `voided_at?`, `void_reason?`, `voided_by_name?` | Beta |
 | `PaymentListPage` | All payments | `PaymentPage` + `total_amount` (sum of the matching payments that are not voided, across all pages) | Beta |
-| `PaymentFilter` | Query filters for the list and the CSV | `date_from?`, `date_to?` (UTC days, inclusive; `date_from` after `date_to` is `422`), `method?`, `member?` (part of the name, any case), `include_voided` (default false) | Beta |
+| `PaymentFilter` | Query filters for the list and the CSV | `date_from?`, `date_to?` (days at the gym, inclusive; `date_from` after `date_to` is `422`), `method?`, `member?` (part of the name, any case), `include_voided` (default false) | Beta |
 | `VoidRequest` | Void a payment | `reason` (1 to 200 characters, required) | Beta |
 | `PlanRead` | Plans | `plan` (code), `name`, `price`, `duration_days`, `description?`, `is_active` | Beta |
 | `PlanCreate` / `PlanUpdate` | Add / change a plan | `name` (1–60), `price` (1 to 10,000,000), `duration_days` (1 to 3,660), `description?` (≤ 300); update: all optional, plus `is_active` | Beta |
@@ -666,7 +666,7 @@ erDiagram
 | `CheckInPage` | Check-in lists | `items: CheckInRead[]`, `total`, `offset`, `limit` | Beta |
 | `AnnouncementCreate` / `AnnouncementUpdate` | Post / edit an announcement | `title` (1–100), `message` (1–1,000), `ends_on?` (a date not before today, or null for none); all optional on update, where `title` and `message` cannot be null and a left-out `ends_on` keeps the end date | Beta |
 | `ActivityRead` / `ActivityPage` | Activity log | `id`, `created_at`, `event`, `actor_id?`, `actor_email?`, `target_id?`, `target_email?`, `details?`, `ip?`, `user_agent?`; page: `items`, `total`, `offset`, `limit` | Beta |
-| `ActivityFilter` | Query filters for the activity list and its CSV | `event?` (an `ActivityEvent`), `user_id?` (actor or target), `date_from?`, `date_to?` (UTC days, inclusive; `date_from` after `date_to` is `422`), `q?` (≤ 100: part of an email, the IP or the details) | Beta |
+| `ActivityFilter` | Query filters for the activity list and its CSV | `event?` (an `ActivityEvent`), `user_id?` (actor or target), `date_from?`, `date_to?` (days at the gym, inclusive; `date_from` after `date_to` is `422`), `q?` (≤ 100: part of an email, the IP or the details) | Beta |
 | `WorkoutCreate` / `WorkoutUpdate` | Add / edit a workout | `title` (1–100), `workout_date` (2000-01-01 to today + 365), `notes?` (≤ 1,000, blank → null); create also `group_id` (required) and `assigned_to?`; update: all optional, `title` and `workout_date` not null | Beta |
 | `WorkoutAssign` / `WorkoutCompletion` | Assign a workout / mark it done | `user_id` (required; `null` unassigns) / `done` | Beta |
 | `WorkoutRead` / `WorkoutPage` | Workout responses and lists | `id`, `title`, `workout_date`, `notes?`, `group_id?`, `group_name?`, `owner_id?`, `owner_name?`, `assigned_to?`, `assigned_to_name?`, `completed_at?`, `created_at`, `updated_at`; page: `items`, `total`, `offset`, `limit` | Beta |
@@ -772,7 +772,7 @@ In the MVP no login is needed. In the Beta the member endpoints need `members:re
 | `DELETE` | `/api/v1/members/{id}` | Gym Manager, Admin | — | `204` | `403`, `404` | FR-19 |
 | `POST` | `/api/v1/members/{id}/check-ins` | Gym Manager, Admin | — | `201` `CheckInRead` | `400` (frozen: "Membership is frozen"; expired: "Membership expired on YYYY-MM-DD"), `403`, `404`, `409` (already inside) | FR-30, FR-32 |
 | `GET` | `/api/v1/members/{id}/check-ins?offset&limit` | Gym Manager, Admin | — | `200` `CheckInPage` (newest first) | `403`, `404`, `422` | FR-31 |
-| `GET` | `/api/v1/check-ins?day&inside&q&offset&limit` | Gym Manager, Admin | — | `200` `CheckInPage` (a UTC day, today by default, newest first; `limit` up to 100, default 50) | `401`, `403`, `422` | FR-42 |
+| `GET` | `/api/v1/check-ins?day&inside&q&offset&limit` | Gym Manager, Admin | — | `200` `CheckInPage` (a day, today by default, newest first; `limit` up to 100, default 50) | `401`, `403`, `422` | FR-42 |
 | `POST` | `/api/v1/check-ins/{check_in_id}/check-out` | Gym Manager, Admin | — | `200` `CheckInRead` | `400` (already out, or an earlier day), `403`, `404` | FR-112 |
 
 **Admin**
@@ -784,7 +784,7 @@ In the MVP no login is needed. In the Beta the member endpoints need `members:re
 | `POST` | `/api/v1/admin/users/bulk-ban` | Admin (`users:ban`) | `BulkUserAction` | `200` `BulkBanResult` (one transaction; one `ban` row per banned user) | `403`, `422` | FR-101 |
 | `POST` | `/api/v1/admin/users/bulk-unban` | Admin (`users:ban`) | `BulkUserAction` | `200` `BulkUnbanResult` | `403`, `422` | FR-101 |
 | `GET` | `/api/v1/admin/users/{user_id}` | Admin (`users:read`) | — | `200` `AdminUserDetail` | `403`, `404`, `422` | FR-99 |
-| `GET` | `/api/v1/admin/workouts?owner_id&group_id&date_from&date_to&q&offset&limit` | Admin (`content:moderate`) | — | `200` `ModerationWorkoutPage` (latest workout date first) | `401`, `403`, `422` | FR-104 |
+| `GET` | `/api/v1/admin/workouts?owner_id&group_id&status&date_from&date_to&q&offset&limit` | Admin (`content:moderate`) | — | `200` `ModerationWorkoutPage` (latest workout date first) | `401`, `403`, `422` | FR-104 |
 | `GET` | `/api/v1/admin/workouts/export.csv` (same filters) | Admin (`content:moderate`) | — | `200` `text/csv` `workouts-YYYY-MM-DD.csv`, `Cache-Control: no-store`; adds an `export` row | `401`, `403`, `422` | FR-108 |
 | `POST` / `DELETE` | `/api/v1/admin/workouts/bulk-delete` / `/api/v1/admin/workouts/{workout_id}` | Admin (`content:moderate`) | `ContentBulkDelete` / — | `200` `ContentDeleted` / `204`; one `workout_delete` row each | `403`, `404` (single), `422` | FR-106, FR-107 |
 | `GET` | `/api/v1/admin/groups?owner_id&date_from&date_to&q&offset&limit` | Admin (`content:moderate`) | — | `200` `ModerationGroupPage` (newest first) | `401`, `403`, `422` | FR-105 |
@@ -846,7 +846,7 @@ Ban rules: banning is idempotent (banning a banned user changes nothing), an adm
 
 | Method | Path | Who | Body | Success | Errors | FR |
 |---|---|---|---|---|---|---|
-| `GET` | `/api/v1/announcements?offset&limit` | Any logged-in user | — | `200` `AnnouncementPage` (current only: no `ends_on`, or `ends_on` today or later in UTC; newest first) | `401`, `422` | FR-73 |
+| `GET` | `/api/v1/announcements?offset&limit` | Any logged-in user | — | `200` `AnnouncementPage` (current only: no `ends_on`, or `ends_on` today or later; newest first) | `401`, `422` | FR-73 |
 | `GET` | `/api/v1/announcements?include_ended=true&offset&limit` | Gym Manager, Admin | — | `200` `AnnouncementPage` (every announcement, newest first) | `401`, `403` (any other role) | FR-74 |
 | `POST` | `/api/v1/announcements` | Gym Manager, Admin | `AnnouncementCreate` | `201` `AnnouncementRead` (`posted_by` = the caller) | `401`, `403`, `422` (empty title or message, too long, `ends_on` before today) | FR-72 |
 | `PATCH` | `/api/v1/announcements/{announcement_id}` | Gym Manager, Admin | `AnnouncementUpdate` | `200` `AnnouncementRead` (only the fields sent change; sets `updated_at`) | `401`, `403`, `404`, `422` | FR-74 |
@@ -954,17 +954,19 @@ Set-Cookie: refresh_token=...; HttpOnly; Secure; SameSite=Strict; Path=/api/v1/a
 
 ### 6.4 Error format
 
-Use FastAPI's default format so there is no custom code to maintain:
+Every error has the same shape, one sentence the app can show as it is:
 
 ```json
 { "detail": "Member not found" }
 ```
 
-Validation errors (`422`) use FastAPI's built-in list format, which names the failing field:
+Validation errors (`422`) name each failing field. FastAPI's own list would repeat the value that was sent, which on sign up or a password change is the password, so `errors.py` answers with only the fields and the reasons:
 
 ```json
-{ "detail": [ { "loc": ["body", "full_name"], "msg": "String should have at least 1 character", "type": "string_too_short" } ] }
+{ "detail": "email: value is not a valid email address; password: String should have at least 8 characters" }
 ```
+
+`backend/app/errors.py` holds the two tables that map every service exception to its status code and message. A value PostgreSQL cannot store (a NUL character) is a `422` too, and ids, offsets and dates outside what a column can hold are refused before they reach the database (`backend/app/params.py`, `models.Day`).
 
 A catch-all exception handler returns `500` with `{"detail": "Internal server error"}` and logs the real error (NFR-07).
 
@@ -1157,7 +1159,7 @@ Row-level rules that depend on the data are checked inside the route:
 - Change password: verify `current_password` (`400` if wrong), hash `new_password`, and revoke every session except the caller's (`keep=auth.session_id`) in the same transaction; the caller stays logged in.
 - **Built so far (trainers):** `trainer_service.check_trainer()` checks that a sent `trainer_id` (of a class or a member) is an account with the role `trainer` (`TrainerNotFoundError` → `422`) and clears the old `trainer_name`; lists outer-join the trainer's account and select `coalesce(app_user.name, gym_class.trainer_name)`, so a renamed trainer shows everywhere. `user_service.change_role()` calls `trainer_service.release_trainer()` (classes keep the name as text, clients have no trainer) when an account stops being a trainer, in the same commit.
 - **Built so far (profile details):** `profile_service.check_emergency_contact()` merges the sent fields with the saved ones before checking, so sending only a new contact phone works, and a refused change leaves the saved contact alone (`IncompleteEmergencyContactError` → `422`). `PATCH /users/me/profile` and `member_service.update_member()` both call it. `start_membership()` keeps a saved phone when the Add member form leaves it empty.
-- **Built so far (announcements):** `announcement_service` filters current ones with `or_(ends_on IS NULL, ends_on >= utc_today())` and outer-joins `app_user` for the poster's name, so an announcement whose poster's account is gone is still listed. An `ends_on` before today is refused by the schemas' validator (`422`); an edit that leaves `ends_on` out keeps an ended announcement's date, so its text can still be corrected. `member_service._delete_accounts()` sets `posted_by` to null before deleting an account.
+- **Built so far (announcements):** `announcement_service` filters current ones with `or_(ends_on IS NULL, ends_on >= gym_today())` and outer-joins `app_user` for the poster's name, so an announcement whose poster's account is gone is still listed. An `ends_on` before today is refused by the schemas' validator (`422`); an edit that leaves `ends_on` out keeps an ended announcement's date, so its text can still be corrected. `member_service._delete_accounts()` sets `posted_by` to null before deleting an account.
 - **Built so far (password reset):** `get_logged_in_user` returns the user from `get_auth` (token, ban and session check); `get_current_user` (used by every route and by `require_permission`) also returns `403 Choose a new password first` while `must_change_password` is set. Only `GET /users/me` and `POST /users/me/password` take `LoggedInUser` instead (the password route takes `AuthDep` to know which session to keep), so a reset account can see who it is and choose a password. The reset revokes every session; after choosing a password the same session goes on working.
 
 ### 10.4 Admin dashboard stats
@@ -1199,7 +1201,7 @@ stats = AdminStats(
 
 > Built so far: members are users with a plan, so the member counts are `COUNT`s on `app_user` with the member list's `status_filters()` (including `expiring_soon`: not frozen, `today <= expires_on <= today + 7`).
 
-**Revenue (`GET /api/v1/admin/revenue`).** `revenue_service.revenue_stats()` sums `payment.amount` where `voided_at IS NULL` over UTC day ranges built with the same `start_of_day()` the payments list filter uses: today, the first of this month, and today − 29 days (30 days counting today). `by_method` is one `GROUP BY method` over the last 30 days, filled to all four methods. The 6 months are six small range sums (first of the month up to the first of the next), which keeps the code the same on SQLite and PostgreSQL (no date functions in SQL).
+**Revenue (`GET /api/v1/admin/revenue`).** `revenue_service.revenue_stats()` sums `payment.amount` where `voided_at IS NULL` over day ranges (the gym's days) built with the same `start_of_day()` the payments list filter uses: today, the first of this month, and today − 29 days (30 days counting today). `by_method` is one `GROUP BY method` over the last 30 days, filled to all four methods. The 6 months are six small range sums (first of the month up to the first of the next), which keeps the code the same on SQLite and PostgreSQL (no date functions in SQL).
 
 ### 10.5 Activity log — Beta
 
@@ -1261,7 +1263,7 @@ stats = AdminStats(
 
 The plan was Alembic (revisions `0001_mvp` and `0002_beta`, run by hand against Supabase before each merge). It was not adopted: every change in the final release was additive (new tables, new nullable or defaulted columns, new indexes), apart from one planned replacement, so the app brings the schema up to date itself and deployment stays one step. `create_db_and_tables()` in `backend/app/database.py` runs on start, in this order:
 
-1. `_drop_old_member_tables()`: only on a database that still has the MVP `member` table, drop `check_in`, `class_booking`, `payment` and `member` (data included; `CASCADE` on PostgreSQL). This was the one destructive change, made once when members became accounts (PR #40) and announced in the README; accounts, classes and plan prices were kept. On every later start it does nothing.
+1. (Removed.) The one destructive change, dropping the MVP's `member` tables when members became accounts (PR #40), has run everywhere and its code is gone: a start never deletes anything.
 2. `SQLModel.metadata.create_all(engine)`: create any table that does not exist yet (and the three dropped ones, now pointing at `app_user`).
 3. `_add_missing_columns()`: for each `(table, column, definition)` in `_ADDED_COLUMNS` (the lockout, ban, password and membership columns on `app_user`, the void columns on `payment`, `trainer_id` on `gym_class`, …), `ALTER TABLE … ADD COLUMN` when the column is missing (`IF NOT EXISTS` on PostgreSQL, since two serverless instances may start together), then `CREATE INDEX IF NOT EXISTS` for `_ADDED_INDEXES`.
 4. `_widen_plan_columns()`: on PostgreSQL, the plan code columns go from varchar(10) to varchar(40), once (a widening keeps the data and does not rewrite the table; SQLite does not enforce the length).
@@ -1285,7 +1287,7 @@ The first admin is promoted by hand in the Supabase table editor or SQL editor (
 | JWT secret leaked | Only in Vercel env vars; rotating it logs everyone out (acceptable) |
 | Permission bug exposes another member's data | All permission checks go through the dependencies in section 10.3; review every new route against the [SRS permission matrix](02-srs.md#311-permission-matrix--beta) |
 | Two members book the last class spot at the same time | Capacity check and insert run in one transaction; the composite primary key blocks duplicate bookings |
-| Expiry compared against the wrong date (time zones) | Store `expires_on` as a plain date; compare with the server's `date.today()` in UTC and state this in the SRS |
+| Expiry compared against the wrong date (time zones) | Store `expires_on` as a plain date; compare with `gym_today()`, the date in Dhaka, and state this in the SRS |
 | No CI | The pytest suite (section 14) runs locally before each merge; review each PR against the [SRS acceptance criteria](02-srs.md#5-acceptance-criteria). CI is out of scope this semester |
 
 ## 14. Testing — Beta

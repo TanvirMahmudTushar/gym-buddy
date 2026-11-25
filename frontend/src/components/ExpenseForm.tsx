@@ -1,7 +1,9 @@
 import { type FormEvent, useState } from "react"
 import type { Expense, ExpenseBody, ExpenseCategory } from "../types/expense"
 import { EXPENSE_CATEGORIES } from "../utils/expense"
-import { todayUtc } from "../utils/member"
+import { gymToday } from "../utils/time"
+import FieldError from "./FieldError"
+import FormActions from "./FormActions"
 
 interface Props {
   /** The expense being edited; leave out to add a new one. */
@@ -9,14 +11,14 @@ interface Props {
   saving: boolean
   error: string
   onSave: (body: ExpenseBody) => void
-  onCancel?: () => void
+  onCancel: () => void
 }
 
 type Errors = Partial<Record<"amount" | "spent_on", string>>
 
 // One form for adding and editing an expense, with the same checks the API makes.
 export default function ExpenseForm({ expense, saving, error, onSave, onCancel }: Props) {
-  const today = todayUtc()
+  const today = gymToday()
   const [form, setForm] = useState({
     category: expense?.category ?? ("rent" as ExpenseCategory),
     amount: expense ? String(expense.amount) : "",
@@ -24,7 +26,6 @@ export default function ExpenseForm({ expense, saving, error, onSave, onCancel }
     description: expense?.description ?? "",
   })
   const [errors, setErrors] = useState<Errors>({})
-  const id = expense ? `expense-${expense.id}` : "add-expense"
   const set = (key: keyof typeof form) => (e: { target: { value: string } }) => setForm((prev) => ({ ...prev, [key]: e.target.value }))
 
   function handleSubmit(e: FormEvent) {
@@ -39,10 +40,10 @@ export default function ExpenseForm({ expense, saving, error, onSave, onCancel }
   }
 
   return (
-    <form className="filters" onSubmit={handleSubmit} noValidate>
+    <form className="fields" onSubmit={handleSubmit} noValidate>
       <div className="field">
-        <label htmlFor={`${id}-category`}>Category</label>
-        <select id={`${id}-category`} value={form.category} onChange={set("category")}>
+        <label htmlFor="expense-category">Category</label>
+        <select id="expense-category" value={form.category} onChange={set("category")}>
           {EXPENSE_CATEGORIES.map((c) => (
             <option key={c.value} value={c.value}>
               {c.label}
@@ -51,34 +52,20 @@ export default function ExpenseForm({ expense, saving, error, onSave, onCancel }
         </select>
       </div>
       <div className="field">
-        <label htmlFor={`${id}-amount`}>Amount (৳)</label>
-        <input id={`${id}-amount`} type="number" min={1} step={1} inputMode="numeric" value={form.amount} onChange={set("amount")} />
-        {errors.amount && <span className="field-error">{errors.amount}</span>}
+        <label htmlFor="expense-amount">Amount (taka)</label>
+        <input id="expense-amount" type="number" min={1} step={1} inputMode="numeric" value={form.amount} onChange={set("amount")} autoFocus />
+        <FieldError>{errors.amount}</FieldError>
       </div>
       <div className="field">
-        <label htmlFor={`${id}-date`}>Date</label>
-        <input id={`${id}-date`} type="date" max={today} value={form.spent_on} onChange={set("spent_on")} />
-        {errors.spent_on && <span className="field-error">{errors.spent_on}</span>}
+        <label htmlFor="expense-date">Date</label>
+        <input id="expense-date" type="date" max={today} value={form.spent_on} onChange={set("spent_on")} />
+        <FieldError>{errors.spent_on}</FieldError>
       </div>
-      <div className="field">
-        <label htmlFor={`${id}-description`}>Description (optional)</label>
-        <input id={`${id}-description`} value={form.description} onChange={set("description")} maxLength={200} autoComplete="off" />
+      <div className="field wide">
+        <label htmlFor="expense-description">Description (optional)</label>
+        <input id="expense-description" value={form.description} onChange={set("description")} maxLength={200} autoComplete="off" />
       </div>
-      <div className="actions">
-        <button className="primary" type="submit" disabled={saving}>
-          {saving ? "Saving…" : expense ? "Save" : "Add expense"}
-        </button>
-        {onCancel && (
-          <button type="button" onClick={onCancel} disabled={saving}>
-            Cancel
-          </button>
-        )}
-      </div>
-      {error && (
-        <p className="error wide-error" role="alert">
-          {error}
-        </p>
-      )}
+      <FormActions label={expense ? "Save changes" : "Add expense"} saving={saving} error={error} onCancel={onCancel} />
     </form>
   )
 }

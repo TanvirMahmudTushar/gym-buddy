@@ -1,222 +1,74 @@
-import { type FormEvent, Fragment, useEffect, useState } from "react"
+import { useState } from "react"
+import Alert from "../../components/Alert"
+import ConfirmModal from "../../components/ConfirmModal"
 import ExpenseForm from "../../components/ExpenseForm"
+import ExportButton from "../../components/ExportButton"
+import Icon from "../../components/Icon"
+import ListState from "../../components/ListState"
+import Modal from "../../components/Modal"
+import PageHeader from "../../components/PageHeader"
+import Pager from "../../components/Pager"
+import { useDebouncedValue } from "../../hooks/useDebouncedValue"
+import { usePagedList } from "../../hooks/usePagedList"
+import { useSave } from "../../hooks/useSave"
 import { createExpense, deleteExpense, exportExpensesCsv, listExpenses, updateExpense } from "../../services/expenseService"
 import type { Expense, ExpenseBody, ExpenseCategory, ExpenseFilters } from "../../types/expense"
 import { EXPENSE_CATEGORIES, expenseLabel } from "../../utils/expense"
-import { errorText, formatDate, todayUtc } from "../../utils/member"
-import { formatMoney, saveFile } from "../../utils/payment"
+import { formatMoney } from "../../utils/payment"
+import { count } from "../../utils/text"
+import { formatDate } from "../../utils/time"
 
 const NO_FILTERS: ExpenseFilters = { date_from: "", date_to: "", category: "", q: "" }
 
 // Admins only: what the gym spends. With the payments it gives the net income on the Dashboard.
 export default function ExpensesPage() {
-  // What is typed in the filter form, and the filters the list was last loaded with.
+  // What the filter boxes show, and (once the typing pauses) what the list is loaded with.
   const [draft, setDraft] = useState<ExpenseFilters>(NO_FILTERS)
-  const [filters, setFilters] = useState<ExpenseFilters>(NO_FILTERS)
-  const [expenses, setExpenses] = useState<Expense[]>([])
-  const [total, setTotal] = useState(0)
-  const [totalAmount, setTotalAmount] = useState(0)
+  const filters = useDebouncedValue(draft)
   const [reloadKey, setReloadKey] = useState(0)
-  const [loading, setLoading] = useState(true)
-  const [loadingMore, setLoadingMore] = useState(false)
-  const [error, setError] = useState("")
-  const [filterError, setFilterError] = useState("")
-  const [exporting, setExporting] = useState(false)
-  // The row whose edit form or delete question is open.
-  const [open, setOpen] = useState<{ id: number; action: "edit" | "delete" } | null>(null)
-  const [saving, setSaving] = useState(false)
-  const [rowError, setRowError] = useState("")
-  const [addError, setAddError] = useState("")
-  const [formKey, setFormKey] = useState(0)
+  const list = usePagedList(listExpenses, filters, reloadKey)
+  const [exportError, setExportError] = useState("")
+  // The open dialog: adding, editing or deleting an expense.
+  const [dialog, setDialog] = useState<"add" | { edit: Expense } | { remove: Expense } | null>(null)
+  const { saving, error, setError, run } = useSave()
 
-  useEffect(() => {
-    let ignore = false
-    setLoading(true)
+  function close() {
+    setDialog(null)
     setError("")
-    listExpenses(filters, 0)
-      .then((page) => {
-        if (ignore) return
-        setExpenses(page.items)
-        setTotal(page.total)
-        setTotalAmount(page.total_amount)
-      })
-      .catch((err) => !ignore && setError(errorText(err)))
-      .finally(() => !ignore && setLoading(false))
-    return () => {
-      ignore = true
-    }
-  }, [filters, reloadKey])
-
-  function apply(e: FormEvent) {
-    e.preventDefault()
-    if (draft.date_from && draft.date_to && draft.date_from > draft.date_to) {
-      setFilterError("The From date must be on or before the To date.")
-      return
-    }
-    setFilterError("")
-    setOpen(null)
-    setFilters({ ...draft, q: draft.q.trim() })
   }
 
-  async function loadMore() {
-    setLoadingMore(true)
-    try {
-      const page = await listExpenses(filters, expenses.length)
-      setExpenses((prev) => [...prev, ...page.items])
-      setTotal(page.total)
-    } catch (err) {
-      setError(errorText(err))
-    } finally {
-      setLoadingMore(false)
-    }
+  function done() {
+    close()
+    setReloadKey((k) => k + 1)
   }
 
-  async function exportCsv() {
-    setExporting(true)
-    setError("")
-    try {
-      saveFile(await exportExpensesCsv(filters), `expenses-${todayUtc()}.csv`)
-    } catch (err) {
-      setError(errorText(err))
-    } finally {
-      setExporting(false)
-    }
-  }
-
-  /** Runs a change, then loads the list again so the rows and the total are right. */
-  async function run(action: () => Promise<unknown>, showError: (message: string) => void) {
-    setSaving(true)
-    showError("")
-    try {
-      await action()
-      setOpen(null)
-      setReloadKey((k) => k + 1)
-      return true
-    } catch (err) {
-      showError(errorText(err))
-      return false
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  async function add(body: ExpenseBody) {
-    if (await run(() => createExpense(body), setAddError)) setFormKey((k) => k + 1)
-  }
-
-  const toggle = (id: number, action: "edit" | "delete") => {
-    setRowError("")
-    setOpen({ id, action })
-  }
-
-  let body
-  if (loading && expenses.length === 0) body = <p className="empty">Loading expenses…</p>
-  else if (expenses.length === 0) body = <p className="empty">No expenses match.</p>
-  else
-    body = (
-      <div className="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Date</th>
-              <th>Category</th>
-              <th>Amount</th>
-              <th>Description</th>
-              <th>Recorded by</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {expenses.map((x) => (
-              <Fragment key={x.id}>
-                <tr>
-                  <td>{formatDate(x.spent_on)}</td>
-                  <td>{expenseLabel(x.category)}</td>
-                  <td>{formatMoney(x.amount)}</td>
-                  <td className="wrap">{x.description ?? "—"}</td>
-                  <td>{x.recorded_by_name ?? "—"}</td>
-                  <td>
-                    <div className="actions">
-                      <button type="button" onClick={() => toggle(x.id, "edit")} disabled={saving}>
-                        Edit
-                      </button>
-                      <button type="button" className="danger" onClick={() => toggle(x.id, "delete")} disabled={saving}>
-                        Delete
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-                {open?.id === x.id && (
-                  <tr className={open.action === "edit" ? "reset-row" : "void-row"}>
-                    <td colSpan={6}>
-                      {open.action === "edit" ? (
-                        <ExpenseForm
-                          expense={x}
-                          saving={saving}
-                          error={rowError}
-                          onSave={(changes) => run(() => updateExpense(x.id, changes), setRowError)}
-                          onCancel={() => setOpen(null)}
-                        />
-                      ) : (
-                        <div className="stack">
-                          <span>
-                            Delete this expense of {formatMoney(x.amount)}? The totals change, it cannot be undone, and it is
-                            recorded in the activity log.
-                          </span>
-                          <div className="actions">
-                            <button type="button" className="danger solid" onClick={() => run(() => deleteExpense(x.id), setRowError)} disabled={saving}>
-                              {saving ? "Deleting…" : "Yes, delete"}
-                            </button>
-                            <button type="button" onClick={() => setOpen(null)} disabled={saving}>
-                              Keep it
-                            </button>
-                          </div>
-                          {rowError && (
-                            <p className="error" role="alert">
-                              {rowError}
-                            </p>
-                          )}
-                        </div>
-                      )}
-                    </td>
-                  </tr>
-                )}
-              </Fragment>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    )
+  const save = (body: ExpenseBody, expense?: Expense) =>
+    run(async () => {
+      await (expense ? updateExpense(expense.id, body) : createExpense(body))
+      done()
+    })
 
   return (
-    <div className="column">
-      <section className="card" aria-labelledby="add-expense-heading">
-        <h2 id="add-expense-heading">Add an expense</h2>
-        <ExpenseForm key={formKey} saving={saving} error={addError} onSave={add} />
-      </section>
-      <section className="card" aria-labelledby="expenses-heading">
-        <div className="toolbar">
-          <h2 id="expenses-heading">Expenses</h2>
-          <button onClick={exportCsv} disabled={exporting || loading || total === 0}>
-            {exporting ? "Exporting…" : "Export CSV"}
-          </button>
-        </div>
-        <form className="filters" onSubmit={apply} noValidate aria-label="Filter expenses">
+    <div className="page">
+      <PageHeader title="Expenses" subtitle="What the gym spends. Payments minus expenses is the net income on the Dashboard.">
+        <ExportButton name="expenses" load={() => exportExpensesCsv(filters)} disabled={list.total === 0} onError={setExportError} />
+        <button type="button" className="primary" onClick={() => setDialog("add")}>
+          <Icon name="plus" /> Add expense
+        </button>
+      </PageHeader>
+      <section className="card">
+        <div className="filters">
           <div className="field">
-            <label htmlFor="expense-from">From</label>
-            <input id="expense-from" type="date" value={draft.date_from} onChange={(e) => setDraft({ ...draft, date_from: e.target.value })} />
+            <label htmlFor="filter-from">From</label>
+            <input id="filter-from" type="date" max={draft.date_to || undefined} value={draft.date_from} onChange={(e) => setDraft({ ...draft, date_from: e.target.value })} />
           </div>
           <div className="field">
-            <label htmlFor="expense-to">To</label>
-            <input id="expense-to" type="date" value={draft.date_to} onChange={(e) => setDraft({ ...draft, date_to: e.target.value })} />
+            <label htmlFor="filter-to">To</label>
+            <input id="filter-to" type="date" min={draft.date_from || undefined} value={draft.date_to} onChange={(e) => setDraft({ ...draft, date_to: e.target.value })} />
           </div>
           <div className="field">
-            <label htmlFor="expense-filter-category">Category</label>
-            <select
-              id="expense-filter-category"
-              value={draft.category}
-              onChange={(e) => setDraft({ ...draft, category: e.target.value as ExpenseCategory | "" })}
-            >
+            <label htmlFor="filter-category">Category</label>
+            <select id="filter-category" value={draft.category} onChange={(e) => setDraft({ ...draft, category: e.target.value as ExpenseCategory | "" })}>
               <option value="">Any</option>
               {EXPENSE_CATEGORIES.map((c) => (
                 <option key={c.value} value={c.value}>
@@ -225,55 +77,88 @@ export default function ExpensesPage() {
               ))}
             </select>
           </div>
-          <div className="field">
-            <label htmlFor="expense-q">Description</label>
-            <input id="expense-q" value={draft.q} onChange={(e) => setDraft({ ...draft, q: e.target.value })} maxLength={100} placeholder="Any" autoComplete="off" />
+          <div className="field grow">
+            <label htmlFor="filter-q">Description</label>
+            <input id="filter-q" type="search" value={draft.q} onChange={(e) => setDraft({ ...draft, q: e.target.value })} maxLength={100} placeholder="Any" autoComplete="off" />
           </div>
-          <div className="actions">
-            <button className="primary" type="submit" disabled={loading}>
-              Apply
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setDraft(NO_FILTERS)
-                setFilters(NO_FILTERS)
-                setFilterError("")
-                setOpen(null)
-              }}
-              disabled={loading}
-            >
-              Clear
-            </button>
-          </div>
-        </form>
-        {filterError && (
-          <p className="error" role="alert">
-            {filterError}
-          </p>
-        )}
-        <p className="summary" aria-live="polite">
-          <strong>{formatMoney(totalAmount)}</strong> in {total} expense{total === 1 ? "" : "s"}
+          <button type="button" onClick={() => setDraft(NO_FILTERS)}>
+            Clear
+          </button>
+        </div>
+        <p className="summary">
+          <strong>{formatMoney(list.data?.total_amount ?? 0)}</strong> in {count(list.total, "expense")}
         </p>
-        {error && (
-          <p className="error" role="alert">
-            {error}
-          </p>
-        )}
-        {body}
-        {expenses.length > 0 && (
-          <div className="list-foot">
-            <span>
-              Showing {expenses.length} of {total}
-            </span>
-            {expenses.length < total && (
-              <button onClick={loadMore} disabled={loadingMore}>
-                {loadingMore ? "Loading…" : "Load more"}
-              </button>
-            )}
+        <Alert>{exportError}</Alert>
+        <ListState loading={list.loading} error={list.error} isEmpty={list.items.length === 0} empty="No expenses match these filters.">
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Category</th>
+                  <th>Date</th>
+                  <th className="number">Amount</th>
+                  <th>Description</th>
+                  <th>Recorded by</th>
+                  <th className="act">
+                    <span className="visually-hidden">Actions</span>
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {list.items.map((x) => (
+                  <tr key={x.id}>
+                    <td className="name">{expenseLabel(x.category)}</td>
+                    <td data-label="Date" className="nowrap">
+                      {formatDate(x.spent_on)}
+                    </td>
+                    <td data-label="Amount" className="number">
+                      {formatMoney(x.amount)}
+                    </td>
+                    <td data-label="Description">{x.description ?? "—"}</td>
+                    <td data-label="Recorded by">{x.recorded_by_name ?? "—"}</td>
+                    <td className="act">
+                      <div className="actions">
+                        <button type="button" className="small" onClick={() => setDialog({ edit: x })}>
+                          Edit
+                        </button>
+                        <button type="button" className="small danger" onClick={() => setDialog({ remove: x })}>
+                          Delete
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
-        )}
+          <Pager {...list} onChange={list.goTo} />
+        </ListState>
       </section>
+      {dialog === "add" && (
+        <Modal title="Add an expense" onClose={close}>
+          <ExpenseForm saving={saving} error={error} onSave={(body) => save(body)} onCancel={close} />
+        </Modal>
+      )}
+      {dialog !== null && typeof dialog === "object" && "edit" in dialog && (
+        <Modal title="Edit expense" onClose={close}>
+          <ExpenseForm expense={dialog.edit} saving={saving} error={error} onSave={(body) => save(body, dialog.edit)} onCancel={close} />
+        </Modal>
+      )}
+      {dialog !== null && typeof dialog === "object" && "remove" in dialog && (
+        <ConfirmModal
+          title="Delete this expense?"
+          confirmLabel="Delete expense"
+          busyLabel="Deleting…"
+          onClose={close}
+          onConfirm={async () => {
+            await deleteExpense(dialog.remove.id)
+            done()
+          }}
+        >
+          {expenseLabel(dialog.remove.category)}, {formatMoney(dialog.remove.amount)} on {formatDate(dialog.remove.spent_on)}. The totals change and
+          it cannot be undone. It is recorded in the activity log.
+        </ConfirmModal>
+      )}
     </div>
   )
 }

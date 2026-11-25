@@ -36,7 +36,7 @@ This document lists the requirements for Gym Buddy: the MVP (gym member CRUD RES
 | REST | API style where resources (like `members`) are accessed with HTTP methods (GET, POST, PATCH, DELETE) |
 | Member | A person with a gym membership. In the MVP, a member record (name, phone, plan, dates, status); in the final release, a user account on which staff have set a plan |
 | Plan | (Beta) What the gym sells: a name, a price, a length in days, offered or retired. Admins manage them; a new database starts with Monthly, Quarterly and Yearly. (MVP: `monthly`, `quarterly` or `yearly`) |
-| Valid membership | A membership that is not frozen and whose `expires_on` is today or later (UTC). (MVP: `is_active = true`) |
+| Valid membership | A membership that is not frozen and whose `expires_on` is today or later. (MVP: `is_active = true`) |
 | Frozen membership | A membership paused by staff: `is_frozen = true` (MVP: `is_active = false`) |
 | Expired membership | A membership with `expires_on` before today |
 | Waiting for a membership | (Beta) A User account with no plan yet: it is on the gym manager's waiting list until staff start a membership |
@@ -167,7 +167,7 @@ Every Admin is also a logged-in user, so they can log out, edit their profile an
 - C-4: Requests and responses use JSON.
 - C-5: Production database is Supabase PostgreSQL; local development uses SQLite.
 - C-6: (Beta) Login is implemented in our own API (no third-party login providers).
-- C-7: Dates (`joined_on`, `expires_on`) are plain calendar dates; "today" is the server's UTC date.
+- C-7: Dates (`joined_on`, `expires_on`) are plain calendar dates; "today" and every date filter use the gym's own day (Dhaka, UTC+6, no daylight saving time). Times are stored in UTC.
 
 ### 2.5 Assumptions
 - A-1: A hosted database is available to the Vercel project through an environment variable.
@@ -190,7 +190,7 @@ Every Admin is also a logged-in user, so they can log out, edit their profile an
 | FR-06 | The system shall delete a member by their ID. | MVP | US-06 |
 | FR-06a | The system shall delete several members in one request, given 1 to 100 IDs, and report how many were deleted. | MVP | US-06 |
 | FR-07 | The system shall set `created_at` when a member is created and update `updated_at` on every change. | MVP | US-04 |
-| FR-08 | The system shall reject invalid input with status `422` and a message saying which field is wrong. This includes an `expires_on` earlier than `joined_on`. | MVP | US-07 |
+| FR-08 | The system shall reject invalid input with status `422` and one sentence saying which fields are wrong and why, never repeating the value that was sent (it may be a password). This includes an `expires_on` earlier than `joined_on`. | MVP | US-07 |
 | FR-09 | The system shall return `404` when a member ID does not exist. | MVP | US-07 |
 | FR-10 | The system shall expose `GET /api/health` returning `{"status": "ok"}`. | MVP | US-08 |
 | FR-11 | The system shall publish interactive API docs at `/api/docs`. | MVP | US-07 |
@@ -245,7 +245,7 @@ Every Admin is also a logged-in user, so they can log out, edit their profile an
 | FR-38 | An admin shall be able to unban a user; the user can then log in again. The user's linked membership and bookings are kept while banned. | Beta | US-22 |
 | FR-39 | The admin user list shall show each user's status (`active` / `banned`), ban date and ban reason. | Beta | US-21 |
 | FR-98 | An admin shall be able to filter the user list by `role` and by `status` (`active` / `banned`) together with the search (`q`) and pagination, and download the users matching the same filters as CSV (newest first, the FR-51 format). The download is recorded in the activity log. An unknown role or status gives `422`. | Beta | US-12 |
-| FR-99 | An admin shall be able to open one user's details: the account, membership and login lockout, their active sessions, how many workouts they have (personal, added to groups, assigned to them; counts only, never the content, FR-90), their groups (name, owner or member, size) and their 10 newest activity rows. | Beta | US-12 |
+| FR-99 | An admin shall be able to open one user's details: the account, membership and login lockout, their active sessions, how many workouts (added, assigned, done), bookings, visits and payments they have with the 5 newest of each, when the password last changed, their groups (name, owner or member, size) and their 10 newest activity rows. | Beta | US-12 |
 | FR-100 | An admin shall be able to end every active session of another user; the user's next request gets `401` and their refresh cookie stops working. Their own account is refused (`400`). | Beta | US-21 |
 | FR-101 | An admin shall be able to ban or unban up to 100 users at once with one optional reason, in one transaction. The admin themself, other admins, accounts that are already banned (or, for an unban, not banned) and unknown ids are skipped and listed in the response with the reason; the others are banned or unbanned. | Beta | US-21, US-22 |
 | FR-102 | The dashboard shall also show the accounts created in the last 7 days, the number of workouts (in all and added in the last 7 days) and the number of training groups. | Beta | US-20 |
@@ -257,7 +257,7 @@ Every Admin is also a logged-in user, so they can log out, edit their profile an
 
 | ID | Requirement | Release | Story |
 |---|---|---|---|
-| FR-25 | A gym manager or admin shall be able to create a class with `name`, `starts_at`, `duration_minutes` and `capacity` (and optional `description` and trainer, FR-69). | Beta | US-14 |
+| FR-25 | A gym manager or admin shall be able to create a class with `name`, `starts_at` (not in the past, `422`), `duration_minutes` and `capacity` (and optional `description` and trainer, FR-69). | Beta | US-14 |
 | FR-26 | Any logged-in user shall be able to list classes (optionally only upcoming, ordered by start time) and view one class. Each class shows `booked_count` and, for members, whether they booked it (`is_booked_by_me`). | Beta | US-15 |
 | FR-27 | A gym manager or admin shall be able to edit or delete a class. Lowering `capacity` below the current number of bookings returns `422`. Deleting a class deletes its bookings. | Beta | US-14 |
 | FR-28 | A gym manager or admin shall be able to list the bookings of a class (member name and booking time); a trainer only for the classes they teach (FR-71). | Beta | US-17 |
@@ -273,7 +273,7 @@ Every Admin is also a logged-in user, so they can log out, edit their profile an
 |---|---|---|---|
 | FR-30 | A gym manager or admin shall be able to record a check-in for a member. The request returns `400` if the membership is not valid (frozen or expired). The check-in stores who recorded it and when. | Beta | US-18 |
 | FR-31 | A gym manager or admin shall be able to list a member's check-ins (newest first, paginated). | Beta | US-18 |
-| FR-42 | A gym manager or admin shall be able to list everyone who checked in on a UTC day (today by default), newest first, with the member's name, when they left and who recorded it, searched by name, email or phone, or narrowed to who is in the gym now. | Beta | US-18 |
+| FR-42 | A gym manager or admin shall be able to list everyone who checked in on a day (today by default), newest first, with the member's name, when they left and who recorded it, searched by name, email or phone, or narrowed to who is in the gym now. | Beta | US-18 |
 | FR-32 | A member may check in more than once on the same day; each is its own record. A member checked in today and not checked out yet cannot be checked in again (`409`). | Beta | US-18 |
 | FR-33 | A user whose account has no linked membership shall get `404` for FR-17, FR-18 and FR-29. | Beta | US-11 |
 
@@ -290,11 +290,11 @@ Every Admin is also a logged-in user, so they can log out, edit their profile an
 | FR-45 | When a payment names a `renew_plan`, the member's `expires_on` shall become the later of today and the current expiry, plus that plan's days, and the member's `plan` shall become that plan. A frozen member's expiry is extended but they stay frozen. | Beta | US-25 |
 | FR-46 | A gym manager or admin shall be able to list a member's payments, newest first, paginated. Each payment keeps the member's name, so it still reads correctly if the member is deleted; deleting a member never deletes their payments. | Beta | US-25 |
 | FR-47 | An admin shall be able to change a plan's `name`, `price` (1 to 10,000,000), `duration_days` (1 to 3,660) and `description`; only the fields sent change. Other roles get `403`. New values apply to later payments and memberships only; payments already taken are not changed. Adding and retiring plans is FR-109 and FR-110. | Beta | US-26 |
-| FR-48 | A gym manager or admin shall be able to list all payments, newest first, paginated, filtered by date range (`date_from`, `date_to`: UTC calendar days, both inclusive), `method` and part of the member's name (any case). Voided payments are left out unless `include_voided=true`. The response includes `total_amount`: the sum of every matching payment that is not voided, across all pages. A User gets `403`; `date_from` after `date_to` gives `422`. | Beta | US-25 |
+| FR-48 | A gym manager or admin shall be able to list all payments, newest first, paginated, filtered by date range (`date_from`, `date_to`: the gym's calendar days, both inclusive), `method` and part of the member's name (any case). Voided payments are left out unless `include_voided=true`. The response includes `total_amount`: the sum of every matching payment that is not voided, across all pages. A User gets `403`; `date_from` after `date_to` gives `422`. | Beta | US-25 |
 | FR-49 | A logged-in user shall be able to list their own payments, newest first, paginated, with voided payments included and marked. Nobody can list another person's payments this way. | Beta | US-25 |
 | FR-50 | An admin shall be able to void a payment with a required `reason` (1 to 200 characters). The payment stays on record with `voided_at`, `void_reason` and who voided it, but is left out of every total and of revenue. Voiding an already voided payment changes nothing. Voiding does not change the member's expiry date. A gym manager gets `403`, an unknown payment `404`. | Beta | US-25 |
 | FR-51 | An admin shall be able to download the payments matching the FR-48 filters as a CSV file (UTF-8 with a byte order mark, one header row, newest first). A text cell starting with `=`, `+`, `-`, `@`, a tab or a carriage return is saved with a leading `'`, so a spreadsheet shows it as text instead of running it as a formula. A gym manager gets `403`. | Beta | US-25 |
-| FR-52 | An admin shall be able to view revenue in whole taka: today, this month, the last 30 days (today included, with its start date), the last 30 days split by payment method (all four methods, zero when unused, with the number of payments), and each of the last 6 months (oldest first, this month last). Days and months are UTC calendar days, the same as the FR-48 date filters, so each number equals the FR-48 `total_amount` for the same dates. Voided payments are never counted. A gym manager or user gets `403`. | Beta | US-20 |
+| FR-52 | An admin shall be able to view revenue in whole taka: today, this month, the last 30 days (today included, with its start date), the last 30 days split by payment method (all four methods, zero when unused, with the number of payments), and each of the last 6 months (oldest first, this month last). Days and months are calendar day at the gyms, the same as the FR-48 date filters, so each number equals the FR-48 `total_amount` for the same dates. Voided payments are never counted. A gym manager or user gets `403`. | Beta | US-20 |
 | FR-53 | A gym manager or admin shall be able to list the memberships that are expiring soon: not frozen, with `expires_on` from today to today + 7 days (both included), soonest first. The dashboard's `expiring_soon` count uses the same rule, so it always equals the length of this list. | Beta | US-25 |
 
 > **Built so far (payments):** FR-43 to FR-53.
@@ -325,7 +325,7 @@ Every Admin is also a logged-in user, so they can log out, edit their profile an
 
 | ID | Requirement | Release | Story |
 |---|---|---|---|
-| FR-62 | A gym manager or admin shall be able to view today's overview: check-ins since midnight UTC and who is inside now, equipment to fix and services due (FR-118), memberships expiring soon (FR-53), accounts waiting for a membership (FR-55), payments taken since midnight UTC that are not voided (count and sum), and the next 5 classes that have not started with their bookings and capacity. Each number shall equal the list it links to. A user gets `403`. | Beta | US-20 |
+| FR-62 | A gym manager or admin shall be able to view today's overview: check-ins since midnight at the gym and who is inside now, equipment to fix and services due (FR-118), memberships expiring soon (FR-53), accounts waiting for a membership (FR-55), payments taken since midnight at the gym that are not voided (count and sum), and the next 5 classes that have not started with their bookings and capacity. Each number shall equal the list it links to. A user gets `403`. | Beta | US-20 |
 | FR-63 | A gym manager and an admin shall land on the Dashboard after logging in: the overview (FR-62), with the admin statistics (FR-35, FR-52) below it for an admin. | Beta | US-20 |
 
 ### 3.7e Admin password reset — Beta
@@ -352,8 +352,8 @@ Story US-27: as a gym manager, I want to post holiday hours, new classes and oth
 
 | ID | Requirement | Release | Story |
 |---|---|---|---|
-| FR-72 | A gym manager or admin shall be able to post an announcement: `title` (1–100 characters after trimming), `message` (1–1,000 characters after trimming) and an optional `ends_on` (a date, not before today in UTC: `422`). The system records who posted it and when. A user or trainer gets `403`. | Beta | US-27 |
-| FR-73 | Any logged-in user shall be able to list the current announcements (no `ends_on`, or `ends_on` today or later in UTC), newest first, paginated, each with `posted_at`, `updated_at` (null until edited) and the poster's current name. An announcement stops showing the day after its `ends_on`, with nothing to run. | Beta | US-27 |
+| FR-72 | A gym manager or admin shall be able to post an announcement: `title` (1–100 characters after trimming), `message` (1–1,000 characters after trimming) and an optional `ends_on` (a date, not before today: `422`). The system records who posted it and when. A user or trainer gets `403`. | Beta | US-27 |
+| FR-73 | Any logged-in user shall be able to list the current announcements (no `ends_on`, or `ends_on` today or later), newest first, paginated, each with `posted_at`, `updated_at` (null until edited) and the poster's current name. An announcement stops showing the day after its `ends_on`, with nothing to run. | Beta | US-27 |
 | FR-74 | A gym manager or admin shall be able to list every announcement including ended ones (`include_ended=true`; other roles `403`), edit one (only the fields sent change; `ends_on: null` removes the end date; a new `ends_on` before today is `422`) and delete one (`404` for an unknown id). An edit keeps the poster and `posted_at` and sets `updated_at`. | Beta | US-27 |
 | FR-75 | Members shall see the current announcements on My membership (the card is hidden when there are none), trainers on My classes, and gym managers and admins on the Dashboard, which links to the Announcements page. Deleting the account that posted an announcement keeps the announcement, without a poster name. | Beta | US-27 |
 
@@ -363,7 +363,7 @@ Story US-28: as a member, I want to keep my phone, date of birth and emergency c
 
 | ID | Requirement | Release | Story |
 |---|---|---|---|
-| FR-76 | Every account shall hold, next to `phone`, an optional `date_of_birth` (from 1900-01-01 to today, UTC) and an optional emergency contact: `emergency_contact_name` (up to 100 characters) and `emergency_contact_phone` (up to 20), set or cleared together (`422` otherwise). Text is trimmed, and blank text counts as not given. | Beta | US-28 |
+| FR-76 | Every account shall hold, next to `phone`, an optional `date_of_birth` (from 1900-01-01 to today) and an optional emergency contact: `emergency_contact_name` (up to 100 characters) and `emergency_contact_phone` (up to 20), set or cleared together (`422` otherwise). Text is trimmed, and blank text counts as not given. | Beta | US-28 |
 | FR-77 | A logged-in user of any role shall be able to read their own phone, date of birth and emergency contact (`GET /users/me/profile`) and change them (`PATCH`, only the fields sent) on My account. | Beta | US-28 |
 | FR-78 | A gym manager or admin shall see a member's date of birth (with their age) and emergency contact in the member details, and edit them through `PATCH /members/{id}` with the FR-76 rules. Starting a membership without a phone keeps a phone the person already saved. | Beta | US-28, US-13 |
 | FR-79 | Only the person themself, gym managers and admins shall be able to read these details (NFR-20). They are not part of `/users/me`, the login response, the waiting list or the admin user list, and a user or trainer gets `403` on every member endpoint. | Beta | US-28 |
@@ -385,9 +385,9 @@ Story US-29: as an admin, I want to see who did what to which account, from wher
 | ID | Requirement | Release | Story |
 |---|---|---|---|
 | FR-84 | The system shall keep an activity log: one row per security event with the time (UTC), the event, the account that did it and its email, the account it was done to and its email, details, the client IP address and the browser (User-Agent). Rows are only ever added. The emails are copied into the row, so it still reads correctly after the account is deleted. The log is indexed on time, event and actor. | Beta | US-29 |
-| FR-85 | The system shall record sign up, login, failed login (a wrong password, an email with no account, a locked account or a banned account, always with the email that was typed), account lockout, logout, password change, failed password change, password reset, role change, ban, unban, session revoke (by its owner, or by the server when a replaced refresh token is used again), account deletion (one or many) and CSV export (payments and activity). The row is saved in the same transaction as the change. An action that changes nothing (banning a banned user, giving the same role, logging out twice) adds no row. | Beta | US-29 |
+| FR-85 | The system shall record sign up, login, failed login (a wrong password, an email with no account, a locked account or a banned account, always with the email that was typed), account lockout, logout, password change, failed password change, password reset, role change, ban, unban, session revoke (by its owner, or by the server when a replaced refresh token is used again), account deletion (one or many), every delete of a workout, group, class, piece of equipment, announcement, plan or expense, a voided payment, and every CSV export. The row is saved in the same transaction as the change. An action that changes nothing (banning a banned user, giving the same role, logging out twice) adds no row. | Beta | US-29 |
 | FR-86 | On Vercel the client IP address shall be the first address in `X-Forwarded-For`, which the platform sets; anywhere else it is the address of the connection, since the header could be made up. | Beta | US-29 |
-| FR-87 | An admin shall be able to list the log, newest first, paginated, filtered by `event`, by `user_id` (rows where that account acted or was acted on), by date range (`date_from`, `date_to`: UTC days, both inclusive) and by `q` (part of an email, the IP address or the details, any case). An unknown event or `date_from` after `date_to` gives `422`. Every other role gets `403`. | Beta | US-29 |
+| FR-87 | An admin shall be able to list the log, newest first, paginated, filtered by `event`, by `user_id` (rows where that account acted or was acted on), by date range (`date_from`, `date_to`: days at the gym, both inclusive) and by `q` (part of an email, the IP address or the details, any case). An unknown event or `date_from` after `date_to` gives `422`. Every other role gets `403`. | Beta | US-29 |
 | FR-88 | An admin shall be able to download the rows matching the FR-87 filters as CSV, in the same order, up to the newest 10,000 rows, with the FR-51 format (byte order mark, formula-safe cells). The download is itself recorded (FR-85), after the rows are read. | Beta | US-29 |
 | FR-89 | An admin shall be able to see the failed logins of the last 24 hours and of the last 7 days: how many there were, how many lockouts, and the 10 IP addresses and 10 emails with the most failed logins, each with how many different emails (for an address) or addresses (for an email) were involved and the time of the last attempt. | Beta | US-29 |
 
@@ -416,13 +416,13 @@ Story US-31: as an admin, I want to find and remove any training group or workou
 
 | ID | Requirement | Release | Story |
 |---|---|---|---|
-| FR-104 | An admin shall be able to list every workout, latest workout date first, paginated, with its owner (name and email), group and assignee, filtered by `owner_id`, `group_id`, date range (`date_from`, `date_to`: the workout's date, both inclusive) and `q` (part of the title, the notes, or the owner's name or email, any case). | Beta | US-31 |
-| FR-105 | An admin shall be able to list every training group, newest first, paginated, with its owner, number of people and number of workouts, filtered by `owner_id`, date range (the UTC day it was made) and `q` (group name, or the owner's name or email). | Beta | US-31 |
+| FR-104 | An admin shall be able to list every workout, latest workout date first, paginated, with its owner (name and email), group and assignee, filtered by `owner_id`, `group_id`, `status` (`unassigned`, `to_do`, `done`), date range (`date_from`, `date_to`: the workout's date, both inclusive) and `q` (part of the title, the notes, or the owner's name or email, any case). | Beta | US-31 |
+| FR-105 | An admin shall be able to list every training group, newest first, paginated, with its owner, number of people and number of workouts, filtered by `owner_id`, date range (the day it was made) and `q` (group name, or the owner's name or email). | Beta | US-31 |
 | FR-106 | An admin shall be able to delete one workout or group, or up to 100 at once in one transaction (unknown ids are skipped). Deleting a group also deletes its workouts and memberships. There is no undo (no soft delete), and admins cannot edit anyone else's content. | Beta | US-31 |
 | FR-107 | Every moderation delete shall be written to the activity log (`workout_delete` / `group_delete`), naming the admin, the owner as the account affected, and the workout's title and date or the group's name and how many workouts went with it. | Beta | US-31, US-29 |
 | FR-108 | An admin shall be able to download the workouts, and the groups, matching the FR-104 / FR-105 filters as CSV (same rows and order as the list, the FR-51 format); each download is logged. Users, trainers and gym managers get `403` on every moderation endpoint (`content:moderate`). | Beta | US-31 |
 
-> **Built so far (moderation):** FR-104 to FR-108, on the Training page (All groups and All workouts, select-many delete with a confirm step, owner filter linked from a user's details). The groups CSV goes beyond the issue, which asked only for the workouts CSV.
+> **Built so far (moderation):** FR-104 to FR-108, on the Training page (All groups and All workouts, delete one or the ticked ones after a question, owner filter linked from a user's details). The groups CSV goes beyond the issue, which asked only for the workouts CSV.
 
 ### 3.7l Plans, attendance, trainers, equipment and expenses — Beta
 
@@ -433,7 +433,7 @@ Stories: US-32 as an admin, I want to decide which plans the gym sells, so price
 | FR-109 | An admin shall be able to add a plan (`name` 1–60 characters, unique in any case, else `409`; price and days as in FR-47). Its code is made from the name and never changes. Other roles get `403`. | Beta | US-32 |
 | FR-110 | An admin shall be able to retire a plan and offer it again. A retired plan cannot be chosen for a membership, a plan change or a renewal (`422`); members and payments that have it keep it. A plan no member or payment has can be deleted; any other answers `409`. | Beta | US-32 |
 | FR-111 | When a membership is started without `expires_on`, it shall run for the plan's days from `joined_on`. With `payment_method`, the plan's price shall be recorded as the first payment in the same transaction. | Beta | US-37 |
-| FR-112 | A gym manager or admin shall be able to check a member out, recording when they left. A visit already checked out, or from an earlier UTC day, gives `400`. | Beta | US-33 |
+| FR-112 | A gym manager or admin shall be able to check a member out, recording when they left. A visit already checked out, or from an earlier day, gives `400`. | Beta | US-33 |
 | FR-113 | A gym manager or admin (any class) or the class's trainer (their own classes, else `403`) shall be able to mark whether each person who booked came, change the mark or clear it, from one hour before the class starts (`400` before). The member sees the mark on their past bookings. | Beta | US-33 |
 | FR-114 | A gym manager or admin shall be able to pick a member's personal trainer, an account with the role `trainer` (`422` otherwise), or none. The member sees the trainer's name on My membership. When the account stops being a trainer or is deleted, its clients have no trainer. | Beta | US-34 |
 | FR-115 | A trainer shall be able to list their own clients, by name, with email, phone, plan, membership dates and last visit, and never notes, payments, date of birth or emergency contact, nor another trainer's clients. | Beta | US-34 |
@@ -480,10 +480,10 @@ Stories: US-32 as an admin, I want to decide which plans the gym sells, so price
 | `capacity` | Integer 1–200 | Beta |
 | `title` (announcement) | 1–100 characters after trimming | Beta |
 | `message` (announcement) | 1–1,000 characters after trimming; line breaks are kept | Beta |
-| `date_of_birth` | Optional date in `YYYY-MM-DD` format, from 1900-01-01 to today (UTC) | Beta |
+| `date_of_birth` | Optional date in `YYYY-MM-DD` format, from 1900-01-01 to today | Beta |
 | `emergency_contact_name` | Optional, max 100 characters after trimming; given together with `emergency_contact_phone` or not at all | Beta |
 | `emergency_contact_phone` | Optional, max 20 characters after trimming; given together with `emergency_contact_name` or not at all | Beta |
-| `ends_on` (announcement) | Optional date in `YYYY-MM-DD` format, not before today (UTC); `null` on edit removes it | Beta |
+| `ends_on` (announcement) | Optional date in `YYYY-MM-DD` format, not before today; `null` on edit removes it | Beta |
 
 ### 3.10 Membership states
 
@@ -853,7 +853,7 @@ Actions on one's own account and data (profile, password, sessions, own membersh
 - After an admin changes Zara's role to User, Spin shows `trainer_id = null` and `trainer_name = "Zara"`, and Zara gets `403` for `/trainers/me/classes`.
 
 **AC-40 Announcements (FR-72 – FR-75)**
-- Given today is 22 November (UTC)
+- Given today is 22 November
 - When a gym manager sends `POST /api/v1/announcements` `{"title": "Eid hours", "message": "Open 10:00 to 16:00", "ends_on": "2026-11-24"}`, the response is `201` with `posted_by_name` = the manager and `updated_at = null`; with `ends_on` 21 November it is `422`, and from a user or trainer `403`.
 - Member A's `GET /api/v1/announcements` lists Eid hours, newest first, until 24 November; on 25 November it is no longer listed, and A's `include_ended=true` is `403`. A gym manager's `include_ended=true` still lists it.
 - `PATCH` with only a new `title` succeeds on the ended announcement and sets `updated_at`; `ends_on: null` makes it current again; `DELETE` is `204`, then `404`.

@@ -42,10 +42,10 @@ The mid-term MVP was a member CRUD API with a one-page front end. The final rele
 | Database | 15 tables (PostgreSQL on Supabase; SQLite locally) |
 | Roles and permissions | 4 roles, 25 permissions, plus 5 per-group permissions |
 | Requirements | 121 functional (FR-01 to FR-121) and 24 non-functional, traced to 37 user stories |
-| Front end | 21 pages, 45 components, 18 service modules |
-| Tests | 74 automated backend tests (pytest), all passing |
+| Front end | 22 pages, 62 components, 18 service modules |
+| Tests | 96 automated backend tests (pytest), passing on SQLite and PostgreSQL |
 | GitHub | 39 issues and 38 pull requests merged into `main` (the latest, for #75, included), each from its own branch. The gym management rework (#76) was committed to `main` directly |
-| Code | about 7,100 lines of Python in the backend and 11,000 lines of TypeScript in the front end |
+| Code | about 7,300 lines of Python in the backend and 9,300 lines of TypeScript in the front end |
 
 ## 2. How to test the live system
 
@@ -108,7 +108,7 @@ The PRD planned the MVP and the Beta from the start, and the final release cover
 | Workout plans | **Added**: training groups run by trainers and staff, with per-member permissions, assigned workouts and marking them done. A private workout diary was built first (PR #70) and then removed: nobody at the gym could see it, so it did not help run the gym |
 | Equipment tracking | **Added**: the equipment list, reported faults, and services with the next due date |
 | Password reset | **Added** as an admin reset with a one-time temporary password (no email reset) |
-| Automated tests | **Added**: a pytest suite (74 tests). CI is still not set up |
+| Automated tests | **Added**: a pytest suite (96 tests). CI is still not set up |
 
 Still out of scope: online payments, email or SMS, email verification and self-service password reset, QR check-in, waiting lists for full classes, recurring classes, and diet plans.
 
@@ -186,7 +186,7 @@ The server never asks "is this an admin?". Every protected endpoint names a perm
 | Privacy | NFR-20 | Phone, date of birth, emergency contact and notes only for staff and the person themself |
 | Consistency | NFR-21 | Booking locks the class row, counts and inserts in one transaction |
 | Audit | NFR-23 | Activity log rows never hold a password, token or hash |
-| Maintainability | NFR-08, NFR-24 | Routers → services → database layers; 74 automated tests |
+| Maintainability | NFR-08, NFR-24 | Routers → services → database layers; 96 automated tests |
 | Secrets | NFR-05 | Only in Vercel environment variables; `backend/.env.example` holds placeholders only |
 
 Two NFRs were changed during the project and are recorded in the SRS: schema changes are applied by the app on start rather than by Alembic (NFR-19, see section 8), and production is deployed with `vercel --prod` rather than on every push (NFR-10).
@@ -222,18 +222,18 @@ flowchart LR
     R["routers/*.py<br/>HTTP only: parse, require_permission(), call a service"] --> S["services/*.py<br/>business rules and queries; raise plain errors"]
     S --> M["models.py<br/>tables and schemas"]
     S --> D[(database)]
-    S -. errors .-> H["main.py<br/>maps each error to 400 / 403 / 404 / 409 / 422"]
+    S -. errors .-> H["errors.py<br/>maps each error to 400 / 403 / 404 / 409 / 422"]
 ```
 
 - **Routers** (`backend/app/routers/`, 17 files) only read the request, declare the permission they need, and call one service function.
-- **Services** (`backend/app/services/`, 21 files) hold every rule and every database query, for example `class_service.book_class()` (capacity and membership checks), `payment_service.record_payment()` (renewal from the right date) and `session_service.rotate()` (refresh rotation). They raise plain Python errors such as `ClassFullError`, and `main.py` turns each into its status code, so no service knows about HTTP.
-- **Shared modules:** `rbac.py` (permissions), `deps.py` (who is calling: token, ban and session check), `security.py` (hashing and tokens), `request_info.py` (client IP and browser for the logs), `config.py` and `cors.py`.
+- **Services** (`backend/app/services/`, 21 files) hold every rule and every database query, for example `class_service.book_class()` (capacity and membership checks), `payment_service.record_payment()` (renewal from the right date) and `session_service.rotate()` (refresh rotation). They raise plain Python errors such as `ClassFullError`, and `errors.py` turns each into its status code, so no service knows about HTTP.
+- **Shared modules:** `rbac.py` (permissions), `deps.py` (who is calling: token, ban and session check), `security.py` (hashing and tokens), `request_info.py` (client IP and browser for the logs), `params.py` (ids, paging and search, with their limits), `errors.py`, `config.py` and `cors.py`.
 
 This split was the one point marked down at the mid-term (the logic was in the route functions). It was fixed in PR #22 for members and followed by every feature after it.
 
 ### 5.3 Front end
 
-One page per route under a hash router (`#/members`, `#/classes`, …). `AuthContext` holds the logged-in user and their permissions; `PlansContext` holds the plans' names and prices; `AppLayout` builds the sidebar from those permissions, so each role sees only the pages it may open, and each page also guards itself. Every API call goes through `services/api.ts`, which adds the access token, and on a `401` refreshes it once and repeats the request, so an expired token is invisible to the person. Lists use one `usePagedList` hook for **Load more**, and every page has loading, error and empty states.
+One page per route under a hash router (`#/members`, `#/classes`, …). `AuthContext` holds the logged-in user and their permissions; `PlansContext` holds the plans' names and prices; `AppLayout` builds the sidebar from those permissions, so each role sees only the pages it may open; any other page shows **No access**. Addresses work with or without the `#` (`vercel.json` answers every path with the app). Every API call goes through `services/api.ts`, which adds the access token, and on a `401` refreshes it once and repeats the request, so an expired token is invisible to the person; a server that cannot be reached logs nobody out. Every page is built from the same parts (`PageHeader`, `Modal`, `ConfirmModal`, `Pager`, `ListState`, `Alert`), so loading, error and empty states look the same everywhere, and on a phone every table becomes a list of cards. Times are shown as the gym's time (`utils/time.ts`).
 
 ### 5.4 Data model
 
@@ -279,7 +279,7 @@ erDiagram
 - Resources are plural nouns under `/api/v1` (`/members`, `/classes/{id}/bookings`, `/members/{id}/check-ins`), and `PATCH` changes only the fields sent.
 - Every list takes `offset` and `limit` and returns `{items, total, offset, limit}`, where `total` counts every match, not just the page.
 - Status codes are consistent: `201` create, `204` delete, `400` a rule refused, `401` not logged in, `403` no permission, `404` not found (or not allowed to know it exists), `409` conflict, `422` invalid input, `429` locked out.
-- Errors are always `{"detail": "..."}` with a message the app can show as it is.
+- Errors are always `{"detail": "..."}` with one sentence the app can show as it is, validation errors included, and never repeat what was sent.
 
 The README's REST API table and [TDD section 6](03-tdd.md#6-rest-api-design) list all 105 operations.
 
@@ -317,7 +317,7 @@ On start the backend creates any missing table, adds any missing column and give
 
 ## 6. Testing and quality
 
-**Automated tests.** `backend/tests/` has 74 pytest tests that run against a throwaway SQLite database, emptied before each test, with test-only secrets, so they never touch real data:
+**Automated tests.** `backend/tests/` has 96 pytest tests that run against a throwaway SQLite database (or, with `TEST_DATABASE_URL`, an empty PostgreSQL one), emptied before each test, with test-only secrets, so they never touch real data:
 
 | File | What it proves |
 |---|---|
@@ -326,13 +326,14 @@ On start the backend creates any missing table, adds any missing column and give
 | `test_refresh.py` | Rotation, the 30-second grace period, reuse ending the whole session, and refresh refused after logout or a ban |
 | `test_rbac.py` | Every admin route is `403` for the other three roles and `401` for a visitor; a role change applies with the same token; another person's session is `404` and member record `403`; members cannot start a group; a group and its workouts are `404` to outsiders, even an admin; group permissions; admins cannot ban each other |
 | `test_gym.py` | Plans (add, retire, delete rules), a membership paid in the same step, check-in and check-out, class attendance (own class only, not a day before), a trainer's own clients only, marking a workout done (assignee only), equipment services and faults, expenses and net income, a user's record counts |
+| `test_robustness.py` | Ids, offsets and dates no column can hold are `422`, never `500`; a validation error is one sentence without the password; no class in the past; days are the gym's days; every delete and void is logged; a user's newest records; moderation filters; logout with a just-replaced token |
 | `test_startup.py` | A normal start and the login check are one query each; an older schema is filled in again; a token does not open another account's session |
 | `test_cors.py` | Only `FRONTEND_ORIGIN` gets CORS headers; look-alike origins and `null` get none; `*` is never sent |
 | `test_config.py` | Settings loading and the `FRONTEND_ORIGIN` rules |
 
 Run with `pip install -r requirements-dev.txt` and `pytest` in `backend/`.
 
-**End-to-end checks.** Each feature was tried against a running backend as each role before it was merged, including the error cases (a full class, a frozen membership, a missing permission). The demo data script doubles as a smoke test: it drives sign-up, roles, memberships, payments, check-ins and check-outs, classes, bookings, announcements, equipment, expenses, the training group and its permissions through the public API and stops at the first unexpected answer. Its results were then checked by role: the right landing page and permissions for each account, `403` for a group member editing without permission, `404` for an outsider, and the Dashboard numbers matching their lists.
+**End-to-end checks.** A browser run (Playwright, Chrome, against the app on PostgreSQL) drives 23 flows as every role: sign up, reload and logout with the old cookie refused, lockout, tampered and expired tokens, silent refresh, a server outage, pages and API calls denied by RBAC, a ban, a role change, a reset and a revoke while the person is logged in, group permissions for an owner, three kinds of members and an outsider, members, classes, payments, equipment, moderation, filters, CSV contents, deep links and a phone screen, with no console errors. The API was also fuzzed from its OpenAPI schema (9,571 requests on PostgreSQL): the first run found 40 ways to get a `500` from ids, offsets or text the database cannot hold, which are now `422`. The demo data script doubles as a smoke test: it drives sign-up, roles, memberships, payments, check-ins and check-outs, classes, bookings, announcements, equipment, expenses, the training group and its permissions through the public API and stops at the first unexpected answer. Its results were then checked by role: the right landing page and permissions for each account, `403` for a group member editing without permission, `404` for an outsider, and the Dashboard numbers matching their lists.
 
 **Manual checks on the live site.** Each main page is opened on the Vercel URL as the role that uses it, at desktop and phone width, checking the browser console for errors and that the loading, error and empty states show.
 
@@ -365,10 +366,11 @@ The one point of mid-term feedback, on the backend's folder structure, was the f
 | **Members became users** (PR #40) | The MVP had a separate `member` table, then a link from member to account. That meant two records per person, names that could disagree, and an extra linking step. Members are now accounts with a plan: the person signs up, staff start the membership by email, and every member page reads one row |
 | **Permissions, not role checks** (PR #68) | With four roles, `if role == "admin"` checks were spreading across routers. One module now maps roles to permissions, every route names the permission it needs, and the app builds its menu from the same list. No status code changed for any role, which was confirmed by calling every route as each role before and after |
 | **Two people booking the last place** | Counting and inserting in two steps lets both succeed. Booking now locks the class row (`SELECT … FOR UPDATE` on PostgreSQL) before counting, and the composite primary key blocks a double booking |
+| **The gym's day, not the server's** | "Today" was the UTC date, which changes at 6 in the morning in Dhaka: a member who came at 5:30 could not be checked out at 6:30, and a payment after midnight counted for the day before. Every day is now the gym's day (`models.gym_today()`, `utils/time.ts`); times are still stored in UTC |
 | **Short-lived tokens without logging people out** (PR #67) | A 15-minute access token in memory is safer than a long one in `localStorage`, but would log people out constantly. The rotating refresh cookie restores the token silently; a race between two tabs is allowed for 30 seconds, and a reuse after that ends the session |
 | **Serverless constraints** | Vercel functions share no memory and have no lasting disk, so the lockout counter and sessions live in the database, and the database connections go through Supabase's transaction pooler without prepared statements |
 | **Slow pages** | Every query crossed an ocean (the function ran in Washington DC, the database in Asia) and every request opened a new connection. The function was moved to the database's region, connections are reused, the Dashboard went from 63 queries to 22, the login check from 2 to 1, and a normal start from 26 statements to 1. The same request went from 1.6 s to 0.25 s after the move alone |
-| **No Alembic** | Apart from one planned, announced drop of the old member tables when members became accounts, the schema only grew (new tables, new nullable or defaulted columns), so the app adds what is missing on start instead. This kept deployment to one step, but a rename or removal would need a real migration tool (section 9) |
+| **No Alembic** | The schema only grows (new tables, new nullable or defaulted columns), so the app adds what is missing on start instead. This kept deployment to one step, but a rename or removal would need a real migration tool (section 9) |
 | **Private by default** | A training group someone is not in answers `404`, not `403`, so ids do not reveal what exists. Admins moderate through separate lists that can delete but never edit |
 | **Gym management, not a fitness diary** | The first version let anyone keep a private workout diary and start a social group. Neither helped run a gym, so the diary was removed, groups became training groups that trainers and staff run for members, and the time went into what a gym needs: plans, attendance, trainers' clients, equipment and expenses. The per-group permissions stayed as they were |
 | **Retiring a plan instead of deleting it** | Members and payments hold a plan's code. Deleting a used plan would leave them without a name, so a used plan can only be retired: it is not offered again, and old records still read correctly |
@@ -378,7 +380,7 @@ The one point of mid-term feedback, on the backend's folder structure, was the f
 
 - **CI:** the tests run locally before each merge. A GitHub Actions job running `pytest` on every pull request, and connecting Vercel to GitHub so `main` deploys by itself, are the next steps.
 - **Migrations:** adopt Alembic before the first change that renames or removes a column.
-- **Front-end tests:** the React app has no automated tests; component tests for the forms and an end-to-end run of the main flows would catch regressions.
+- **Front-end tests in the repository:** the browser run in section 6 is a local script; adding it to CI would catch regressions before each merge.
 - **Notifications:** renewal reminders and class changes by email or SMS.
 - **Self-service password reset** by email, which needs email verification first.
 - **Waiting lists** for full classes and **recurring classes**.

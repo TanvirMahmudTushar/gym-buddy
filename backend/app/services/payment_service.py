@@ -11,9 +11,9 @@ from app.models import (
     PaymentCreate,
     PaymentFilter,
     User,
+    gym_today,
     start_of_day,
     utc_now,
-    utc_today,
 )
 from app.request_info import Client
 from app.services import activity_service, member_service, plan_service
@@ -98,7 +98,7 @@ def _conditions(f: PaymentFilter) -> list:
 
 
 def totals_since(session: Session, day: date) -> tuple[int, int]:
-    """How many payments were taken from the start of this UTC day, and their sum; voided ones left out."""
+    """How many payments were taken from the start of this day, and their sum; voided ones left out."""
     count, amount = session.exec(
         select(func.count(), func.coalesce(func.sum(Payment.amount), 0)).where(
             col(Payment.voided_at).is_(None), col(Payment.paid_at) >= start_of_day(day)
@@ -114,7 +114,7 @@ def record_payment(session: Session, member_id: int, data: PaymentCreate, record
     if data.renew_plan:
         days = plan_service.get_offered(session, data.renew_plan).duration_days
         # An active member renews from their current expiry, so no paid days are lost; an expired one from today.
-        renewed_until = max(utc_today(), member.expires_on) + timedelta(days=days)
+        renewed_until = max(gym_today(), member.expires_on) + timedelta(days=days)
         member.expires_on = renewed_until
         member.plan = data.renew_plan
         session.add(member)
@@ -141,6 +141,12 @@ def list_member_payments(session: Session, member_id: int, offset: int, limit: i
     return _page(session, [col(Payment.member_id) == member_id], offset, limit)
 
 
+def list_of_account(session: Session, user_id: int, limit: int) -> list[dict]:
+    """The newest payments of an account, voided ones included, for the admin's user details."""
+    items, _ = _page(session, [col(Payment.member_id) == user_id], 0, limit)
+    return items
+
+
 def list_own_payments(session: Session, user: User, offset: int, limit: int) -> tuple[list[dict], int]:
     """The logged-in user's own payments, voided ones included. Nobody can read someone else's here."""
     return _page(session, [col(Payment.member_id) == user.id], offset, limit)
@@ -156,14 +162,23 @@ def list_payments(session: Session, f: PaymentFilter, offset: int, limit: int) -
     return items, total, total_amount
 
 
-def void_payment(session: Session, payment_id: int, voided_by: User, reason: str) -> dict:
+def void_payment(session: Session, payment_id: int, voided_by: User, reason: str, client: Client) -> dict:
     """Mark a payment as voided. Voiding twice changes nothing: the first time and reason are kept."""
     # Only a payment that is not voided yet is updated, so two admins voiding at the same moment cannot overwrite each other.
-    session.exec(
+    changed = session.exec(
         update(Payment)
         .where(col(Payment.id) == payment_id, col(Payment.voided_at).is_(None))
         .values(voided_at=utc_now(), void_reason=reason, voided_by=voided_by.id)
-    )
+    ).rowcount
+    if changed:
+        payment = session.get(Payment, payment_id)
+        activity_service.record(
+            session,
+            ActivityEvent.PAYMENT_VOID,
+            client,
+            actor=voided_by,
+            details=f"{payment.amount} taka from {payment.member_name}; reason: {reason}",
+        )
     session.commit()
     row = session.exec(_with_names([col(Payment.id) == payment_id])).first()
     if row is None:

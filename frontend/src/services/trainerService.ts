@@ -1,7 +1,7 @@
 // fetch helpers for trainers: /api/v1/trainers. The list is for gym managers and admins; My classes and My clients are
 // for trainers.
 import type { BookingWhen, ClassPage, Client, Trainer } from "../types/gymClass"
-import type { Page } from "../types/moderation"
+import type { Page } from "../types/page"
 import { request } from "./api"
 
 const BASE = "/api/v1/trainers"

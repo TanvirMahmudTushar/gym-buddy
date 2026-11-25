@@ -4,7 +4,9 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-TODAY = datetime.now(timezone.utc).date()
+from app.models import gym_today
+
+TODAY = gym_today()
 
 
 @pytest.fixture

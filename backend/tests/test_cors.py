@@ -1,6 +1,5 @@
 # CORS limited to FRONTEND_ORIGIN (NFR-15): the frontend gets CORS headers with credentials, any other origin none.
 import pytest
-
 from conftest import ALLOWED_ORIGIN
 
 HEALTH = "/api/health"

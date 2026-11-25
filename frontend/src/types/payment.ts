@@ -1,5 +1,6 @@
 // Plan and payment types matching the FastAPI schemas (TDD 5.3).
 import type { Plan } from "./member"
+import type { Page } from "./page"
 
 export type PaymentMethod = "cash" | "card" | "bank_transfer" | "mobile_banking"
 
@@ -38,19 +39,14 @@ export interface Payment {
   voided_by_name: string | null
 }
 
-export interface PaymentPage {
-  items: Payment[]
-  total: number
-  offset: number
-  limit: number
-}
+export type PaymentPage = Page<Payment>
 
 /** The all-payments list: total_amount adds up every matching payment that is not voided, not just this page. */
 export interface PaymentListPage extends PaymentPage {
   total_amount: number
 }
 
-/** Filters for the payments list and the CSV export. Empty strings mean "any". Dates are YYYY-MM-DD (UTC). */
+/** Filters for the payments list and the CSV export. Empty strings mean "any". Dates are YYYY-MM-DD. */
 export interface PaymentFilters {
   date_from: string
   date_to: string
@@ -59,7 +55,7 @@ export interface PaymentFilters {
   include_voided: boolean
 }
 
-/** Money taken, by UTC calendar day; voided payments are never counted. */
+/** Money taken, by day; voided payments are never counted. */
 export interface RevenueStats {
   today: number
   this_month: number

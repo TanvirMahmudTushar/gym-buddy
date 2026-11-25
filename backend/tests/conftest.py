@@ -8,7 +8,9 @@ from pathlib import Path
 from typing import NamedTuple
 
 _DB_DIR = Path(tempfile.mkdtemp(prefix="gym-buddy-tests-"))
-os.environ["DATABASE_URL"] = f"sqlite:///{(_DB_DIR / 'test.db').as_posix()}"
+# TEST_DATABASE_URL runs the same tests on an empty PostgreSQL database, which is stricter than SQLite (every table in
+# it is dropped, so never point it at real data).
+os.environ["DATABASE_URL"] = os.getenv("TEST_DATABASE_URL") or f"sqlite:///{(_DB_DIR / 'test.db').as_posix()}"
 os.environ["JWT_SECRET"] = "test-only-jwt-secret-" + "j" * 32
 os.environ["PASSWORD_PEPPER"] = "test-only-password-pepper-" + "p" * 32
 os.environ["FRONTEND_ORIGIN"] = "https://frontend.test"

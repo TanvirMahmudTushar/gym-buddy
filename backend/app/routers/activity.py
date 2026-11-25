@@ -6,7 +6,8 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query, Response
 
 from app.database import SessionDep
-from app.models import ActivityFilter, ActivityPage, SecuritySummary, User, utc_today
+from app.models import ActivityFilter, ActivityPage, SecuritySummary, User, gym_today
+from app.params import Limit, Offset
 from app.rbac import Permission, require_permission
 from app.request_info import ClientDep
 from app.services import activity_service
@@ -23,10 +24,10 @@ Filters = Annotated[ActivityFilter, Query()]
 def list_activity(
     session: SessionDep,
     filters: Filters,
-    offset: Annotated[int, Query(ge=0)] = 0,
-    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    offset: Offset = 0,
+    limit: Limit = 50,
 ) -> dict:
-    """Newest first. event, user_id (rows where that account acted or was acted on), date_from and date_to (UTC days,
+    """Newest first. event, user_id (rows where that account acted or was acted on), date_from and date_to (days at the gym,
     both included) and q (part of an email, the IP address or the details) can be combined."""
     items, total = activity_service.list_activity(session, filters, offset, limit)
     return {"items": items, "total": total, "offset": offset, "limit": limit}
@@ -46,7 +47,7 @@ def security_summary(session: SessionDep) -> dict:
 )
 def export_activity(session: SessionDep, filters: Filters, reader: Reader, client: ClientDep) -> Response:
     """The same filters and order as the list, every matching row up to 10,000. The export is itself logged."""
-    filename = f"activity-{utc_today().isoformat()}.csv"
+    filename = f"activity-{gym_today().isoformat()}.csv"
     return Response(
         content=activity_service.export_csv(session, filters, reader, client),
         media_type="text/csv; charset=utf-8",

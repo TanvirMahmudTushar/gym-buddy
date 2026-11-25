@@ -11,9 +11,13 @@ class TrainerNotFoundError(Exception):
 
 
 def list_trainers(session: Session) -> list[User]:
-    """Every account with the Trainer role, by name: the choices for a class or a member. A gym has only a few."""
+    """Every account with the Trainer role that is not banned, by name: the choices for a class or a member."""
     teachers = rbac.roles_with(Permission.CLASSES_TEACH)
-    query = select(User).where(col(User.role).in_(teachers)).order_by(col(User.name), col(User.id))
+    query = (
+        select(User)
+        .where(col(User.role).in_(teachers), col(User.is_banned).is_(False))
+        .order_by(col(User.name), col(User.id))
+    )
     return list(session.exec(query).all())
 
 

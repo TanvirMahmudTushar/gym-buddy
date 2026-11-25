@@ -1,6 +1,7 @@
 // Member types matching the FastAPI schemas (TDD 5.3). A member is a user whose account has a membership.
 import type { PaymentMethod } from "./payment"
 import type { Profile } from "./profile"
+import type { Page } from "./page"
 
 /** A plan's code, such as "monthly". Its name and price come from the plan list (context/PlansContext.tsx). */
 export type Plan = string
@@ -24,12 +25,7 @@ export interface Member extends Profile {
   notes: string | null
 }
 
-export interface MemberPage {
-  items: Member[]
-  total: number
-  offset: number
-  limit: number
-}
+export type MemberPage = Page<Member>
 
 /** Start a membership on the account with this email (the person signs up first). */
 export interface MemberCreate {

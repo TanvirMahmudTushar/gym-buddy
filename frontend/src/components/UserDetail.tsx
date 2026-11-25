@@ -1,44 +1,167 @@
-import { type FormEvent, useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { useAuth } from "../context/AuthContext"
 import { usePlans } from "../context/PlansContext"
-import { banUser, getUserDetail, revokeSessions, unbanUser } from "../services/adminService"
+import { getUserDetail } from "../services/adminService"
 import { ApiError } from "../services/api"
 import type { AdminUserDetail } from "../types/auth"
 import { activityLink, eventLabel, eventPill } from "../utils/activity"
-import { can, roleLabel, usersLink } from "../utils/auth"
-import { errorText, formatDate, formatDateTime, membersLink, todayUtc } from "../utils/member"
+import { can, usersLink } from "../utils/auth"
+import { memberStatus, membersLink } from "../utils/member"
 import { describeBrowser } from "../utils/session"
+import { count, errorText } from "../utils/text"
+import { formatDate, formatDateTime } from "../utils/time"
 import { trainingLink } from "../utils/workout"
+import Alert from "./Alert"
+import BookingRow from "./BookingRow"
+import PageHeader from "./PageHeader"
+import PaymentRow from "./PaymentRow"
+import RolePill from "./RolePill"
 import Stat from "./Stat"
 import StatusPill from "./StatusPill"
+import UserActionModal, { type UserAction } from "./UserActionModal"
+import VisitRow from "./VisitRow"
 
-interface Props {
-  userId: number
+const BACK = { href: usersLink(), label: "All users" }
+
+function Account({ detail: d }: { detail: AdminUserDetail }) {
+  const { planLabel } = usePlans()
+  const locked = d.locked_until !== null && new Date(d.locked_until) > new Date()
+  return (
+    <section className="card">
+      <h2>Account</h2>
+      <dl className="facts">
+        <dt>Email</dt>
+        <dd>{d.email}</dd>
+        <dt>Role</dt>
+        <dd>
+          <RolePill role={d.role} />
+        </dd>
+        <dt>Status</dt>
+        <dd>
+          <span className={d.is_banned ? "pill bad" : "pill good"}>{d.is_banned ? "Banned" : "Active"}</span>{" "}
+          {d.is_banned && d.banned_at && <span className="hint">since {formatDate(d.banned_at)}</span>}
+        </dd>
+        {d.is_banned && (
+          <>
+            <dt>Ban reason</dt>
+            <dd>{d.ban_reason ?? "Not given"}</dd>
+          </>
+        )}
+        {locked && (
+          <>
+            <dt>Login</dt>
+            <dd>Locked until {formatDateTime(d.locked_until ?? "")} after wrong passwords</dd>
+          </>
+        )}
+        <dt>Password</dt>
+        <dd>
+          {d.must_change_password ? "Temporary, must be changed" : d.password_changed_at ? `Changed ${formatDateTime(d.password_changed_at)}` : "Never changed"}
+        </dd>
+        <dt>Signed up</dt>
+        <dd>{formatDateTime(d.created_at)}</dd>
+        <dt>Membership</dt>
+        <dd>
+          {d.plan && d.expires_on ? (
+            <>
+              <a href={membersLink({ member: d.id })}>{planLabel(d.plan)}</a>{" "}
+              <StatusPill status={memberStatus({ is_frozen: d.is_frozen, expires_on: d.expires_on })} />{" "}
+              <span className="hint">until {formatDate(d.expires_on)}</span>
+            </>
+          ) : (
+            "None"
+          )}
+        </dd>
+      </dl>
+    </section>
+  )
 }
 
-// Admins only: one account in full. Its membership, the browsers it is logged in on (with Log out everywhere), how much
-// it has on record, its training groups, and its newest activity.
-export default function UserDetail({ userId }: Props) {
+function Records({ detail: d }: { detail: AdminUserDetail }) {
+  const { records: n, recent_records: recent } = d
+  const nothing = n.workouts_added + n.workouts_assigned + n.bookings + n.visits + n.payments === 0
+  return (
+    <section className="card">
+      <div className="toolbar">
+        <h2>Records</h2>
+        <a href={trainingLink("all-workouts", { owner: d.id })}>Workouts they added</a>
+      </div>
+      <div className="stats">
+        <Stat label="Workouts added" value={n.workouts_added} />
+        <Stat label="Workouts assigned" value={n.workouts_assigned} note={`${n.workouts_completed} done`} />
+        <Stat label="Bookings" value={n.bookings} />
+        <Stat label="Visits" value={n.visits} />
+        <Stat label="Payments" value={n.payments} />
+      </div>
+      {nothing && <p className="empty">Nothing on record yet.</p>}
+      <div className="split">
+        {recent.workouts.length > 0 && (
+          <div className="stack">
+            <h3>Newest workouts</h3>
+            <ul className="rows">
+              {recent.workouts.map((w) => (
+                <li key={w.id}>
+                  <span>
+                    <span className="row-title">{w.title}</span>
+                    <span className="hint">
+                      {formatDate(w.workout_date)} · {w.group_name ?? "no group"} · {w.owner_id === d.id ? "added" : "assigned"}
+                    </span>
+                  </span>
+                  {w.completed_at ? <span className="pill good">Done</span> : <span />}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {recent.bookings.length > 0 && (
+          <div className="stack">
+            <h3>Newest bookings</h3>
+            <ul className="rows">
+              {recent.bookings.map((b) => (
+                <BookingRow key={b.class_id} booking={b} />
+              ))}
+            </ul>
+          </div>
+        )}
+        {recent.visits.length > 0 && (
+          <div className="stack">
+            <h3>Newest visits</h3>
+            <ul className="rows">
+              {recent.visits.map((v) => (
+                <VisitRow key={v.id} visit={v} showRecorder />
+              ))}
+            </ul>
+          </div>
+        )}
+        {recent.payments.length > 0 && (
+          <div className="stack">
+            <h3>Newest payments</h3>
+            <ul className="rows">
+              {recent.payments.map((p) => (
+                <PaymentRow key={p.id} payment={p} />
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+    </section>
+  )
+}
+
+// Admins only: one account in full. Its membership, the browsers it is logged in on, its records and training groups,
+// and its newest activity.
+export default function UserDetail({ userId }: { userId: number }) {
   const { user: me } = useAuth()
-  const { planLabel } = usePlans()
   const [detail, setDetail] = useState<AdminUserDetail | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [notFound, setNotFound] = useState(false)
   const [error, setError] = useState("")
   const [notice, setNotice] = useState("")
-  const [confirming, setConfirming] = useState<"revoke" | "ban" | null>(null)
-  const [reason, setReason] = useState("")
-  const [busy, setBusy] = useState(false)
+  const [action, setAction] = useState<UserAction | null>(null)
 
   const load = useCallback(async () => {
-    setLoading(true)
     try {
       setDetail(await getUserDetail(userId))
+      setError("")
     } catch (err) {
-      if (err instanceof ApiError && err.status === 404) setNotFound(true)
-      else setError(errorText(err))
-    } finally {
-      setLoading(false)
+      setError(err instanceof ApiError && err.status === 404 ? "No account has this id. It may have been deleted." : errorText(err))
     }
   }, [userId])
 
@@ -46,242 +169,86 @@ export default function UserDetail({ userId }: Props) {
     void load()
   }, [load])
 
-  /** Run an action, show what happened, and load the account again so every section is current. */
-  async function act(action: () => Promise<string>) {
-    setBusy(true)
-    setError("")
-    setNotice("")
-    try {
-      setNotice(await action())
-      setConfirming(null)
-      setReason("")
-      await load()
-    } catch (err) {
-      setError(errorText(err))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  if (loading && !detail) return <p className="empty">Loading the account…</p>
-  if (notFound)
-    return (
-      <section className="card">
-        <h2>User not found</h2>
-        <p className="empty">No account has this id. It may have been deleted.</p>
-        <a href={usersLink(null)}>Back to users</a>
-      </section>
-    )
   if (!detail)
     return (
-      <p className="error" role="alert">
-        {error}
-      </p>
+      <div className="page">
+        <PageHeader title="User" back={BACK} />
+        {error ? <Alert>{error}</Alert> : <p className="empty">Loading…</p>}
+      </div>
     )
 
   const d = detail
   const isMe = d.id === me?.id
-  const canRevoke = can(me, "users:revoke_sessions") && !isMe && d.sessions.length > 0
-  const canBan = can(me, "users:ban") && !isMe && d.role !== "admin"
-  const locked = d.locked_until !== null && new Date(d.locked_until) > new Date()
-
-  function submitBan(e: FormEvent) {
-    e.preventDefault()
-    void act(async () => {
-      await banUser(d.id, reason.trim())
-      return `${d.name} is banned and logged out of every browser.`
-    })
-  }
+  // The API has the same rules: not yourself, and not another admin.
+  const canAct = !isMe && d.role !== "admin"
 
   return (
-    <div className="column">
-      <section className="card" aria-labelledby="user-heading">
-        <div className="toolbar">
-          <h2 id="user-heading" className="wrap-text">
-            {d.name}
-            {isMe && <span className="hint"> (you)</span>}
-          </h2>
-          <a href={usersLink(null)}>All users</a>
-        </div>
-        <dl className="facts">
-          <dt>Email</dt>
-          <dd>{d.email}</dd>
-          <dt>Role</dt>
-          <dd>
-            <span className={`pill role-${d.role}`}>{roleLabel(d.role)}</span>
-          </dd>
-          <dt>Status</dt>
-          <dd>
-            <span className={d.is_banned ? "pill banned" : "pill active"}>{d.is_banned ? "Banned" : "Active"}</span>
-            {d.is_banned && (
-              <span className="hint">
-                {" "}
-                {d.banned_at && `since ${formatDate(d.banned_at)}`}
-                {d.ban_reason && ` · ${d.ban_reason}`}
-              </span>
-            )}
-            {locked && <span className="hint"> · logins blocked until {formatDateTime(d.locked_until ?? "")} after wrong passwords</span>}
-            {d.must_change_password && <span className="hint"> · must choose a new password (reset by an admin)</span>}
-          </dd>
-          <dt>Signed up</dt>
-          <dd>{formatDateTime(d.created_at)}</dd>
-          <dt>Membership</dt>
-          <dd>
-            {d.plan && d.expires_on ? (
-              <>
-                <a href={membersLink({ member: d.id })}>{planLabel(d.plan)}</a>{" "}
-                <StatusPill status={d.is_frozen ? "frozen" : d.expires_on < todayUtc() ? "expired" : "active"} />
-                <span className="hint">
-                  {" "}
-                  {d.joined_on && `joined ${formatDate(d.joined_on)} · `}until {formatDate(d.expires_on)}
-                </span>
-              </>
+    <div className="page">
+      <PageHeader back={BACK} title={isMe ? `${d.name} (you)` : d.name} subtitle={d.email}>
+        {canAct && can(me, "users:reset_password") && (
+          <button type="button" onClick={() => setAction({ kind: "reset", user: d })}>
+            Reset password
+          </button>
+        )}
+        {!isMe && can(me, "users:revoke_sessions") && d.sessions.length > 0 && (
+          <button type="button" onClick={() => setAction({ kind: "revoke", user: d })}>
+            Log out everywhere
+          </button>
+        )}
+        {canAct && can(me, "users:ban") && (
+          <button type="button" className={d.is_banned ? undefined : "danger"} onClick={() => setAction({ kind: d.is_banned ? "unban" : "ban", user: d })}>
+            {d.is_banned ? "Unban" : "Ban"}
+          </button>
+        )}
+      </PageHeader>
+      <Alert kind="success">{notice}</Alert>
+      <Alert>{error}</Alert>
+      <div className="split">
+        <Account detail={d} />
+        <div className="column">
+          <section className="card">
+            <h2>Sessions {d.sessions.length > 0 && <span className="hint">({d.sessions.length})</span>}</h2>
+            {d.sessions.length === 0 ? (
+              <p className="empty">Not logged in anywhere.</p>
             ) : (
-              <span className="hint">None</span>
+              <ul className="rows">
+                {d.sessions.map((s) => (
+                  <li key={s.id}>
+                    <span>
+                      <span className="row-title">{describeBrowser(s.user_agent)}</span>
+                      <span className="hint">
+                        {s.ip ?? "Unknown address"} · last used {formatDateTime(s.last_used_at)}
+                      </span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
             )}
-          </dd>
-        </dl>
-        {(canBan || (can(me, "users:ban") && d.is_banned)) && (
-          <div className="actions">
-            {d.is_banned ? (
-              <button
-                type="button"
-                onClick={() =>
-                  act(async () => {
-                    await unbanUser(d.id)
-                    return `${d.name} can log in again.`
-                  })
-                }
-                disabled={busy}
-              >
-                Unban
-              </button>
+          </section>
+          <section className="card">
+            <h2>Training groups {d.groups.length > 0 && <span className="hint">({d.groups.length})</span>}</h2>
+            {d.groups.length === 0 ? (
+              <p className="empty">Not in any group.</p>
             ) : (
-              <button type="button" className="danger" onClick={() => setConfirming("ban")} disabled={busy}>
-                Ban
-              </button>
+              <ul className="rows">
+                {d.groups.map((g) => (
+                  <li key={g.id}>
+                    <span>
+                      <span className="row-title">{g.name}</span>
+                      <span className="hint">{count(g.member_count, "person", "people")}</span>
+                    </span>
+                    <span className={g.is_owner ? "pill info" : "pill"}>{g.is_owner ? "Owner" : "Member"}</span>
+                  </li>
+                ))}
+              </ul>
             )}
-          </div>
-        )}
-        {confirming === "ban" && (
-          <form className="confirm" onSubmit={submitBan}>
-            <div className="field">
-              <label htmlFor="detail-ban-reason">Reason for banning {d.name} (optional)</label>
-              <input id="detail-ban-reason" value={reason} onChange={(e) => setReason(e.target.value)} maxLength={500} autoFocus />
-            </div>
-            <div className="actions">
-              <button type="submit" className="danger solid" disabled={busy}>
-                {busy ? "Banning…" : "Ban user"}
-              </button>
-              <button type="button" onClick={() => setConfirming(null)} disabled={busy}>
-                Cancel
-              </button>
-            </div>
-          </form>
-        )}
-        {error && (
-          <p className="error" role="alert">
-            {error}
-          </p>
-        )}
-        {notice && (
-          <p className="hint" role="status">
-            {notice}
-          </p>
-        )}
-      </section>
-
-      <section className="card" aria-labelledby="user-sessions-heading">
-        <div className="toolbar">
-          <h2 id="user-sessions-heading">Where they are logged in</h2>
-          {canRevoke && (
-            <button type="button" className="danger" onClick={() => setConfirming("revoke")} disabled={busy}>
-              Log out everywhere
-            </button>
-          )}
+          </section>
         </div>
-        {confirming === "revoke" && (
-          <div className="confirm" role="alertdialog" aria-labelledby="confirm-revoke">
-            <span id="confirm-revoke">
-              Log {d.name} out of all {d.sessions.length} browser{d.sessions.length === 1 ? "" : "s"}? Their next request
-              is refused and they must log in again. Their password does not change.
-            </span>
-            <div className="actions">
-              <button
-                type="button"
-                className="danger solid"
-                disabled={busy}
-                onClick={() =>
-                  act(async () => {
-                    const { revoked } = await revokeSessions(d.id)
-                    return `${d.name} is logged out of ${revoked} browser${revoked === 1 ? "" : "s"}.`
-                  })
-                }
-              >
-                {busy ? "Logging out…" : "Yes, log them out"}
-              </button>
-              <button type="button" onClick={() => setConfirming(null)} disabled={busy}>
-                Cancel
-              </button>
-            </div>
-          </div>
-        )}
-        {d.sessions.length === 0 ? (
-          <p className="empty">Not logged in anywhere.</p>
-        ) : (
-          <ul className="visit-list session-list">
-            {d.sessions.map((s) => (
-              <li key={s.id}>
-                <span>
-                  <strong>{describeBrowser(s.user_agent)}</strong>
-                  <br />
-                  <span className="hint">
-                    {s.ip ?? "Unknown address"} · logged in {formatDateTime(s.created_at)} · last active {formatDateTime(s.last_used_at)}
-                  </span>
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      <section className="card" aria-labelledby="user-records-heading">
-        <h2 id="user-records-heading">Records and training groups</h2>
-        <dl className="stats">
-          <Stat label="Visits" value={d.records.visits} />
-          <Stat label="Class bookings" value={d.records.bookings} />
-          <Stat label="Payments" value={d.records.payments} />
-          <Stat label="Workouts added" value={d.records.workouts_added} />
-          <Stat label="Workouts assigned" value={d.records.workouts_assigned} note={`${d.records.workouts_completed} done`} />
-        </dl>
-        <p className="hint">
-          {d.plan && <a href={membersLink({ member: d.id })}>Open their visits, bookings and payments</a>}
-          {d.plan && can(me, "content:moderate") && " · "}
-          {can(me, "content:moderate") && (
-            <a href={trainingLink("all-workouts", d.id)}>See the workouts and groups they added</a>
-          )}
-        </p>
-        {d.groups.length === 0 ? (
-          <p className="empty">Not in any group.</p>
-        ) : (
-          <ul className="visit-list">
-            {d.groups.map((g) => (
-              <li key={g.id}>
-                <span>
-                  <strong>{g.name}</strong>{" "}
-                  <span className="hint">
-                    · {g.is_owner ? "Owner" : "Member"} · {g.member_count} {g.member_count === 1 ? "person" : "people"}
-                  </span>
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      <section className="card" aria-labelledby="user-activity-heading">
+      </div>
+      <Records detail={d} />
+      <section className="card">
         <div className="toolbar">
-          <h2 id="user-activity-heading">Recent activity</h2>
+          <h2>Recent activity</h2>
           <a href={activityLink({ user_id: d.id })}>All their activity</a>
         </div>
         {d.recent_activity.length === 0 ? (
@@ -291,8 +258,9 @@ export default function UserDetail({ userId }: Props) {
             <table>
               <thead>
                 <tr>
-                  <th>Time</th>
                   <th>Event</th>
+                  <th>Time</th>
+                  <th>By</th>
                   <th>Details</th>
                   <th>Address</th>
                 </tr>
@@ -300,13 +268,15 @@ export default function UserDetail({ userId }: Props) {
               <tbody>
                 {d.recent_activity.map((e) => (
                   <tr key={e.id}>
-                    <td>{formatDateTime(e.created_at)}</td>
-                    <td>
+                    <td className="name">
                       <span className={eventPill(e.event)}>{eventLabel(e.event)}</span>
-                      {e.actor_id !== d.id && e.actor_email && <div className="hint">by {e.actor_email}</div>}
                     </td>
-                    <td className="wrap">{e.details ?? "—"}</td>
-                    <td>{e.ip ?? "—"}</td>
+                    <td data-label="Time" className="nowrap">
+                      {formatDateTime(e.created_at)}
+                    </td>
+                    <td data-label="By">{e.actor_id === d.id ? "Themself" : (e.actor_email ?? "System")}</td>
+                    <td data-label="Details">{e.details ?? "—"}</td>
+                    <td data-label="Address">{e.ip ?? "—"}</td>
                   </tr>
                 ))}
               </tbody>
@@ -314,6 +284,18 @@ export default function UserDetail({ userId }: Props) {
           </div>
         )}
       </section>
+      {action && (
+        <UserActionModal
+          action={action}
+          onClose={() => setAction(null)}
+          onChanged={load}
+          onDone={(message) => {
+            setNotice(message)
+            setAction(null)
+            void load()
+          }}
+        />
+      )}
     </div>
   )
 }

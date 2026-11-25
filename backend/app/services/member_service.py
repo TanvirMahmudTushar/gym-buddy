@@ -18,7 +18,7 @@ from app.models import (
     MemberCreate,
     Payment,
     User,
-    utc_today,
+    gym_today,
 )
 from app.request_info import Client
 from app.services import activity_service, group_service, plan_service, profile_service, trainer_service
@@ -92,7 +92,7 @@ def start_membership(session: Session, data: MemberCreate, recorded_by: User) ->
     if data.trainer_id is not None:
         trainer_service.check_trainer(session, data.trainer_id)
     user.plan = plan.plan
-    user.joined_on = data.joined_on or utc_today()
+    user.joined_on = data.joined_on or gym_today()
     user.expires_on = data.expires_on or user.joined_on + timedelta(days=plan.duration_days)
     user.is_frozen = False
     user.trainer_id = data.trainer_id
@@ -128,7 +128,7 @@ def get_member(session: Session, member_id: int) -> User:
 
 def status_filters(status: MemberStatus | None) -> list:
     """A frozen member counts as frozen whatever its expiry date."""
-    today = utc_today()
+    today = gym_today()
     not_frozen = col(User.is_frozen).is_(False)
     if status == "active":
         return [not_frozen, col(User.expires_on) >= today]

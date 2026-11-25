@@ -4,7 +4,7 @@ from datetime import date, datetime, timedelta
 from sqlalchemy.orm import aliased
 from sqlmodel import Session, col, func, select
 
-from app.models import CheckIn, User, as_utc, start_of_day, utc_now, utc_today
+from app.models import CheckIn, User, as_utc, gym_today, start_of_day, utc_now
 from app.services import member_service
 from app.services.search import contains_any
 
@@ -32,13 +32,13 @@ Recorder = aliased(User)
 def check_membership_valid(member: User) -> None:
     if member.is_frozen:
         raise MembershipNotValidError("Membership is frozen")
-    if member.expires_on < utc_today():
+    if member.expires_on < gym_today():
         raise MembershipNotValidError(f"Membership expired on {member.expires_on.isoformat()}")
 
 
 def start_of_today() -> datetime:
-    """Midnight at the start of today, UTC: the same 'today' the expiry check uses (SRS C-7)."""
-    return start_of_day(utc_today())
+    """Midnight at the gym at the start of today, the same 'today' the expiry check uses (SRS C-7)."""
+    return start_of_day(gym_today())
 
 
 def _inside() -> list:
@@ -94,6 +94,12 @@ def list_member_check_ins(session: Session, member_id: int, offset: int, limit: 
     return _page(session, [col(CheckIn.member_id) == member_id], offset, limit)
 
 
+def list_of_account(session: Session, user_id: int, limit: int) -> list[dict]:
+    """The newest visits of an account, which need not be a member any more, for the admin's user details."""
+    items, _ = _page(session, [col(CheckIn.member_id) == user_id], 0, limit)
+    return items
+
+
 def check_out(session: Session, check_in_id: int) -> dict:
     """Record that the member left, now. A visit left open on an earlier day stays open: when they really left is
     not known any more."""
@@ -114,7 +120,7 @@ def check_out(session: Session, check_in_id: int) -> dict:
 def list_day(
     session: Session, day: date, inside: bool, q: str | None, offset: int, limit: int
 ) -> tuple[list[dict], int]:
-    """Everyone checked in on a UTC day, newest first. inside narrows it to who is in the gym now."""
+    """Everyone checked in on a day, newest first. inside narrows it to who is in the gym now."""
     filters = [
         col(CheckIn.checked_in_at) >= start_of_day(day),
         col(CheckIn.checked_in_at) < start_of_day(day + timedelta(days=1)),
@@ -137,9 +143,9 @@ def today_counts(session: Session) -> tuple[int, int]:
 
 
 def check_in_stats(session: Session) -> dict:
-    """Today, the last 7 days, who is inside, and each of the last 7 UTC days (oldest first), in one query. Each day
+    """Today, the last 7 days, who is inside, and each of the last 7 days (oldest first), in one query. Each day
     is a range of times, which is the same on SQLite and PostgreSQL (no date functions in SQL)."""
-    days = [utc_today() - timedelta(days=back) for back in range(6, -1, -1)]
+    days = [gym_today() - timedelta(days=back) for back in range(6, -1, -1)]
 
     def between(day: date):
         return func.count().filter(
