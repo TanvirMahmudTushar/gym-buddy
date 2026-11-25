@@ -28,7 +28,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
-DOMAIN = "gymbuddy.example"  # .example is reserved (RFC 2606): these addresses can never receive mail.
+DOMAIN = "gmail.com"  # The app never sends mail or checks an address, so these accounts need no real inbox.
 DHAKA = timezone(timedelta(hours=6))  # Class times are written in the gym's local time and sent with their offset.
 
 
