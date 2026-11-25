@@ -49,18 +49,18 @@ The mid-term MVP was a member CRUD API with a one-page front end. The final rele
 
 ## 2. How to test the live system
 
-Open https://2321648gymbuddy.vercel.app/ and log in with one of the accounts below. The email is the user ID. **Passwords are in the submission form and the PDF report only; they are never stored in the repository.**
+Open https://2321648gymbuddy.vercel.app/ and log in with one of the accounts below. The email is the user ID. **Every account uses the same password. It is in the submission form and the PDF report only; it is never stored in the repository.**
 
 | User ID (email) | Role | Lands on |
 |---|---|---|
-| `admin.ayesha@gymbuddy.example` | Admin | Dashboard |
-| `admin.imran@gymbuddy.example` | Admin | Dashboard |
-| `manager.nadia@gymbuddy.example` | Gym Manager | Dashboard |
-| `trainer.karim@gymbuddy.example` | Trainer | My classes |
-| `rafi@gymbuddy.example` | User | My membership |
-| `sadia@gymbuddy.example` | User | My membership |
-| `tanim@gymbuddy.example` | User | My membership |
-| `mitu@gymbuddy.example` | User | My membership |
+| `admin.ayesha@gmail.com` | Admin | Dashboard |
+| `admin.imran@gmail.com` | Admin | Dashboard |
+| `manager.nadia@gmail.com` | Gym Manager | Dashboard |
+| `trainer.karim@gmail.com` | Trainer | My classes |
+| `rafi@gmail.com` | User | My membership |
+| `sadia@gmail.com` | User | My membership |
+| `tanim@gmail.com` | User | My membership |
+| `mitu@gmail.com` | User | My membership |
 
 **Shared group with mixed permissions: "Strength Program"**, owned by the trainer Karim Uddin. Rafi may add, edit and assign workouts; Sadia may only add; Tanim may only read; Mitu is not in the group and gets `404` for it. The [README](../README.md#shared-group-with-mixed-permissions) lists what to try with each account.
 

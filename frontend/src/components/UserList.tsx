@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useAuth } from "../context/AuthContext"
 import { usePlans } from "../context/PlansContext"
 import { useDebouncedValue } from "../hooks/useDebouncedValue"
@@ -58,11 +58,18 @@ export default function UserList() {
   const [notice, setNotice] = useState("")
   const [exportError, setExportError] = useState("")
 
+  // The menu link, followed while a list from the Dashboard is open, clears its filters.
+  useEffect(() => {
+    const onChange = () => setDraft(filtersFromHash())
+    window.addEventListener("hashchange", onChange)
+    return () => window.removeEventListener("hashchange", onChange)
+  }, [])
+
   return (
     <div className="page">
       <PageHeader title="Users" subtitle="Everyone with an account. Open a name for their records, groups, sessions and activity.">
         {can(me, "users:export") && (
-          <ExportButton name="users" load={() => exportUsersCsv(filters)} disabled={list.total === 0} onError={setExportError} />
+          <ExportButton name="users" load={() => exportUsersCsv(filters)} total={list.total} onError={setExportError} />
         )}
       </PageHeader>
       <section className="card">

@@ -48,7 +48,7 @@ export default function ModerationWorkouts({ tabs, ownerId, groupId }: Props) {
   return (
     <>
       <PageHeader title="Training" subtitle="Moderation: every workout in every training group.">
-        <ExportButton name="workouts" load={() => exportWorkoutsCsv(filters)} disabled={list.total === 0} onError={setExportError} />
+        <ExportButton name="workouts" load={() => exportWorkoutsCsv(filters)} total={list.total} onError={setExportError} />
       </PageHeader>
       {tabs}
       <section className="card">

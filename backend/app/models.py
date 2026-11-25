@@ -2,7 +2,7 @@
 # There is no separate member table: a member is a user whose account has a membership (a plan).
 from datetime import date, datetime, time, timedelta, timezone
 from enum import Enum
-from typing import Annotated, Literal
+from typing import Annotated, Literal, get_args
 
 from pydantic import (
     AfterValidator,
@@ -269,6 +269,16 @@ class MemberBulkDeleteResult(SQLModel):
 # --- Accounts and roles ---
 
 Role = Literal["user", "trainer", "gym_manager", "admin"]
+
+
+def _known_role(value: object) -> object:
+    """A role typed wrongly in the database ("admin " with a space) holds no permissions (rbac.permissions_for), so it
+    is shown as a plain User. Refusing it here would turn the login, and the whole Users page, into a 500."""
+    return value if value in get_args(Role) else "user"
+
+
+# In answers only: a request with an unknown role is still refused (422).
+ReadRole = Annotated[Role, BeforeValidator(_known_role)]
 MIN_PASSWORD_LENGTH = 8
 MAX_PASSWORD_LENGTH = 128
 Password = Annotated[str, StringConstraints(min_length=MIN_PASSWORD_LENGTH, max_length=MAX_PASSWORD_LENGTH)]
@@ -289,7 +299,7 @@ class UserRead(SQLModel):
     id: int
     email: str
     name: str
-    role: Role
+    role: ReadRole
     created_at: UtcDateTime
     # True after an admin reset the password: the app asks for a new one before anything else.
     must_change_password: bool

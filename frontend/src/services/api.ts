@@ -4,9 +4,14 @@ import type { LoginResult, Me } from "../types/auth"
 // The access token is kept only in memory, never in localStorage or sessionStorage, so a script injected into
 // the page cannot find it there. After a reload a new one comes from the refresh cookie, which scripts cannot read.
 let accessToken: string | null = null
+// The account this tab is logged in as. Every tab shares the refresh cookie, so after another tab logs in as someone
+// else, this tab's next refresh answers with that account.
+let account: number | null = null
 
-export function setToken(token: string | null): void {
-  accessToken = token
+/** The login this tab has now, or null after a logout. */
+export function setSession(login: LoginResult | null): void {
+  accessToken = login?.access_token ?? null
+  account = login?.user.id ?? null
 }
 
 /** Why a login ended without the person logging out. */
@@ -15,8 +20,9 @@ export type SessionEnd = "expired" | "banned"
 interface SessionHandlers {
   /** The server no longer accepts the login, so the app shows Log in. */
   onEnd: (reason: SessionEnd) => void
-  /** A refresh answered with the account as it is now, such as with a new role. */
-  onUser: (user: Me) => void
+  /** A refresh answered with the account as it is now, such as with a new role. `switched`: it is another account than
+   * this tab had, because another tab logged in. */
+  onUser: (user: Me, switched: boolean) => void
   /** The server refused something for lack of permission: the role may have changed since the app loaded it. */
   onForbidden: () => void
 }
@@ -60,8 +66,9 @@ export function refreshSession(): Promise<LoginResult | null> {
       if (res.status === 204 || res.status === 401) return null
       if (!res.ok) throw new ApiError(await errorMessage(res), res.status)
       const result: LoginResult = await res.json()
-      accessToken = result.access_token
-      handlers?.onUser(result.user)
+      const switched = account !== null && account !== result.user.id
+      setSession(result)
+      handlers?.onUser(result.user, switched)
       return result
     } finally {
       refreshing = null
@@ -87,6 +94,7 @@ async function errorMessage(res: Response): Promise<string> {
 
 /** Send a request with the access token; throws ApiError for any error status. */
 async function send(path: string, init: RequestInit, isRetry = false): Promise<Response> {
+  const sentAs = account
   const headers: Record<string, string> = {}
   if (init.body) headers["Content-Type"] = "application/json"
   const token = accessToken
@@ -98,7 +106,9 @@ async function send(path: string, init: RequestInit, isRetry = false): Promise<R
   // A 401 while holding a token: it expired (after 5 minutes) or its session ended. Get a new one once and try
   // again; if another request already got one meanwhile, just try again. A wrong password on Log in has no token.
   if (token && res.status === 401 && !isRetry && (accessToken !== token || (await refreshSession()))) {
-    return send(path, init, true)
+    if (account === sentAs) return send(path, init, true)
+    // Never repeat a request as someone else: what one person asked for would change another person's account.
+    if (account !== null) throw new ApiError("Another tab logged in as someone else, so this was not done.", 401)
   }
   const message = await errorMessage(res)
   // The refresh was refused too, or the account is banned: the session is over, so the app shows Log in.

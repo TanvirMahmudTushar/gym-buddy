@@ -59,24 +59,24 @@ vercel.json       Vercel setup: /api/* goes to backend, everything else to front
 
 ## Test accounts
 
-These accounts are on the live site, each with the role shown. **Passwords are given only in the submission form and the PDF report, never in this repository.** The email is the user ID you log in with.
+These accounts are on the live site, each with the role shown. **The password (the same for every account below) is given only in the submission form and the PDF report, never in this repository.** The email is the user ID you log in with.
 
 | User ID (email) | Name | Role | Lands on | Good for trying |
 |---|---|---|---|---|
-| `admin.ayesha@gymbuddy.example` | Ayesha Rahman | Admin | Dashboard | Revenue and net income, plans, expenses, users, roles, bans, password reset, activity log, failed logins, moderation (Training → All groups / All workouts), payments void and CSV |
-| `admin.imran@gymbuddy.example` | Imran Hossain | Admin | Dashboard | A second admin: neither admin can ban the other or reset the other's password, and neither can change their own role |
-| `manager.nadia@gymbuddy.example` | Nadia Islam | Gym Manager | Dashboard (front desk part) | Members, attendance, payments, classes, equipment and announcements; `403` on the admin endpoints |
-| `trainer.karim@gymbuddy.example` | Karim Uddin | Trainer | My classes | Who booked his classes and who came, his clients, reporting a fault; owner of the shared training group |
-| `rafi@gymbuddy.example` | Rafi Ahmed | User | My membership | Monthly membership expiring within 7 days, Karim's client, 3 bookings (one class now full), may add, edit and assign workouts in the shared group |
-| `sadia@gymbuddy.example` | Sadia Karim | User | My membership | Quarterly membership, Karim's client, in the gym now; in the shared group, may add workouts only; one assigned workout done |
-| `tanim@gymbuddy.example` | Tanim Chowdhury | User | My membership | Frozen yearly membership (cannot book or be checked in); in the shared group, read only |
-| `mitu@gymbuddy.example` | Mitu Das | User | My membership | Signed up but no membership yet: shows on the Members page waiting list |
+| `admin.ayesha@gmail.com` | Ayesha Rahman | Admin | Dashboard | Revenue and net income, plans, expenses, users, roles, bans, password reset, activity log, failed logins, moderation (Training → All groups / All workouts), payments void and CSV |
+| `admin.imran@gmail.com` | Imran Hossain | Admin | Dashboard | A second admin: neither admin can ban the other or reset the other's password, and neither can change their own role |
+| `manager.nadia@gmail.com` | Nadia Islam | Gym Manager | Dashboard (front desk part) | Members, attendance, payments, classes, equipment and announcements; `403` on the admin endpoints |
+| `trainer.karim@gmail.com` | Karim Uddin | Trainer | My classes | Who booked his classes and who came, his clients, reporting a fault; owner of the shared training group |
+| `rafi@gmail.com` | Rafi Ahmed | User | My membership | Monthly membership expiring within 7 days, Karim's client, 3 bookings (one class now full), may add, edit and assign workouts in the shared group |
+| `sadia@gmail.com` | Sadia Karim | User | My membership | Quarterly membership, Karim's client, in the gym now; in the shared group, may add workouts only; one assigned workout done |
+| `tanim@gmail.com` | Tanim Chowdhury | User | My membership | Frozen yearly membership (cannot book or be checked in); in the shared group, read only |
+| `mitu@gmail.com` | Mitu Das | User | My membership | Signed up but no membership yet: shows on the Members page waiting list |
 
-`.example` addresses are reserved and can never receive mail, so nobody's real inbox is involved.
+The app never sends email and does not check that an address exists, so these accounts need no real inbox. All eight use the same password.
 
 ### Shared group with mixed permissions
 
-**Strength Program**, owned by **Karim Uddin** (`trainer.karim@gymbuddy.example`). Open **Training** → **My groups** after logging in as any of the four people below.
+**Strength Program**, owned by **Karim Uddin** (`trainer.karim@gmail.com`). Open **Training** → **My groups** after logging in as any of the four people below.
 
 | Person | In the group as | Add workouts | Edit workouts | Assign workouts | Delete workouts; rename or delete the group; add and remove people |
 |---|---|---|---|---|---|
@@ -95,8 +95,8 @@ Everyone in the group sees its workouts and its people. The group has four worko
 python scripts/seed_demo.py --base-url https://2321648gymbuddy.vercel.app
 ```
 
-- The passwords are read from `gym-buddy-demo-passwords.json` in your home folder, outside the repository (`--passwords` picks another file). If the file does not exist, random passwords are made and saved there.
-- Nobody can make themselves an admin through the API, so the first run signs the accounts up, then stops and prints one SQL line that makes `admin.ayesha@gymbuddy.example` an admin. Run it in Supabase → **SQL editor** and run the script again; from then on that admin gives the other roles.
+- The passwords are read from `gym-buddy-demo-passwords.json` in your home folder, outside the repository (`--passwords` picks another file). If the file does not exist, random passwords are made and saved there. To give every account one shared password, write it for each email in that file before the first run.
+- Nobody can make themselves an admin through the API, so the first run signs the accounts up, then stops and prints one SQL line that makes `admin.ayesha@gmail.com` an admin. Run it in Supabase → **SQL editor** and run the script again; from then on that admin gives the other roles.
 - Class and workout dates are relative to the day the script runs, so run it shortly before a demo.
 
 ## Accounts and roles

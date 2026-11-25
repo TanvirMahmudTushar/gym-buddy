@@ -2,10 +2,10 @@
 from datetime import timedelta
 
 from conftest import PASSWORD
-from sqlmodel import Session, col, select, update
+from sqlmodel import Session, select
 
 from app.database import engine
-from app.models import ActivityLog, utc_now
+from app.models import ActivityLog, User, as_utc
 from app.services.auth_service import LOCKOUT, MAX_FAILED_LOGINS
 
 
@@ -101,9 +101,47 @@ def test_the_block_on_an_unknown_email_ends_after_the_lockout_and_attempts_do_no
     rows = admin.client.get("/api/v1/admin/activity", params={"event": "account_locked"}).json()["items"]
     assert [r["target_email"] for r in rows] == [ghost]
 
-    # 15 minutes later the five wrong attempts have aged out.
-    with Session(engine) as session:
-        session.exec(update(ActivityLog).where(col(ActivityLog.actor_email) == ghost).values(created_at=utc_now() - LOCKOUT - timedelta(seconds=1)))
-        session.commit()
-        assert session.exec(select(ActivityLog).where(col(ActivityLog.actor_email) == ghost)).first() is not None
+    # 15 minutes later the block is over, and the count starts again: one more wrong password is a plain 401.
+    _pass_time(LOCKOUT + timedelta(seconds=1))
     assert _try(anon, ghost).status_code == 401
+
+
+def _pass_time(by: timedelta) -> None:
+    """Make every activity row older, as if this much time had passed (an account's own lock is not moved)."""
+    with Session(engine) as session:
+        for row in session.exec(select(ActivityLog)).all():
+            row.created_at = as_utc(row.created_at) - by
+            session.add(row)
+        session.commit()
+
+
+def test_slow_guessing_does_not_show_which_emails_exist(account, anon):
+    """A real account counts wrong passwords in a row however far apart they are, so an unknown email must too."""
+    answers = {}
+    for email in (account("real").email, "ghost@test.example"):
+        codes = []
+        for _ in range(MAX_FAILED_LOGINS):
+            codes.append(_try(anon, email).status_code)
+            _pass_time(LOCKOUT + timedelta(minutes=1))
+        answers[email] = codes
+    real, ghost = answers.values()
+    assert real == ghost == [401] * (MAX_FAILED_LOGINS - 1) + [429]
+
+
+def test_a_role_typed_wrongly_in_the_database_is_a_plain_user_not_a_500(account, anon):
+    admin, rafi = account("ada", role="admin"), account("rafi")
+    with Session(engine) as session:
+        user = session.get(User, rafi.id)
+        user.role = "admin "  # with a space, as typed in a table editor
+        session.add(user)
+        session.commit()
+    login = _try(anon, rafi.email, PASSWORD)
+    assert login.status_code == 200
+    assert login.json()["user"]["role"] == "user" and login.json()["user"]["permissions"] == []
+    assert rafi.client.get("/api/v1/admin/stats").status_code == 403
+    # The admin still sees the list, and can give a real role.
+    listed = admin.client.get("/api/v1/admin/users")
+    assert listed.status_code == 200 and {u["role"] for u in listed.json()["items"]} == {"admin", "user"}
+    path = f"/api/v1/admin/users/{rafi.id}/role"
+    assert admin.client.patch(path, json={"role": "trainer"}).json()["role"] == "trainer"
+    assert admin.client.patch(path, json={"role": "admin "}).status_code == 422

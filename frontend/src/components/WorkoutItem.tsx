@@ -123,6 +123,7 @@ export default function WorkoutItem({ workout: w, meId, canEdit = false, canDele
           onClose={close}
           onConfirm={async () => {
             await deleteWorkout(w.id)
+            setDialog(null)
             onDeleted?.()
           }}
         >

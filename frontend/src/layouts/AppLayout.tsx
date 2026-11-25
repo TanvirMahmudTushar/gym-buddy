@@ -1,4 +1,5 @@
 import { type ReactNode, useEffect, useState } from "react"
+import Alert from "../components/Alert"
 import Icon, { type IconName } from "../components/Icon"
 import { useAuth } from "../context/AuthContext"
 import type { Me } from "../types/auth"
@@ -66,7 +67,7 @@ interface Props {
 
 // The frame around every page: the menu (a sidebar, or a button that opens it on a phone), who is logged in, Log out.
 export default function AppLayout({ page, children, locked = false }: Props) {
-  const { user, logout } = useAuth()
+  const { user, logout, switched } = useAuth()
   const [open, setOpen] = useState(false)
 
   // On a phone, choosing a page closes the menu.
@@ -111,7 +112,12 @@ export default function AppLayout({ page, children, locked = false }: Props) {
           </div>
         </div>
       </div>
-      <main className="content">{children}</main>
+      <main className="content">
+        <Alert kind="info">
+          {switched && `Another tab logged in as ${user.name} (${user.email}), so this tab now shows that account. Anything you had not saved here was not saved.`}
+        </Alert>
+        {children}
+      </main>
     </div>
   )
 }
