@@ -5,7 +5,7 @@ from datetime import timedelta
 import jwt
 
 from app.models import utc_now
-from app.security import ALGORITHM, read_access_token
+from app.security import ACCESS_TOKEN_LIFETIME, ALGORITHM, read_access_token
 
 ME = "/api/v1/users/me"
 
@@ -52,9 +52,15 @@ def test_expired_token_gets_401(account, anon):
     claims = jwt.decode(_token(me.client), os.environ["JWT_SECRET"], algorithms=[ALGORITHM])
     past = utc_now() - timedelta(minutes=30)
     expired = jwt.encode(
-        {**claims, "iat": past, "exp": past + timedelta(minutes=15)}, os.environ["JWT_SECRET"], algorithm=ALGORITHM
+        {**claims, "iat": past, "exp": past + ACCESS_TOKEN_LIFETIME}, os.environ["JWT_SECRET"], algorithm=ALGORITHM
     )
     assert anon.get(ME, headers={"Authorization": f"Bearer {expired}"}).status_code == 401
+
+
+def test_token_is_valid_for_5_minutes(account):
+    me = account("lina")
+    claims = jwt.decode(_token(me.client), os.environ["JWT_SECRET"], algorithms=[ALGORITHM])
+    assert claims["exp"] - claims["iat"] == 5 * 60
 
 
 def test_token_without_a_session_id_gets_401(account, anon):
@@ -68,7 +74,7 @@ def test_token_without_a_session_id_gets_401(account, anon):
 def test_token_stops_working_after_logout(account):
     me = account("ugo")
     assert me.client.get(ME).status_code == 200
-    # Logout revokes the session by its refresh cookie; the 15-minute access token stops at once, not when it expires.
+    # Logout revokes the session by its refresh cookie; the 5-minute access token stops at once, not when it expires.
     assert me.client.post("/api/v1/auth/logout").status_code == 204
     assert me.client.get(ME).status_code == 401
     assert read_access_token(_token(me.client))  # still a well-signed, unexpired token: only its session ended

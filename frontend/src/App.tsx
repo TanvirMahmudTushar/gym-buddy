@@ -10,6 +10,7 @@ import AttendancePage from "./pages/AttendancePage"
 import ChoosePasswordPage from "./pages/ChoosePasswordPage"
 import ClassesPage from "./pages/ClassesPage"
 import DashboardPage from "./pages/DashboardPage"
+import DevicesPage from "./pages/DevicesPage"
 import EquipmentPage from "./pages/EquipmentPage"
 import ExpensesPage from "./pages/ExpensesPage"
 import LoginPage from "./pages/LoginPage"
@@ -46,6 +47,7 @@ const PAGES: Record<ProtectedPage, () => React.ReactNode> = {
   membership: MembershipPage,
   timetable: TimetablePage,
   account: AccountPage,
+  devices: DevicesPage,
 }
 
 /** The page part of the URL hash: "members" for #/members?filter=expiring_soon. */

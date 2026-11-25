@@ -910,6 +910,18 @@ button.linklike {
   display: block;
 }
 
+/* A login device: its icon beside its lines. */
+.device {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.device > .icon {
+  margin-top: 2px;
+  color: var(--muted);
+}
+
 .table-wrap {
   position: relative;
   overflow-x: auto;

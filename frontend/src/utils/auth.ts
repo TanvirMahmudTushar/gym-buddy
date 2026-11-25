@@ -50,6 +50,7 @@ export const PAGE_TITLES = {
   membership: "My membership",
   timetable: "Book a class",
   account: "My account",
+  devices: "Login devices",
 }
 
 export type Page = keyof typeof PAGE_TITLES
@@ -75,6 +76,7 @@ const PAGE_ACCESS: Record<ProtectedPage, (user: Me) => boolean> = {
   "my-classes": (u) => can(u, "classes:teach"),
   clients: (u) => can(u, "clients:read"),
   account: () => true,
+  devices: () => true,
   // Training shows the groups the caller is in: any login. Inside a group, the buttons follow the caller's group
   // permissions (my_permissions), which the API checks again on every request.
   training: () => true,

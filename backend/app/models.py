@@ -123,9 +123,9 @@ class User(SQLModel, table=True):
 
 
 class AuthSession(SQLModel, table=True):
-    """One login on one browser (TDD 10.1). The refresh cookie holds a random token; only its hash is kept here, and
-    every refresh replaces it (rotation). Each access token names its session (sid), so revoking the session ends
-    the access token at once, not only when it expires."""
+    """One login on one browser: a login device (TDD 10.1). The refresh cookie holds a random token; only its hash is
+    kept here, and every refresh replaces it (rotation). Each access token names its session (sid), so revoking the
+    session ends the access token at once, not only when it expires."""
 
     __tablename__ = "auth_session"
 
@@ -137,7 +137,7 @@ class AuthSession(SQLModel, table=True):
     previous_token_hash: str | None = Field(default=None, max_length=64, index=True)
     rotated_at: datetime | None = None
     created_at: datetime = Field(default_factory=utc_now)
-    # Updated on login and on every refresh (at least every 15 minutes while the app is open).
+    # Updated on login and on every refresh (about every 5 minutes while the app is in use).
     last_used_at: datetime = Field(default_factory=utc_now)
     # 7 days after the last refresh. Each refresh pushes it on, so a session ends after a week unused.
     expires_at: datetime
@@ -324,7 +324,7 @@ class TokenResponse(SQLModel):
 
 
 class SessionRead(SQLModel):
-    """One of my active logins (a browser where I am logged in)."""
+    """One of my login devices: a browser that holds a valid refresh token."""
 
     id: int
     created_at: UtcDateTime

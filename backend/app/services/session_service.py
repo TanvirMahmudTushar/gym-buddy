@@ -1,5 +1,6 @@
 # Login sessions and refresh tokens (FR-14, FR-15, NFR-13, TDD 10.1). One session per login on one browser.
 # The cookie holds the refresh token; the database keeps only its hash, and every refresh replaces it (rotation).
+# A login device is a session whose refresh token is still valid, so one browser is one device.
 from datetime import timedelta
 
 from sqlmodel import Session, col, or_, select, update
@@ -28,9 +29,42 @@ def _is_active(auth_session: AuthSession) -> bool:
     return auth_session.revoked_at is None and as_utc(auth_session.expires_at) > utc_now()
 
 
-def start_session(session: Session, user: User, client: Client) -> tuple[AuthSession, str]:
+def _find_by_token(session: Session, token: str) -> AuthSession | None:
+    """The session of a refresh token, also when another tab has just replaced the token."""
+    token_hash = hash_refresh_token(token)
+    return session.exec(
+        select(AuthSession).where(
+            or_(col(AuthSession.token_hash) == token_hash, col(AuthSession.previous_token_hash) == token_hash)
+        )
+    ).first()
+
+
+def _end_replaced(session: Session, user: User, token: str, client: Client) -> None:
+    """End the session whose refresh cookie a new login is about to overwrite, such as after a logout while offline.
+    No browser holds its token any more, so it would stay in the device list for a week. The caller commits."""
+    earlier = _find_by_token(session, token)
+    if earlier is None or not _is_active(earlier):
+        return
+    earlier.revoked_at = utc_now()
+    session.add(earlier)
+    activity_service.record(
+        session,
+        ActivityEvent.SESSION_REVOKE,
+        client,
+        actor=user,
+        # Someone else may have been logged in on this browser.
+        target=session.get(User, earlier.user_id) if earlier.user_id != user.id else None,
+        details=f"Session {earlier.id} ended: a new login on the same browser replaced it",
+    )
+
+
+def start_session(
+    session: Session, user: User, client: Client, replaces: str | None = None
+) -> tuple[AuthSession, str]:
     """A new session for a login, saved together with the login's activity row. Returns it with the refresh token
-    for the cookie (never stored as it is)."""
+    for the cookie (never stored as it is). `replaces` is the refresh token the browser still held, if any."""
+    if replaces:
+        _end_replaced(session, user, replaces, client)
     token = new_refresh_token()
     now = utc_now()
     auth_session = AuthSession(
@@ -122,7 +156,7 @@ def get_active_session(session: Session, session_id: int, user_id: int) -> AuthS
 
 
 def list_active_sessions(session: Session, user_id: int) -> list[AuthSession]:
-    """The user's sessions that are not revoked or expired, most recently used first."""
+    """The user's login devices: sessions whose refresh token is not revoked or expired, most recently used first."""
     query = (
         select(AuthSession)
         .where(
@@ -164,15 +198,9 @@ def revoke_all(session: Session, user_id: int, keep: int | None = None) -> int:
 
 
 def logout(session: Session, token: str, client: Client) -> None:
-    """Revoke the session this refresh token belongs to, also when another tab has just replaced the token. An unknown
-    token is ignored: logout always succeeds. Only a session that was still open is logged, so a second logout adds
-    nothing."""
-    token_hash = hash_refresh_token(token)
-    auth_session = session.exec(
-        select(AuthSession).where(
-            or_(col(AuthSession.token_hash) == token_hash, col(AuthSession.previous_token_hash) == token_hash)
-        )
-    ).first()
+    """Revoke the session this refresh token belongs to. An unknown token is ignored: logout always succeeds. Only a
+    session that was still open is logged, so a second logout adds nothing."""
+    auth_session = _find_by_token(session, token)
     if auth_session is not None and auth_session.revoked_at is None:
         user = session.get(User, auth_session.user_id)
         activity_service.record(session, ActivityEvent.LOGOUT, client, actor=user)

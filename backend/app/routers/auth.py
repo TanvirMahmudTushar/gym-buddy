@@ -52,11 +52,15 @@ def signup(body: SignupRequest, session: SessionDep, client: ClientDep) -> User:
 
 
 @router.post("/login", response_model=TokenResponse)
-def login(body: LoginRequest, response: Response, session: SessionDep, client: ClientDep) -> dict:
-    """Starts a session: a 15-minute access token in the body and a 7-day refresh token in an HttpOnly cookie.
+def login(
+    body: LoginRequest, request: Request, response: Response, session: SessionDep, client: ClientDep
+) -> dict:
+    """Starts a session: a 5-minute access token in the body and a 7-day refresh token in an HttpOnly cookie.
     A wrong email and a wrong password give the same 401. Every attempt, failed or not, is in the activity log."""
     user = auth_service.authenticate(session, body, client)
-    auth_session, refresh_token = session_service.start_session(session, user, client)
+    auth_session, refresh_token = session_service.start_session(
+        session, user, client, replaces=request.cookies.get(REFRESH_COOKIE)
+    )
     _set_refresh_cookie(response, refresh_token)
     return _tokens(user, auth_session)
 

@@ -87,7 +87,7 @@ sequenceDiagram
     C->>A: POST /api/v1/auth/login {email, password}
     A->>D: find user, check lockout, verify Argon2 hash (peppered)
     A->>D: insert auth_session (hash of a new refresh token, IP, browser)
-    A-->>C: 200 {access_token (sub, role, sid; 15 min)} + Set-Cookie refresh_token (HttpOnly)
+    A-->>C: 200 {access_token (sub, role, sid; 5 min)} + Set-Cookie refresh_token (HttpOnly)
     Note over C: keep the access token in memory; send Authorization: Bearer on each request
     C->>A: GET /api/v1/... (Bearer)
     A->>D: get_auth(): verify signature and exp, load user, check ban, check session sid is active
@@ -133,7 +133,7 @@ backend/
     security.py        # password hashing (Argon2 + pepper), access tokens (JWT create/verify), refresh token generation and hashing
     deps.py            # get_auth (token + session check), get_current_user
     rbac.py            # every role rule: permission constants, role → permission map, require_permission(), has_permission(), is_staff(), is_admin(), may_edit_account(), is_owner(), group permissions
-    request_info.py    # client_ip() (X-Forwarded-For on Vercel), user_agent() and ClientDep: where a request came from, for the session list and the activity log
+    request_info.py    # client_ip() (X-Forwarded-For on Vercel), user_agent() and ClientDep: where a request came from, for the login devices and the activity log
     routers/
       __init__.py
       members.py       # /api/v1/members (+ check-ins in Beta)
@@ -176,7 +176,7 @@ backend/
       group_service.py   # training groups: access() and require() on rbac.group_permissions(), list with counts, members, delete_for_accounts(); raises GroupNotFoundError / GroupPermissionError / GroupOwnerError
       moderation_service.py # admin lists, CSVs and deletes of anyone's workouts and groups (one activity row per delete)
       workout_service.py # workouts in groups: lists, add, edit, assign, mark done, delete; raises WorkoutNotFoundError / NotAssignedToYouError / AssigneeNotInGroupError
-  tests/               # pytest suite (section 14): conftest.py, test_login.py, test_tokens.py, test_refresh.py, test_rbac.py, test_gym.py, test_startup.py, test_robustness.py, test_rules.py, test_cors.py, test_config.py
+  tests/               # pytest suite (section 14): conftest.py, test_login.py, test_tokens.py, test_refresh.py, test_devices.py, test_rbac.py, test_gym.py, test_startup.py, test_robustness.py, test_rules.py, test_cors.py, test_config.py
   .env.example         # the four variables with placeholders only (copy to backend/.env)
   requirements-dev.txt # -r requirements.txt + pytest, httpx (not installed by Vercel)
   pytest.ini
@@ -187,7 +187,7 @@ frontend/
     components/        # the forms, lists and panels the pages are built from
     context/           # AuthContext: who is logged in, login / signup / logout; restores the login with a refresh on load; PlansContext: the plans' names and prices
     layouts/           # AppLayout: the sidebar with the pages each role may open
-    pages/             # DashboardPage, MembersPage, AttendancePage, PaymentsPage, ClassesPage and AnnouncementsPage (gym manager, admin); EquipmentPage (trainer, gym manager, admin); PlansPage, ExpensesPage, UsersPage (one user's details at `#/users?user=ID`), SecurityPage and ActivityPage (admin); MyClassesPage and MyClientsPage (trainer); MembershipPage and TimetablePage (user); TrainingPage (everyone; one group at `#/training?group=ID`; All groups and All workouts for admins), AccountPage, LoginPage, SignupPage, ChoosePasswordPage (after an admin reset)
+    pages/             # DashboardPage, MembersPage, AttendancePage, PaymentsPage, ClassesPage and AnnouncementsPage (gym manager, admin); EquipmentPage (trainer, gym manager, admin); PlansPage, ExpensesPage, UsersPage (one user's details at `#/users?user=ID`), SecurityPage and ActivityPage (admin); MyClassesPage and MyClientsPage (trainer); MembershipPage and TimetablePage (user); TrainingPage (everyone; one group at `#/training?group=ID`; All groups and All workouts for admins), AccountPage, DevicesPage, LoginPage, SignupPage, ChoosePasswordPage (after an admin reset)
     services/          # fetch calls to the API; api.ts keeps the access token in memory and refreshes it once on a 401
     types/             # TypeScript types
     utils/             # display helpers; membersLink() builds the #/members?filter=&member= address
@@ -274,7 +274,7 @@ erDiagram
 
 `phone`, `date_of_birth` and the emergency contact are read only through `MemberRead` (member endpoints: gym managers and admins; `/users/me/membership`: the member) and `ProfileRead` (`/users/me/profile`: the person), never through `UserRead`, so they stay out of the login response and every account list (NFR-20).
 
-**`auth_session`** (one row per login on one browser; holds the current refresh token's hash)
+**`auth_session`** (one row per login on one browser, shown to its owner as a login device; holds the current refresh token's hash)
 
 | Column | Type | Rules |
 |---|---|---|
@@ -288,7 +288,7 @@ erDiagram
 | `expires_at` | timestamp (UTC) | Not null: last refresh + 7 days |
 | `ip` | varchar(45) | Nullable: client address at login |
 | `user_agent` | varchar(300) | Nullable: browser at login |
-| `revoked_at` | timestamp (UTC) | Nullable: set by logout, a revoke, a password change (other sessions) or reset, a ban, or a reused refresh token |
+| `revoked_at` | timestamp (UTC) | Nullable: set by logout, a revoke, a password change (other sessions) or reset, a ban, a reused refresh token, or a new login on the same browser |
 
 A session is active while `revoked_at IS NULL AND expires_at > now`. Rows are kept after they end; `member_service._delete_accounts()` deletes them with the account.
 
@@ -621,8 +621,8 @@ erDiagram
 | `MemberBulkDeleteResult` | Bulk delete response | `deleted` (how many members were deleted) | MVP |
 | `SignupRequest` | Sign up | `email`, `name`, `password` | Beta |
 | `LoginRequest` | Log in | `email`, `password` | Beta |
-| `TokenResponse` | Login / refresh | `access_token`, `token_type: "bearer"`, `expires_in` (900), `user` (`UserRead`); the refresh token is only in the cookie | Beta |
-| `SessionRead` | My sessions | `id`, `created_at`, `last_used_at`, `expires_at`, `ip`, `user_agent`, `current` (the session of this request); never the token hashes | Beta |
+| `TokenResponse` | Login / refresh | `access_token`, `token_type: "bearer"`, `expires_in` (300), `user` (`UserRead`); the refresh token is only in the cookie | Beta |
+| `SessionRead` | My login devices | `id`, `created_at`, `last_used_at`, `expires_at`, `ip`, `user_agent`, `current` (the session of this request); never the token hashes | Beta |
 | `UserRead` | User responses | `id`, `email`, `name`, `role`, `created_at` (never `password_hash`) | Beta |
 | `MeRead` | My own account (`/users/me`, login, refresh) | `UserRead` fields + `permissions` (the caller's role's permissions from `app/rbac.py`) + `plan?` | Beta |
 | `UserRoleUpdate` | Change role | `role` | Beta |
@@ -752,7 +752,7 @@ In the MVP no login is needed. In the Beta the member endpoints need `members:re
 | `GET` | `/api/v1/users/me` | Any logged-in user | — | `200` `MeRead` | `401` | FR-16, FR-83 |
 | `PATCH` | `/api/v1/users/me` | Any logged-in user | `UserNameUpdate` | `200` `MeRead` | `422` | FR-40 |
 | `POST` | `/api/v1/users/me/password` | Any logged-in user, also while a new password is due | `PasswordChange` | `204` (every other session is revoked, this one stays; clears `must_change_password`) | `400` (wrong current password or same password), `401`, `422`, `429` (locked after 5 wrong passwords) | FR-34, FR-41, FR-66 |
-| `GET` | `/api/v1/users/me/sessions` | Any logged-in user | — | `200` `SessionRead[]`, active only, most recently used first | `401` | FR-80 |
+| `GET` | `/api/v1/users/me/sessions` | Any logged-in user | — | `200` `SessionRead[]`, one per valid refresh token, most recently used first | `401` | FR-80 |
 | `DELETE` | `/api/v1/users/me/sessions/{id}` | Any logged-in user | — | `204` (that session's refresh and access tokens stop working) | `401`, `404` (not mine or not active) | FR-81 |
 | `GET` | `/api/v1/users/me/profile` | Any logged-in user | — | `200` `ProfileRead` (my own only) | `401` | FR-77 |
 | `PATCH` | `/api/v1/users/me/profile` | Any logged-in user | `ProfileUpdate` | `200` `ProfileRead` | `401`, `422` (date of birth out of range, too long, emergency contact with only a name or a phone) | FR-76, FR-77 |
@@ -1001,7 +1001,7 @@ A catch-all exception handler returns `500` with `{"detail": "Internal server er
 | `PASSWORD_PEPPER` | optional (a fixed development pepper) | Required: random 32+ byte secret, generated the same way. Never changed once set: every password hashed with it would stop verifying | Beta |
 | `FRONTEND_ORIGIN` | optional (default `http://localhost:5173`, the Vite dev server) | optional: `https://2321648gymbuddy.vercel.app` is always allowed. One exact origin or several separated by commas; `*` stops the backend at start-up | Beta |
 
-Token lifetimes are constants, not env vars: `ACCESS_TOKEN_LIFETIME` (15 minutes) in `app/security.py`, `REFRESH_LIFETIME` (7 days) and `ROTATION_GRACE` (30 seconds) in `app/services/session_service.py`.
+Token lifetimes are constants, not env vars: `ACCESS_TOKEN_LIFETIME` (5 minutes) in `app/security.py`, `REFRESH_LIFETIME` (7 days) and `ROTATION_GRACE` (30 seconds) in `app/services/session_service.py`.
 
 No secrets are committed. `.env` stays in `.gitignore`. `backend/.env.example` lists `DATABASE_URL`, `JWT_SECRET`, `PASSWORD_PEPPER` and `FRONTEND_ORIGIN` with placeholders only; the secrets' placeholder (`change-me`) is shorter than 32 bytes on purpose, so it is ignored locally (temporary secrets are used) and refused on Vercel. On a developer machine `app/config.load_local_env()`, run from `app/__init__.py`, reads `backend/.env` with python-dotenv (`override=False`), so the terminal's variables win; it never runs on Vercel.
 
@@ -1034,15 +1034,16 @@ flowchart LR
 
 | Token | Format | Lifetime | Where it lives |
 |---|---|---|---|
-| Access token | JWT, HS256, claims `sub` (user id), `role`, `sid` (session id), `iat`, `exp` | 15 min | Frontend memory only (a module variable in `services/api.ts`); sent as `Authorization: Bearer` |
+| Access token | JWT, HS256, claims `sub` (user id), `role`, `sid` (session id), `iat`, `exp` | 5 min | Frontend memory only (a module variable in `services/api.ts`); sent as `Authorization: Bearer` |
 | Refresh token | Random 32 bytes (`secrets.token_urlsafe`) | 7 days from the last refresh | `refresh_token` cookie (`HttpOnly`, `Secure`, `SameSite=Strict`, `Path=/api/v1/auth`); `auth_session.token_hash` keeps only its SHA-256 hash |
 
-- **Create:** `POST /auth/login` checks the password, inserts an `auth_session` row, sets the cookie and returns an access token naming that row in `sid`.
+- **Create:** `POST /auth/login` checks the password, inserts an `auth_session` row, sets the cookie and returns an access token naming that row in `sid`. If the browser still sends an earlier refresh cookie (such as after a logout while offline), `session_service._end_replaced()` revokes that session in the same transaction, because the new cookie overwrites the only copy of its token.
 - **Verify (every protected request):** `deps.get_auth()` decodes the token with `JWT_SECRET` (a bad signature, an expired `exp` or a missing claim → `401`), loads the user together with session `sid` in one query (`session_service.get_login()`): user gone → `401`; banned → `403 Account banned`; the session not the user's or no longer active → `401`. Every other dependency builds on it, and FastAPI runs it once per request.
 - **Refresh rotation:** `session_service.rotate()` finds the session by the cookie's hash and replaces the hash with a new token's in one `UPDATE ... WHERE id = ? AND token_hash = <old hash>`. If that matches no row, another request rotated first: this one still gets an access token but no new cookie, so the browser keeps the winner's cookie. The session id stays the same, so `sid` in new access tokens does not change.
 - **Reuse detection:** the replaced hash is kept in `previous_token_hash`. Sent again within `ROTATION_GRACE` (30 s, for example two tabs refreshing at once), it gets an access token without a new cookie. Sent later, only a copy can hold it, so the whole session is revoked (`401`) and both holders must log in again. Only the last replaced hash is kept: a token two or more rotations old matches no row, so it is refused like an unknown token (`401`) but does not end the session.
 - **Revoke:** logout (`POST /auth/logout`, by the cookie), `DELETE /users/me/sessions/{id}`, a password change (every session but the caller's), an admin reset or a ban (every session) set `revoked_at`. The access tokens of a revoked session fail on their next request, because `get_auth()` checks the session; there is no wait for `exp`.
-- **Expiry:** after 15 minutes the API answers `401`. `services/api.ts` then calls `refreshSession()` once (all requests failing together share one promise) and repeats the request. If the refresh fails, `AuthContext` (the `onEnd` handler it gives `setSessionHandlers()`) shows Log in. On page load the app always calls refresh (scripts cannot see the HttpOnly cookie); with no cookie the answer is `204`, so a visitor sees no console error, and "Loading…" covers the wait instead of a flash of the Log in page.
+- **Login devices:** `session_service.list_active_sessions()` returns the rows with `revoked_at` null and `expires_at` in the future, which are exactly the sessions whose refresh token still works. The refresh cookie is not sent to `/users/me/sessions` (its path is `/api/v1/auth`), so `current` is the row the access token names in `sid`.
+- **Expiry:** after 5 minutes the API answers `401`. `services/api.ts` then calls `refreshSession()` once (all requests failing together share one promise) and repeats the request. If the refresh fails, `AuthContext` (the `onEnd` handler it gives `setSessionHandlers()`) shows Log in. On page load the app always calls refresh (scripts cannot see the HttpOnly cookie); with no cookie the answer is `204`, so a visitor sees no console error, and "Loading…" covers the wait instead of a flash of the Log in page.
 - The `role` claim is only informational; permission checks always use the role loaded from the database, so a role change applies on the next request.
 
 ### 10.2 Passwords and login lockout
@@ -1217,7 +1218,7 @@ stats = AdminStats(
 | `login_failed` | `auth_service.authenticate()` | the account if one has the email, with the typed email / — | `Wrong password`, `No account has this email`, `Account is locked` or `Account is banned` |
 | `account_locked` | `auth_service._count_wrong_password()` on the 5th wrong password | — / the account | `5 wrong passwords in a row; logins blocked for 15 minutes` |
 | `logout` | `session_service.logout()`, only for a session that was still open | the account / — | — |
-| `session_revoke` | `session_service.revoke_own_session()`; `rotate()` when a replaced refresh token comes back after the grace period | the owner / —; or — / the owner (the IP is whoever sent the old token) | the session id and its address, or why the server ended it |
+| `session_revoke` | `session_service.revoke_own_session()`; `rotate()` when a replaced refresh token comes back after the grace period; `_end_replaced()` when a new login on the same browser replaces it | the owner / —; or — / the owner (the IP is whoever sent the old token); or who logged in / the owner, if that is someone else | the session id and its address, or why the server ended it |
 | `password_change`, `password_change_failed` | `auth_service.change_password()` | the account / — | how many other sessions were logged out; or `Current password was wrong` / `New password was too short or too long` / `New password was the same as the current one` / `Account is locked` |
 | `password_reset` | `user_service.reset_password()` | the admin / the account | `Temporary password issued; sessions ended: N` (never the password) |
 | `role_change` | `user_service.change_role()`, only when the role differs | the admin / the account | `user → trainer` |
@@ -1240,7 +1241,7 @@ stats = AdminStats(
 | Area | Design |
 |---|---|
 | Passwords | Argon2 (`argon2-cffi`) over HMAC-SHA256 with `PASSWORD_PEPPER`, minimum 8 characters |
-| Tokens | Section 10.1: 15-minute access token checked against its session on every request; rotating refresh token with reuse detection; `JWT_SECRET` and `PASSWORD_PEPPER` only in env vars, required on Vercel |
+| Tokens | Section 10.1: 5-minute access token checked against its session on every request; rotating refresh token with reuse detection; `JWT_SECRET` and `PASSWORD_PEPPER` only in env vars, required on Vercel |
 | Cookies | `HttpOnly`, `Secure`, `SameSite=Strict`, path-limited |
 | CORS | Frontend and API share the Vercel origin (locally Vite proxies `/api`), so the app needs no CORS. `AllowlistCORSMiddleware` (Starlette's `CORSMiddleware` with `allow_origins=frontend_origins()`, `allow_credentials=True`, methods `GET`/`POST`/`PUT`/`PATCH`/`DELETE`, headers `Authorization`/`Content-Type`) answers only the deployed frontend (`https://2321648gymbuddy.vercel.app`, built in, so it is allowed even when the variable is not set) and what `FRONTEND_ORIGIN` lists. A request whose `Origin` is not on the list skips the middleware entirely, so it gets no CORS headers (plain Starlette would still add `Access-Control-Allow-Credentials`), and its preflight gets the app's `405`. `*` is refused at start-up |
 | Security headers | Added for all routes in `vercel.json` (below) |
@@ -1307,8 +1308,9 @@ The first admin is promoted by hand in the Supabase table editor or SQL editor (
 | File | Covers |
 |---|---|
 | `test_login.py` | Right password (tokens, cookie flags), any-case email, wrong password and unknown email give the same `401`, the 5th wrong password answers `429` with `Retry-After` and blocks even the right one, a right password resets the count, the failed login is logged without the password |
-| `test_tokens.py` | Missing, garbage, tampered (signature), forged (another `sub`), expired and `sid`-less tokens get `401`; the token stops working after logout although it is still well signed; a ban answers `403` |
+| `test_tokens.py` | Missing, garbage, tampered (signature), forged (another `sub`), expired and `sid`-less tokens get `401`; `exp` is 5 minutes after `iat`; the token stops working after logout although it is still well signed; a ban answers `403` |
 | `test_refresh.py` | No cookie `204`; rotation gives a new cookie and a working token; the replaced cookie within the grace period gets a token but no cookie; after the grace period it ends the whole session for both holders; a cookie two rotations old is refused; refresh after logout or a ban is refused |
+| `test_devices.py` | Each login is a device and the one asking is marked; no token hash is sent; a refresh keeps the device; an expired refresh token is not listed; logging a device out ends its refresh and access tokens; a new login on the same browser replaces its device (also another account's, which is logged); a failed login does not |
 | `test_rbac.py` | Every admin `GET` route without a path parameter (found from the OpenAPI schema) is `403` for a user, trainer and gym manager, `200` for an admin, `401` for a visitor; staff routes; a role change applies with the same token; a user cannot start a group; another person's session is `404`; a group and its workouts are `404` to outsiders (an admin too); a group member without `can_update` gets `403`, then `200` once ticked; only the owner renames or deletes a group; an admin cannot ban another admin or themself, nor change their own role; a bulk ban skips the admin |
 | `test_gym.py` | Plans (add, retire, delete, in use), a membership with its first payment, check-in and check-out, class attendance, a trainer's own clients, marking a workout done, equipment services and faults, expenses and net income, a user's record counts |
 | `test_robustness.py` | Ids, offsets and dates no column can hold are `422`, never `500`; a validation error is one sentence without the password; no class in the past; days are the gym's days; every delete and void is logged; a user's newest records; moderation filters; logout with a just-replaced token |
@@ -1317,6 +1319,6 @@ The first admin is promoted by hand in the Supabase table editor or SQL editor (
 | `test_cors.py` | `FRONTEND_ORIGIN` gets `Access-Control-Allow-Origin` and credentials, and its preflight is allowed; other origins (including look-alikes and `null`) and their preflights get no `Access-Control-*` header; `*` is never sent |
 | `test_config.py` | `.env` fills in missing variables but never overrides, is never read on Vercel, may be absent; `FRONTEND_ORIGIN` lists, trailing slashes, `*` and scheme-less values refused, defaults locally and on Vercel |
 
-Run: `pip install -r requirements-dev.txt` (adds `pytest` and `httpx` to `requirements.txt`; Vercel installs only `requirements.txt`), then `pytest` in `backend/`. 113 tests, all passing on SQLite and PostgreSQL. Not in CI (out of scope).
+Run: `pip install -r requirements-dev.txt` (adds `pytest` and `httpx` to `requirements.txt`; Vercel installs only `requirements.txt`), then `pytest` in `backend/`. 121 tests, all passing on SQLite; the 113 before `test_devices.py` and the token lifetime check were also run on PostgreSQL. Not in CI (out of scope).
 
 **Smoke test through the public API.** `scripts/seed_demo.py` (README, **Demo data**) signs accounts up, gives roles, starts memberships, takes payments, checks members in and out, creates classes, books them, posts announcements, adds equipment and expenses, and sets up a training group with mixed permissions, stopping at the first unexpected status code. Run against a fresh local backend and then again, it creates everything once and nothing the second time. Its results were checked by role: each account's role and landing page, `403` when a group member without `update` edits a group workout, `404` for someone outside the group, a class at capacity, and the Overview numbers (`check_ins_today`, `expiring_soon`, `waiting`, `payments_today`) matching the seeded data.

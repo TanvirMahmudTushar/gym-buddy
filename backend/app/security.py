@@ -17,7 +17,7 @@ from app.models import utc_now
 logger = logging.getLogger("gym_buddy")
 
 ALGORITHM = "HS256"
-ACCESS_TOKEN_LIFETIME = timedelta(minutes=15)
+ACCESS_TOKEN_LIFETIME = timedelta(minutes=5)
 MIN_SECRET_BYTES = 32
 # Hashes made with the pepper start with this, so a hash from before the pepper can still be checked (once).
 PEPPERED_PREFIX = "peppered$"
@@ -109,7 +109,7 @@ def _dev_secret() -> str:
 
 
 def create_access_token(user_id: int, role: str, session_id: int) -> str:
-    """Valid for 15 minutes. `sid` names the login session, so logging out or revoking the session ends this token
+    """Valid for 5 minutes. `sid` names the login session, so logging out or revoking the session ends this token
     at once. `role` is there for the client; the server always checks the role stored in the database."""
     now = utc_now()
     payload = {"sub": str(user_id), "role": role, "sid": session_id, "iat": now, "exp": now + ACCESS_TOKEN_LIFETIME}

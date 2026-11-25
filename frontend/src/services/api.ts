@@ -95,7 +95,7 @@ async function send(path: string, init: RequestInit, isRetry = false): Promise<R
   const res = await reach(path, { ...init, headers })
   if (res.ok) return res
 
-  // A 401 while holding a token: it expired (after 15 minutes) or its session ended. Get a new one once and try
+  // A 401 while holding a token: it expired (after 5 minutes) or its session ended. Get a new one once and try
   // again; if another request already got one meanwhile, just try again. A wrong password on Log in has no token.
   if (token && res.status === 401 && !isRetry && (accessToken !== token || (await refreshSession()))) {
     return send(path, init, true)

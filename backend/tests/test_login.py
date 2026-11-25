@@ -9,7 +9,7 @@ def test_right_password_gives_tokens_and_a_refresh_cookie(account, anon):
     response = anon.post("/api/v1/auth/login", json={"email": me.email, "password": PASSWORD})
     assert response.status_code == 200
     body = response.json()
-    assert body["token_type"] == "bearer" and body["expires_in"] == 900
+    assert body["token_type"] == "bearer" and body["expires_in"] == 300
     assert body["user"]["email"] == me.email and body["user"]["permissions"] == []
     cookie = response.headers["set-cookie"]
     assert "refresh_token=" in cookie and "HttpOnly" in cookie and "Secure" in cookie
