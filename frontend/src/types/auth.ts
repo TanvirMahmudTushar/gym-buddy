@@ -60,20 +60,22 @@ export interface Me extends User {
 export interface LoginResult {
   access_token: string
   token_type: "bearer"
-  /** Seconds until the access token expires (15 minutes). */
+  /** Seconds until the access token expires (5 minutes). */
   expires_in: number
   user: Me
 }
 
-/** A browser where I am logged in. */
+/** One of my login devices: a browser that holds a valid refresh token. */
 export interface SessionInfo {
   id: number
   created_at: string
+  /** The last refresh, or the login: about every 5 minutes while the device is in use. */
   last_used_at: string
+  /** When its refresh token expires, unless it is used again before. */
   expires_at: string
   ip: string | null
   user_agent: string | null
-  /** True for this browser. */
+  /** True for this device. */
   current: boolean
 }
 

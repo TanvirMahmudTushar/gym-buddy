@@ -41,6 +41,7 @@ This document lists the requirements for Gym Buddy: the MVP (gym member CRUD RES
 | Expired membership | A membership with `expires_on` before today |
 | Waiting for a membership | (Beta) A User account with no plan yet: it is on the gym manager's waiting list until staff start a membership |
 | Session | (Beta) One login on one browser, stored in `auth_session`; logging out or a ban ends it on the server |
+| Login device | (Beta) A session as its owner sees it: a browser that holds a valid (not expired, not revoked) refresh token |
 | Permission | (Beta) A named right such as `members:read`, held by roles (`backend/app/rbac.py`); every protected endpoint asks for one |
 | Payment | (Beta) Money a member paid at the desk, recorded by staff, optionally renewing the membership; it can be voided but never deleted |
 | Workout | (Beta) A training session in a training group, which may be assigned to one person, who marks it done |
@@ -208,11 +209,11 @@ Every Admin is also a logged-in user, so they can log out, edit their profile an
 | FR-16 | The system shall return the logged-in user's profile (`id`, `email`, `name`, `role`). The password hash is never returned. | Beta | US-10 |
 | FR-40 | A user shall be able to change their own `name`. Email and role cannot be changed through the profile. | Beta | US-23, US-24 |
 | FR-41 | A user shall be able to change their password by sending the current and the new password. A wrong current password returns `400`, a new one shorter than 8 or longer than 128 characters `422`, and the same one `400`; every failed attempt is recorded, and wrong current passwords count towards the lockout (FR-34). On success every other session of the user is revoked; the session that made the change stays logged in. | Beta | US-24 |
-| FR-80 | A user shall be able to list their own active sessions (one per browser where they are logged in) with the time it started, the time it was last used, its IP address and browser, and which one is the current session. | Beta | US-10 |
-| FR-81 | A user shall be able to revoke one of their own sessions. Its refresh token and access token stop working at once. Another user's session, or one that is no longer active, returns `404`. | Beta | US-10 |
+| FR-80 | A user shall be able to list their own login devices: one for each refresh token that is still valid, with the time it logged in, the time it was last used (the login or the last refresh), the time it expires, its IP address and browser, and which one is the current device. A refresh keeps the device; a new login on a browser that still holds a refresh token replaces that token's device. | Beta | US-10 |
+| FR-81 | A user shall be able to log out one of their own login devices (revoke its session). Its refresh token and access token stop working at once. Another user's session, or one that is no longer active, returns `404`. | Beta | US-10 |
 | FR-82 | A refresh token used again more than 30 seconds after it was replaced shall revoke its whole session (`401`), because only a copy can still hold it. Within the 30 seconds (two tabs refreshing at once) the request gets an access token without a new cookie. | Beta | US-10 |
 
-> **Built so far:** all of 3.2 (FR-12 – FR-16, FR-40, FR-41, FR-80 – FR-82). Each login is a row in `auth_session`; the access token (15 minutes) names it with `sid`, and every request checks that the session is still active. The app keeps the access token in memory and refreshes it on a `401`. The login attempt limit (FR-34) is built: the 5th wrong password in a row answers `429` with `Retry-After`, attempts while locked do not count, and an existing login is not ended.
+> **Built so far:** all of 3.2 (FR-12 – FR-16, FR-40, FR-41, FR-80 – FR-82). Each login is a row in `auth_session`; the access token (5 minutes) names it with `sid`, and every request checks that the session is still active. The app keeps the access token in memory and refreshes it on a `401`. The login attempt limit (FR-34) is built: the 5th wrong password in a row answers `429` with `Retry-After`, attempts while locked do not count, and an existing login is not ended.
 
 ### 3.3 Own membership and check-ins — Beta
 
@@ -625,7 +626,7 @@ Actions on one's own account and data (profile, password, sessions, own membersh
 | NFR-10 | Deployability | The app runs on Vercel; a push to `main` updates production. | MVP |
 | NFR-11 | Security | Passwords are hashed with Argon2; plain passwords are never stored, logged or returned. | Beta |
 | NFR-22 | Security | Before hashing, each password is mixed with a server-side secret (pepper, HMAC-SHA256) of at least 32 bytes from the `PASSWORD_PEPPER` env var, so a copy of the database alone is not enough to test guesses. | Beta |
-| NFR-12 | Security | Access tokens are JWTs signed with a secret of at least 32 bytes from an env var, valid for 15 minutes. | Beta |
+| NFR-12 | Security | Access tokens are JWTs signed with a secret of at least 32 bytes from an env var, valid for 5 minutes. | Beta |
 | NFR-13 | Security | Refresh tokens are random, valid for 7 days, stored only as a hash, and replaced on every refresh. | Beta |
 | NFR-14 | Security | The refresh token cookie is `HttpOnly`, `Secure`, `SameSite=Strict` and limited to path `/api/v1/auth`. | Beta |
 | NFR-15 | Security | Frontend and API share one origin. CORS allows only the deployed frontend (`https://2321648gymbuddy.vercel.app`, built in, so it is allowed even when the variable is not set) and what `FRONTEND_ORIGIN` lists (exact origins, never `*`, with credentials); a request from any other origin, preflight included, gets no CORS headers. | Beta |
@@ -871,10 +872,11 @@ Actions on one's own account and data (profile, password, sessions, own membersh
 
 **AC-42 Sessions and refresh (FR-14, FR-15, FR-80 – FR-82, NFR-12 – NFR-14)**
 - Given user A logs in on browser 1 and on browser 2
-- Then each login returns an access token whose `exp` is 15 minutes after `iat`, with `sub`, `role` and `sid`, and sets a `refresh_token` cookie that is `HttpOnly`, `Secure`, `SameSite=Strict`, path `/api/v1/auth`, 7 days.
+- Then each login returns an access token whose `exp` is 5 minutes after `iat`, with `sub`, `role` and `sid`, and sets a `refresh_token` cookie that is `HttpOnly`, `Secure`, `SameSite=Strict`, path `/api/v1/auth`, 7 days.
 - When browser 1 sends `POST /api/v1/auth/refresh`, the response is `200` with a new access token and a new cookie; a tampered or expired access token gets `401`.
 - When the replaced cookie is sent again after 30 seconds, the response is `401`, and browser 1's current cookie and access token get `401` too.
 - `GET /api/v1/users/me/sessions` on browser 2 lists its session with `current = true`. When browser 2 revokes browser 1's session, browser 1's next request gets `401`; revoking it again, or revoking user B's session, is `404`.
+- When user A logs in again on browser 2 while it still holds its refresh cookie, the list has one device for browser 2, and the earlier access token gets `401`.
 - When browser 2 sends `POST /api/v1/auth/logout`, the response is `204`, the cookie is cleared, browser 2's access token gets `401`, and refresh without a cookie returns `204`.
 
 **AC-43 Permissions (FR-24, FR-83, NFR-17)**

@@ -10,12 +10,10 @@ const EMPTY = { current: "", next: "", confirm: "" }
 interface Props {
   /** The label of the first field, such as "Temporary password" after an admin reset. */
   currentLabel?: string
-  /** Called after the password changed, for example to reload the session list. */
-  onChanged?: () => void
 }
 
-// The server logs out every other browser; this one stays logged in.
-export default function ChangePasswordForm({ currentLabel = "Current password", onChanged }: Props) {
+// The server logs out every other device; this one stays logged in.
+export default function ChangePasswordForm({ currentLabel = "Current password" }: Props) {
   const { user, setUser } = useAuth()
   const [form, setForm] = useState(EMPTY)
   const [errors, setErrors] = useState<Partial<Record<keyof typeof EMPTY, string>>>({})
@@ -55,7 +53,6 @@ export default function ChangePasswordForm({ currentLabel = "Current password", 
       // After an admin reset, choosing a password unlocks the rest of the app straight away.
       if (user?.must_change_password) setUser({ ...user, must_change_password: false })
       setDone(true)
-      onChanged?.()
     })
   }
 
@@ -65,7 +62,7 @@ export default function ChangePasswordForm({ currentLabel = "Current password", 
       {field("next", "New password (at least 8 characters)", "new-password")}
       {field("confirm", "Confirm new password", "new-password")}
       <Alert>{error}</Alert>
-      <Alert kind="success">{done && "Password changed. Every other browser has been logged out."}</Alert>
+      <Alert kind="success">{done && "Password changed. Every other device has been logged out."}</Alert>
       <div className="actions">
         <button className="primary" type="submit" disabled={saving}>
           {saving ? "Changing…" : "Change password"}

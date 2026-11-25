@@ -4,21 +4,18 @@ import ChangePasswordForm from "../../components/ChangePasswordForm"
 import MyDetailsCard from "../../components/MyDetailsCard"
 import PageHeader from "../../components/PageHeader"
 import RolePill from "../../components/RolePill"
-import SessionsCard from "../../components/SessionsCard"
 import { useAuth } from "../../context/AuthContext"
 import { useSave } from "../../hooks/useSave"
 import { renameMe } from "../../services/authService"
 import { ROLES } from "../../utils/auth"
 import { formatDate } from "../../utils/time"
 
-// Every logged-in person sees this page: their profile, password and sessions.
+// Every logged-in person sees this page: their profile, contact details and password.
 export default function AccountPage() {
   const { user, setUser } = useAuth()
   const [name, setName] = useState(user?.name ?? "")
   const [saved, setSaved] = useState(false)
   const { saving, error, setError, run } = useSave()
-  // Bumped after a password change, which logs the other browsers out, so the session list shows that.
-  const [sessionsKey, setSessionsKey] = useState(0)
 
   if (!user) return null
 
@@ -75,9 +72,15 @@ export default function AccountPage() {
         <div className="column">
           <section className="card">
             <h2>Password</h2>
-            <ChangePasswordForm onChanged={() => setSessionsKey((k) => k + 1)} />
+            <ChangePasswordForm />
           </section>
-          <SessionsCard reloadKey={sessionsKey} />
+          <section className="card">
+            <div className="toolbar">
+              <h2>Login devices</h2>
+              <a href="#/devices">See my devices</a>
+            </div>
+            <p className="hint">Where you are logged in. Log out any device you do not recognise.</p>
+          </section>
         </div>
       </div>
     </div>

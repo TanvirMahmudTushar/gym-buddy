@@ -11,7 +11,7 @@ const SECTIONS: { title: string; pages: ProtectedPage[] }[] = [
   { title: "Gym", pages: ["my-classes", "clients", "membership", "timetable", "classes", "training", "equipment", "announcements"] },
   { title: "Business", pages: ["plans", "expenses"] },
   { title: "Administration", pages: ["users", "security", "activity"] },
-  { title: "You", pages: ["account"] },
+  { title: "You", pages: ["account", "devices"] },
 ]
 
 const ICONS: Record<ProtectedPage, IconName> = {
@@ -33,6 +33,7 @@ const ICONS: Record<ProtectedPage, IconName> = {
   membership: "membership",
   timetable: "classes",
   account: "account",
+  devices: "devices",
 }
 
 const menuFor = (user: Me) =>

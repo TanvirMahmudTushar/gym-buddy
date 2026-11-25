@@ -116,7 +116,8 @@ def change_my_password(body: PasswordChange, auth: AuthDep, session: SessionDep,
 
 @router.get("/me/sessions", response_model=list[SessionRead])
 def list_my_sessions(user: CurrentUser, auth: AuthDep, session: SessionDep) -> list[dict]:
-    """The browsers where I am logged in, most recently used first. `current` marks the one asking."""
+    """My login devices: one for each refresh token that is still valid, most recently used first. `current` marks the
+    one asking."""
     return [
         {**s.model_dump(), "current": s.id == auth.session_id}
         for s in session_service.list_active_sessions(session, user.id)
@@ -125,7 +126,7 @@ def list_my_sessions(user: CurrentUser, auth: AuthDep, session: SessionDep) -> l
 
 @router.delete("/me/sessions/{session_id}", status_code=204)
 def revoke_my_session(session_id: RowId, user: CurrentUser, session: SessionDep, client: ClientDep) -> Response:
-    """Logs that browser out: its refresh cookie and its access token stop working at once. Revoking the current
+    """Logs that device out: its refresh cookie and its access token stop working at once. Revoking the current
     session is the same as logging out here. 404 for a session that is not mine or no longer active."""
     session_service.revoke_own_session(session, user, session_id, client)
     return Response(status_code=204)

@@ -11,8 +11,10 @@ export const login = (email: string, password: string) =>
 /** Ends this browser's session on the server and clears the refresh cookie. */
 export const logout = () => request<void>("/api/v1/auth/logout", { method: "POST" })
 
+/** My login devices: one for each refresh token that is still valid. */
 export const listMySessions = () => request<SessionInfo[]>("/api/v1/users/me/sessions")
 
+/** Log one device out: its refresh cookie and access token stop working at once. */
 export const revokeMySession = (id: number) => request<void>(`/api/v1/users/me/sessions/${id}`, { method: "DELETE" })
 
 export const getMe = () => request<Me>("/api/v1/users/me")

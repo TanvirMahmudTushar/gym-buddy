@@ -1,4 +1,4 @@
-// Display helpers for the session list.
+// Display helpers for the login devices.
 
 /** "Chrome on Windows" from a User-Agent text. Rough on purpose: it only has to tell my own browsers apart. */
 export function describeBrowser(userAgent: string | null): string {
@@ -31,3 +31,7 @@ export function describeBrowser(userAgent: string | null): string {
   if (!browser) return userAgent.split(" ")[0]
   return os ? `${browser} on ${os}` : browser
 }
+
+/** Phones and tablets get the phone icon, everything else the computer. */
+export const deviceIcon = (userAgent: string | null) =>
+  /Mobi|Android|iPhone|iPad|iPod/.test(userAgent ?? "") ? "phone" : "computer"

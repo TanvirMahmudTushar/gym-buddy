@@ -42,8 +42,8 @@ The mid-term MVP was a member CRUD API with a one-page front end. The final rele
 | Database | 15 tables (PostgreSQL on Supabase; SQLite locally) |
 | Roles and permissions | 4 roles, 26 permissions, plus 5 per-group permissions |
 | Requirements | 121 functional (FR-01 to FR-121) and 24 non-functional, traced to 37 user stories |
-| Front end | 22 pages, 62 components, 18 service modules |
-| Tests | 113 automated backend tests (pytest), passing on SQLite and PostgreSQL |
+| Front end | 23 pages, 61 components, 18 service modules |
+| Tests | 121 automated backend tests (pytest), passing on SQLite; 113 of them also run on PostgreSQL |
 | GitHub | One issue and one pull request into `main` for each piece of work, each from its own branch. The gym management rework (#76) was committed to `main` directly |
 | Code | about 7,400 lines of Python in the backend and 9,300 lines of TypeScript in the front end |
 
@@ -66,7 +66,7 @@ Open https://2321648gymbuddy.vercel.app/ and log in with one of the accounts bel
 
 **Sample data.** Four plans, three memberships (Rafi's expires within 7 days, Sadia's is active, Tanim's is frozen) with their payments, Karim as personal trainer of Rafi and Sadia, two visits today (Sadia is still inside), three upcoming classes (two taught by Karim; *Strength Basics* is full), two announcements, four pieces of equipment (the leg press is broken, a treadmill is due for a service), two expenses, and the group's four workouts (one done). Mitu has signed up but has no membership, so this account is on the gym manager's waiting list. The data is made by [`scripts/seed_demo.py`](../scripts/seed_demo.py) through the public API (see the README's **Demo data**).
 
-**Trying the API directly.** `/api/docs` lists every endpoint. To call a protected one there, log in with `POST /api/v1/auth/login`, copy `access_token` from the response, and paste it into **Authorize**. It lasts 15 minutes.
+**Trying the API directly.** `/api/docs` lists every endpoint. To call a protected one there, log in with `POST /api/v1/auth/login`, copy `access_token` from the response, and paste it into **Authorize**. It lasts 5 minutes.
 
 ## 3. Product requirements (PRD)
 
@@ -108,7 +108,7 @@ The PRD planned the MVP and the Beta from the start, and the final release cover
 | Workout plans | **Added**: training groups run by trainers and staff, with per-member permissions, assigned workouts and marking them done. A private workout diary was built first (PR #70) and then removed: nobody at the gym could see it, so it did not help run the gym |
 | Equipment tracking | **Added**: the equipment list, reported faults, and services with the next due date |
 | Password reset | **Added** as an admin reset with a one-time temporary password (no email reset) |
-| Automated tests | **Added**: a pytest suite (113 tests). CI is still not set up |
+| Automated tests | **Added**: a pytest suite (121 tests). CI is still not set up |
 
 Still out of scope: online payments, email or SMS, email verification and self-service password reset, QR check-in, waiting lists for full classes, recurring classes, and diet plans.
 
@@ -118,7 +118,7 @@ Still out of scope: online payments, email or SMS, email verification and self-s
 |---|---|---|
 | Plans | Three fixed plans | Admins add, edit, retire and delete plans; a new membership takes its length and first payment from the plan |
 | Members | Add, list with status filter and pagination, view, edit, renew, freeze, delete, bulk delete | Members are user accounts with a membership; search; expiring soon; waiting list; contact and emergency details |
-| Accounts | — | Sign up, log in and out, sessions with refresh, change name and password, list and log out browsers |
+| Accounts | — | Sign up, log in and out, sessions with refresh, change name and password, list and log out login devices |
 | Roles | — | User, Trainer, Gym Manager, Admin; one RBAC module; menus built from the caller's permissions |
 | Classes | — | Timetable with trainers and capacity, bookings, cancel, a member's bookings, trainers' own classes, attendance |
 | Attendance | — | Check in (valid membership only) and out, who is inside now, any day's list, history |
@@ -180,13 +180,13 @@ The server never asks "is this an admin?". Every protected endpoint names a perm
 |---|---|---|
 | Persistence | NFR-02 | PostgreSQL on Supabase; nothing kept on the serverless function's disk |
 | Security: passwords | NFR-11, NFR-22 | Argon2 over HMAC-SHA256 with `PASSWORD_PEPPER`; never stored, logged or returned in plain text |
-| Security: tokens | NFR-12 to NFR-14 | 15-minute JWT in memory; 7-day random refresh token in an `HttpOnly`, `Secure`, `SameSite=Strict` cookie, stored only as a SHA-256 hash and replaced on every refresh |
+| Security: tokens | NFR-12 to NFR-14 | 5-minute JWT in memory; 7-day random refresh token in an `HttpOnly`, `Secure`, `SameSite=Strict` cookie, stored only as a SHA-256 hash and replaced on every refresh |
 | Security: browser | NFR-15, NFR-16 | CORS only for the deployed frontend (and `FRONTEND_ORIGIN`); `nosniff`, `DENY` framing, referrer policy and HSTS on every response |
 | Security: checks | NFR-17, NFR-06, NFR-07 | Every permission check on the server; ORM queries only; a generic `500` with no stack trace |
 | Privacy | NFR-20 | Phone, date of birth, emergency contact and notes only for staff and the person themself |
 | Consistency | NFR-21 | Booking locks the class row, counts and inserts in one transaction |
 | Audit | NFR-23 | Activity log rows never hold a password, token or hash |
-| Maintainability | NFR-08, NFR-24 | Routers → services → database layers; 113 automated tests |
+| Maintainability | NFR-08, NFR-24 | Routers → services → database layers; 121 automated tests |
 | Secrets | NFR-05 | Only in Vercel environment variables; `backend/.env.example` holds placeholders only |
 
 One NFR was changed during the project and is recorded in the SRS: schema changes are applied by the app on start rather than by Alembic (NFR-19, see section 8).
@@ -292,7 +292,7 @@ sequenceDiagram
     participant D as Database
     B->>A: POST /auth/login {email, password}
     A->>D: check lockout, verify Argon2 (peppered), insert auth_session
-    A-->>B: access token (15 min, in memory) + refresh cookie (HttpOnly, 7 days)
+    A-->>B: access token (5 min, in memory) + refresh cookie (HttpOnly, 7 days)
     B->>A: GET /api/v1/... with Bearer token
     A->>D: verify token, load user, check ban and that the session is active
     A-->>B: 200, or 401 when the token expired or the session ended
@@ -301,7 +301,7 @@ sequenceDiagram
     A-->>B: new access token + new cookie; the app repeats the request
 ```
 
-- Every request checks that its session is still active, so logging out, a password change, an admin reset, "log out everywhere" and a ban take effect on the very next request, not after 15 minutes.
+- Every request checks that its session is still active, so logging out, a password change, an admin reset, "log out everywhere" and a ban take effect on the very next request, not after 5 minutes.
 - A replaced refresh token that comes back more than 30 seconds later can only be a copy, so the whole session is ended.
 - After 5 wrong passwords in a row, on Log in or on a password change, an account is locked for 15 minutes (`429` with `Retry-After`). The count is kept in the database because serverless functions share no memory.
 
@@ -317,13 +317,14 @@ On start the backend creates any missing table, adds any missing column and give
 
 ## 6. Testing and quality
 
-**Automated tests.** `backend/tests/` has 113 pytest tests that run against a throwaway SQLite database (or, with `TEST_DATABASE_URL`, an empty PostgreSQL one), emptied before each test, with test-only secrets, so they never touch real data:
+**Automated tests.** `backend/tests/` has 121 pytest tests that run against a throwaway SQLite database (or, with `TEST_DATABASE_URL`, an empty PostgreSQL one), emptied before each test, with test-only secrets, so they never touch real data:
 
 | File | What it proves |
 |---|---|
 | `test_login.py` | Correct login and cookie flags; wrong password and unknown email look the same; the 5th wrong password locks the account, even against the right password; the failed login is logged without the password |
 | `test_tokens.py` | Missing, tampered, forged and expired tokens get `401`; a token stops working after logout; a banned user gets `403` |
 | `test_refresh.py` | Rotation, the 30-second grace period, reuse ending the whole session, and refresh refused after logout or a ban |
+| `test_devices.py` | Login devices follow the refresh tokens: a refresh keeps the device, an expired token or a logout removes it, and a new login on the same browser replaces it |
 | `test_rbac.py` | Every admin route is `403` for the other three roles and `401` for a visitor; a role change applies with the same token; another person's session is `404` and member record `403`; members cannot start a group; a group and its workouts are `404` to outsiders, even an admin; group permissions; admins cannot ban each other |
 | `test_gym.py` | Plans (add, retire, delete rules), a membership paid in the same step, check-in and check-out, class attendance (own class only, not a day before), a trainer's own clients only, marking a workout done (assignee only), equipment services and faults, expenses and net income, a user's record counts |
 | `test_robustness.py` | Ids, offsets and dates no column can hold are `422`, never `500`; a validation error is one sentence without the password; no class in the past; days are the gym's days; every delete and void is logged; a user's newest records; moderation filters; logout with a just-replaced token |
@@ -370,7 +371,7 @@ The one point of mid-term feedback, on the backend's folder structure, was the f
 | **Permissions, not role checks** (PR #68) | With four roles, `if role == "admin"` checks were spreading across routers. One module now maps roles to permissions, every route names the permission it needs, and the app builds its menu from the same list. No status code changed for any role, which was confirmed by calling every route as each role before and after |
 | **Two people booking the last place** | Counting and inserting in two steps lets both succeed. Booking now locks the class row (`SELECT … FOR UPDATE` on PostgreSQL) before counting, and the composite primary key blocks a double booking |
 | **The gym's day, not the server's** | "Today" was the UTC date, which changes at 6 in the morning in Dhaka: a member who came at 5:30 could not be checked out at 6:30, and a payment after midnight counted for the day before. Every day is now the gym's day (`models.gym_today()`, `utils/time.ts`); times are still stored in UTC |
-| **Short-lived tokens without logging people out** (PR #67) | A 15-minute access token in memory is safer than a long one in `localStorage`, but would log people out constantly. The rotating refresh cookie restores the token silently; a race between two tabs is allowed for 30 seconds, and a reuse after that ends the session |
+| **Short-lived tokens without logging people out** (PR #67) | A 5-minute access token in memory is safer than a long one in `localStorage`, but would log people out constantly. The rotating refresh cookie restores the token silently; a race between two tabs is allowed for 30 seconds, and a reuse after that ends the session |
 | **Serverless constraints** | Vercel functions share no memory and have no lasting disk, so the lockout counter and sessions live in the database, and the database connections go through Supabase's transaction pooler without prepared statements |
 | **Slow pages** | Every query crossed an ocean (the function ran in Washington DC, the database in Asia) and every request opened a new connection. The function was moved to the database's region, connections are reused, the Dashboard went from 63 queries to 22, the login check from 2 to 1, and a normal start from 26 statements to 1. The same request went from 1.6 s to 0.25 s after the move alone |
 | **No Alembic** | The schema only grows (new tables, new nullable or defaulted columns), so the app adds what is missing on start instead. This kept deployment to one step, but a rename or removal would need a real migration tool (section 9) |
