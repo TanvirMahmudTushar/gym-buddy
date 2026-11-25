@@ -8,7 +8,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import DataError
 
-from app.models import utc_now
+from app.models import MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH, utc_now
 from app.services import (
     announcement_service,
     auth_service,
@@ -37,6 +37,10 @@ FIXED: dict[type[Exception], tuple[int, str]] = {
     auth_service.EmailTakenError: (409, "An account with this email already exists"),
     auth_service.AccountBannedError: (403, auth_service.ACCOUNT_BANNED_MESSAGE),
     auth_service.WrongPasswordError: (400, "Current password is wrong"),
+    auth_service.PasswordLengthError: (
+        422,
+        f"new_password: use {MIN_PASSWORD_LENGTH} to {MAX_PASSWORD_LENGTH} characters",
+    ),
     auth_service.SamePasswordError: (400, "Choose a password different from your current one"),
     session_service.SessionNotFoundError: (404, "Session not found"),
     user_service.UserNotFoundError: (404, "User not found"),
@@ -50,6 +54,7 @@ FIXED: dict[type[Exception], tuple[int, str]] = {
     member_service.MemberNotFoundError: (404, "Member not found"),
     member_service.AccountNotFoundError: (422, NO_ACCOUNT),
     member_service.AlreadyMemberError: (409, "That account already has a membership"),
+    member_service.StaffAccountError: (403, "Only an admin can change a staff member's account"),
     member_service.NoMembershipError: (404, "You do not have a membership yet"),
     plan_service.PlanNotFoundError: (404, "Plan not found"),
     plan_service.PlanNotOfferedError: (422, "plan: pick a plan the gym offers now"),
@@ -122,7 +127,7 @@ async def _account_locked(request: Request, exc: auth_service.AccountLockedError
     minutes = math.ceil(seconds / 60)
     return _answer(
         429,
-        f"Too many failed logins. Try again in {minutes} minute{'' if minutes == 1 else 's'}.",
+        f"Too many wrong passwords. Try again in {minutes} minute{'' if minutes == 1 else 's'}.",
         {"Retry-After": str(seconds)},
     )
 

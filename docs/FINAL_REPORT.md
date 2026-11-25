@@ -30,9 +30,9 @@ This report covers the finished product in one place: what it is for (PRD), what
 Many small gyms keep their members in a paper register or a spreadsheet, so nobody can quickly tell whose membership has expired, who came in today, or whether a class is full. Gym Buddy replaces the register with one web app for the whole gym:
 
 - **Members** sign up, see their membership, visits and payments, book and cancel classes, keep their contact and emergency details up to date, and follow the workouts their trainer gives them.
-- **Gym managers** (front desk) start, renew, freeze and delete memberships, check members in and out, take payments, run the class timetable, keep the equipment working and post announcements, from a Dashboard that shows what needs attention today.
+- **Gym managers** (front desk) start, renew and freeze memberships, check members in and out, take payments, run the class timetable, keep the equipment working and post announcements, from a Dashboard that shows what needs attention today.
 - **Trainers** see the classes they teach, who booked each one and who came, look after their own clients, run training groups, and report broken equipment.
-- **Admins** do everything a gym manager does, and also set the plans, record expenses and see net income, manage accounts and roles, ban and unban, reset passwords, void payments, export CSVs, read the activity log and failed logins, and moderate training groups.
+- **Admins** do everything a gym manager does, and also delete accounts, set the plans, record expenses and see net income, manage accounts and roles, ban and unban, reset passwords, void payments, export CSVs, read the activity log and failed logins, and moderate training groups.
 
 The mid-term MVP was a member CRUD API with a one-page front end. The final release turned it into a multi-user product with accounts, four roles under one permission module, classes and bookings, attendance, payments, expenses and net income, equipment, training groups, an audit log and security hardening.
 
@@ -40,11 +40,11 @@ The mid-term MVP was a member CRUD API with a one-page front end. The final rele
 |---|---|
 | API | 105 operations on 78 paths under `/api/v1`, all listed in `/api/docs` |
 | Database | 15 tables (PostgreSQL on Supabase; SQLite locally) |
-| Roles and permissions | 4 roles, 25 permissions, plus 5 per-group permissions |
+| Roles and permissions | 4 roles, 26 permissions, plus 5 per-group permissions |
 | Requirements | 121 functional (FR-01 to FR-121) and 24 non-functional, traced to 37 user stories |
 | Front end | 22 pages, 62 components, 18 service modules |
-| Tests | 96 automated backend tests (pytest), passing on SQLite and PostgreSQL |
-| GitHub | 39 issues and 38 pull requests merged into `main` (the latest, for #75, included), each from its own branch. The gym management rework (#76) was committed to `main` directly |
+| Tests | 113 automated backend tests (pytest), passing on SQLite and PostgreSQL |
+| GitHub | One issue and one pull request into `main` for each piece of work, each from its own branch. The gym management rework (#76) was committed to `main` directly |
 | Code | about 7,300 lines of Python in the backend and 9,300 lines of TypeScript in the front end |
 
 ## 2. How to test the live system
@@ -108,7 +108,7 @@ The PRD planned the MVP and the Beta from the start, and the final release cover
 | Workout plans | **Added**: training groups run by trainers and staff, with per-member permissions, assigned workouts and marking them done. A private workout diary was built first (PR #70) and then removed: nobody at the gym could see it, so it did not help run the gym |
 | Equipment tracking | **Added**: the equipment list, reported faults, and services with the next due date |
 | Password reset | **Added** as an admin reset with a one-time temporary password (no email reset) |
-| Automated tests | **Added**: a pytest suite (96 tests). CI is still not set up |
+| Automated tests | **Added**: a pytest suite (113 tests). CI is still not set up |
 
 Still out of scope: online payments, email or SMS, email verification and self-service password reset, QR check-in, waiting lists for full classes, recurring classes, and diet plans.
 
@@ -168,11 +168,11 @@ The server never asks "is this an admin?". Every protected endpoint names a perm
 | `classes:teach` (my classes, who booked and who came), `clients:read` (my clients) | | ✓ | | |
 | `groups:create`, `equipment:read` | | ✓ | ✓ | ✓ |
 | `members:read`, `members:manage`, `check_ins:record`, `payments:manage`, `classes:manage`, `equipment:manage`, `overview:read`, `announcements:manage` | | | ✓ | ✓ |
-| `payments:void`, `payments:export`, `expenses:manage`, `dashboard:read`, `plans:edit` | | | | ✓ |
+| `members:delete`, `payments:void`, `payments:export`, `expenses:manage`, `dashboard:read`, `plans:edit` | | | | ✓ |
 | `users:read`, `users:change_role`, `users:ban`, `users:reset_password`, `users:revoke_sessions`, `users:export` | | | | ✓ |
 | `activity:read`, `content:moderate` | | | | ✓ |
 
-**Group permissions** add a second, per-group layer in the same module: the owner holds `read`, `create`, `update`, `assign` and `manage`; a member holds `read` plus whichever of `create`, `update` and `assign` the owner ticked. Someone outside the group gets `404` for the group and its workouts, so a private group does not even show that it exists. The full action-by-role matrix is [SRS section 3.11](02-srs.md#311-permission-matrix--beta).
+**Group permissions** add a second, per-group layer in the same module: the owner holds `read`, `create`, `update`, `assign` and `manage`; a member holds `read` plus whichever of `create`, `update` and `assign` the owner ticked. Only `manage`, the owner's alone, deletes a workout, renames or deletes the group, or changes its members. Someone outside the group gets `404` for the group and its workouts, so a private group does not even show that it exists. The full action-by-role matrix is [SRS section 3.11](02-srs.md#311-permission-matrix--beta).
 
 ### 4.3 Non-functional requirements
 
@@ -181,12 +181,12 @@ The server never asks "is this an admin?". Every protected endpoint names a perm
 | Persistence | NFR-02 | PostgreSQL on Supabase; nothing kept on the serverless function's disk |
 | Security: passwords | NFR-11, NFR-22 | Argon2 over HMAC-SHA256 with `PASSWORD_PEPPER`; never stored, logged or returned in plain text |
 | Security: tokens | NFR-12 to NFR-14 | 15-minute JWT in memory; 7-day random refresh token in an `HttpOnly`, `Secure`, `SameSite=Strict` cookie, stored only as a SHA-256 hash and replaced on every refresh |
-| Security: browser | NFR-15, NFR-16 | CORS only for `FRONTEND_ORIGIN`; `nosniff`, `DENY` framing, referrer policy and HSTS on every response |
+| Security: browser | NFR-15, NFR-16 | CORS only for the deployed frontend (and `FRONTEND_ORIGIN`); `nosniff`, `DENY` framing, referrer policy and HSTS on every response |
 | Security: checks | NFR-17, NFR-06, NFR-07 | Every permission check on the server; ORM queries only; a generic `500` with no stack trace |
 | Privacy | NFR-20 | Phone, date of birth, emergency contact and notes only for staff and the person themself |
 | Consistency | NFR-21 | Booking locks the class row, counts and inserts in one transaction |
 | Audit | NFR-23 | Activity log rows never hold a password, token or hash |
-| Maintainability | NFR-08, NFR-24 | Routers → services → database layers; 96 automated tests |
+| Maintainability | NFR-08, NFR-24 | Routers → services → database layers; 113 automated tests |
 | Secrets | NFR-05 | Only in Vercel environment variables; `backend/.env.example` holds placeholders only |
 
 Two NFRs were changed during the project and are recorded in the SRS: schema changes are applied by the app on start rather than by Alembic (NFR-19, see section 8), and production is deployed with `vercel --prod` rather than on every push (NFR-10).
@@ -303,7 +303,7 @@ sequenceDiagram
 
 - Every request checks that its session is still active, so logging out, a password change, an admin reset, "log out everywhere" and a ban take effect on the very next request, not after 15 minutes.
 - A replaced refresh token that comes back more than 30 seconds later can only be a copy, so the whole session is ended.
-- After 5 wrong passwords in a row an account is locked for 15 minutes (`429` with `Retry-After`). The count is kept in the database because serverless functions share no memory.
+- After 5 wrong passwords in a row, on Log in or on a password change, an account is locked for 15 minutes (`429` with `Retry-After`). The count is kept in the database because serverless functions share no memory.
 
 ### 5.7 Deployment and configuration
 
@@ -311,13 +311,13 @@ sequenceDiagram
 |---|---|
 | `DATABASE_URL` | Supabase transaction pooler (port 6543); the engine keeps a small pool of connections and uses no prepared statements, as the pooler requires |
 | `JWT_SECRET`, `PASSWORD_PEPPER` | 32+ byte secrets, required on Vercel; the pepper must never change once set |
-| `FRONTEND_ORIGIN` | The one origin CORS answers (`https://2321648gymbuddy.vercel.app`) |
+| `FRONTEND_ORIGIN` | Optional on Vercel: another origin CORS answers besides the deployed frontend, `https://2321648gymbuddy.vercel.app`, which is always allowed |
 
 On start the backend creates any missing table, adds any missing column and gives a new database its first plans, keeping existing data, so an older database upgrades itself. Production is deployed with `vercel --prod` from an up-to-date `main`.
 
 ## 6. Testing and quality
 
-**Automated tests.** `backend/tests/` has 96 pytest tests that run against a throwaway SQLite database (or, with `TEST_DATABASE_URL`, an empty PostgreSQL one), emptied before each test, with test-only secrets, so they never touch real data:
+**Automated tests.** `backend/tests/` has 113 pytest tests that run against a throwaway SQLite database (or, with `TEST_DATABASE_URL`, an empty PostgreSQL one), emptied before each test, with test-only secrets, so they never touch real data:
 
 | File | What it proves |
 |---|---|
@@ -327,15 +327,16 @@ On start the backend creates any missing table, adds any missing column and give
 | `test_rbac.py` | Every admin route is `403` for the other three roles and `401` for a visitor; a role change applies with the same token; another person's session is `404` and member record `403`; members cannot start a group; a group and its workouts are `404` to outsiders, even an admin; group permissions; admins cannot ban each other |
 | `test_gym.py` | Plans (add, retire, delete rules), a membership paid in the same step, check-in and check-out, class attendance (own class only, not a day before), a trainer's own clients only, marking a workout done (assignee only), equipment services and faults, expenses and net income, a user's record counts |
 | `test_robustness.py` | Ids, offsets and dates no column can hold are `422`, never `500`; a validation error is one sentence without the password; no class in the past; days are the gym's days; every delete and void is logged; a user's newest records; moderation filters; logout with a just-replaced token |
+| `test_rules.py` | The final spec's rules: every endpoint but sign in and the health check is `401` for a visitor; every staff and admin endpoint is `403` for a plain user; nobody gives themself a role; role names are compared only in `rbac.py`; only a group's owner deletes a workout; gym managers cannot edit staff accounts or delete accounts; every failed password change is recorded and guessing is locked out; leaving, removing and cancelling are logged; the deployed frontend is always allowed by CORS |
 | `test_startup.py` | A normal start and the login check are one query each; an older schema is filled in again; a token does not open another account's session |
 | `test_cors.py` | Only `FRONTEND_ORIGIN` gets CORS headers; look-alike origins and `null` get none; `*` is never sent |
 | `test_config.py` | Settings loading and the `FRONTEND_ORIGIN` rules |
 
 Run with `pip install -r requirements-dev.txt` and `pytest` in `backend/`.
 
-**End-to-end checks.** A browser run (Playwright, Chrome, against the app on PostgreSQL) drives 23 flows as every role: sign up, reload and logout with the old cookie refused, lockout, tampered and expired tokens, silent refresh, a server outage, pages and API calls denied by RBAC, a ban, a role change, a reset and a revoke while the person is logged in, group permissions for an owner, three kinds of members and an outsider, members, classes, payments, equipment, moderation, filters, CSV contents, deep links and a phone screen, with no console errors. The API was also fuzzed from its OpenAPI schema (9,571 requests on PostgreSQL): the first run found 40 ways to get a `500` from ids, offsets or text the database cannot hold, which are now `422`. The demo data script doubles as a smoke test: it drives sign-up, roles, memberships, payments, check-ins and check-outs, classes, bookings, announcements, equipment, expenses, the training group and its permissions through the public API and stops at the first unexpected answer. Its results were then checked by role: the right landing page and permissions for each account, `403` for a group member editing without permission, `404` for an outsider, and the Dashboard numbers matching their lists.
+**End-to-end checks.** A browser run (Playwright, Chrome, against the app on PostgreSQL) drives 24 flows as every role: sign up, reload and logout with the old cookie refused, lockout, tampered and expired tokens, silent refresh, a server outage, pages and API calls denied by RBAC, a ban, a role change, a reset and a revoke while the person is logged in, group permissions for an owner, three kinds of members and an outsider, members, classes, payments, equipment, moderation, filters, CSV contents, deep links and a phone screen, with no console errors. The API was also fuzzed from its OpenAPI schema (9,571 requests on PostgreSQL): the first run found 40 ways to get a `500` from ids, offsets or text the database cannot hold, which are now `422`. The demo data script doubles as a smoke test: it drives sign-up, roles, memberships, payments, check-ins and check-outs, classes, bookings, announcements, equipment, expenses, the training group and its permissions through the public API and stops at the first unexpected answer. Its results were then checked by role: the right landing page and permissions for each account, `403` for a group member editing without permission, `404` for an outsider, and the Dashboard numbers matching their lists.
 
-**Manual checks on the live site.** Each main page is opened on the Vercel URL as the role that uses it, at desktop and phone width, checking the browser console for errors and that the loading, error and empty states show.
+**Checks on the live site.** After a deployment the site is checked without logging in (the pages, reloads, deep links such as `/members`, the browser console, the API's `401` answers, CORS and the security headers), and the deployed script files are compared with a build of `main`.
 
 ## 7. Project management on GitHub
 
@@ -355,6 +356,7 @@ Work went through GitHub issues and pull requests, one issue per feature, with o
 | Gym operations | 20 – 21 Nov | #44 – #58 | Lockout and headers, connected pages, bookings and renewals, Overview, password reset, trainers, announcements, profile details |
 | Security and admin | 21 – 22 Nov | #67 – #74 | Refresh sessions, the RBAC module, activity log, workouts and groups, admin user tools, moderation, CORS allowlist and the test suite |
 | Gym management | 25 Nov | Issue #76, commit `f4554bb` | Plans, attendance, class attendance, personal trainers and clients, equipment, expenses and net income, the sidebar; the private workout diary and the separate Overview and Moderation pages removed |
+| Robustness and design | 25 Nov | #79 | Server errors found by fuzzing, the gym's day, session handling, fuller activity log and user details, one set of shared interface parts |
 | Speed | 25 Nov | Issue #75 | Reused database connections, a one-query login check, combined Dashboard counts and a one-query start |
 
 The one point of mid-term feedback, on the backend's folder structure, was the first thing fixed in the final phase (PR #22).

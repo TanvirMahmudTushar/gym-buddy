@@ -2,7 +2,7 @@ import { type FormEvent, useState } from "react"
 import { useSave } from "../hooks/useSave"
 import { banUser, bulkBan, bulkUnban, changeRole, resetPassword, revokeSessions, unbanUser } from "../services/adminService"
 import type { AdminUser, Role, SkippedUser } from "../types/auth"
-import { ROLES, roleLabel } from "../utils/auth"
+import { ROLES, aRole } from "../utils/auth"
 import { count } from "../utils/text"
 import Alert from "./Alert"
 import ConfirmModal from "./ConfirmModal"
@@ -181,13 +181,13 @@ export default function UserActionModal({ action, onDone, onChanged, onClose }: 
     case "role":
       return (
         <ConfirmModal
-          title={`Make ${user.name} ${action.role === "admin" ? "an" : "a"} ${roleLabel(action.role)}?`}
+          title={`Make ${user.name} ${aRole(action.role)}?`}
           confirmLabel="Change role"
           busyLabel="Changing…"
           onClose={onClose}
           onConfirm={async () => {
             await changeRole(user.id, action.role)
-            onDone(`${user.name} is now ${action.role === "admin" ? "an" : "a"} ${roleLabel(action.role)}.`)
+            onDone(`${user.name} is now ${aRole(action.role)}.`)
           }}
         >
           {ROLES.find((r) => r.value === action.role)?.description} It takes effect on their next request.

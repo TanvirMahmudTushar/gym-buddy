@@ -55,5 +55,5 @@ def complete_workout(workout_id: RowId, body: WorkoutCompletion, user: CurrentUs
 
 @router.delete("/{workout_id}", status_code=204)
 def delete_workout(workout_id: RowId, user: CurrentUser, session: SessionDep, client: ClientDep) -> None:
-    """Needs the update permission in its group (403 without it)."""
+    """Only the owner of its group (403 for a member, whatever their permissions)."""
     workout_service.delete_workout(session, user, workout_id, client)

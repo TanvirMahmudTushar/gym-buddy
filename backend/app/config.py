@@ -11,6 +11,8 @@ ENV_FILE = BACKEND_DIR / ".env"
 
 # The Vite dev server, allowed when FRONTEND_ORIGIN is not set on a developer machine.
 LOCAL_FRONTEND_ORIGIN = "http://localhost:5173"
+# The deployed frontend. Always allowed on Vercel, so a missing or mistyped FRONTEND_ORIGIN cannot lock it out.
+DEPLOYED_FRONTEND_ORIGIN = "https://2321648gymbuddy.vercel.app"
 
 
 def load_local_env() -> None:
@@ -26,12 +28,10 @@ def load_local_env() -> None:
 
 
 def frontend_origins() -> list[str]:
-    """The browser origins allowed to call the API from another origin (CORS, NFR-15). FRONTEND_ORIGIN holds one
-    exact origin such as https://2321648gymbuddy.vercel.app, or several separated by commas. Unset, a developer
-    machine allows the Vite dev server and Vercel allows none (the app and the API share one origin there)."""
-    raw = os.getenv("FRONTEND_ORIGIN")
-    if raw is None:
-        return [] if os.getenv("VERCEL") else [LOCAL_FRONTEND_ORIGIN]
+    """The browser origins allowed to call the API from another origin (CORS, NFR-15): the deployed frontend on Vercel,
+    the Vite dev server on a developer machine without FRONTEND_ORIGIN, and what FRONTEND_ORIGIN lists (one exact
+    origin, or several separated by commas)."""
+    raw = os.getenv("FRONTEND_ORIGIN") or ""
     origins = [origin.strip().rstrip("/") for origin in raw.split(",") if origin.strip()]
     for origin in origins:
         # A wildcard with credentials would let any site call the API as the logged-in user.
@@ -39,4 +39,6 @@ def frontend_origins() -> list[str]:
             raise RuntimeError("FRONTEND_ORIGIN must list exact origins; * is not allowed")
         if not origin.startswith(("https://", "http://")):
             raise RuntimeError(f"FRONTEND_ORIGIN: {origin!r} is not an origin like https://example.com")
-    return origins
+    if os.getenv("VERCEL"):
+        return list(dict.fromkeys([DEPLOYED_FRONTEND_ORIGIN, *origins]))
+    return origins or [LOCAL_FRONTEND_ORIGIN]

@@ -230,7 +230,7 @@ def rename_user(session: Session, user: User, name: str) -> User:
 def _ban_refusal(acting_admin: User, user: User) -> str | None:
     if user.id == acting_admin.id:
         return BAN_SELF
-    if user.role == "admin":
+    if rbac.is_admin(user):
         return BAN_ADMIN
     return None
 
@@ -340,7 +340,7 @@ def reset_password(session: Session, acting_admin: User, user_id: int, client: C
     if acting_admin.id == user_id:
         raise CannotResetPasswordError("Change your own password on My account")
     user = get_user(session, user_id)
-    if user.role == "admin":
+    if rbac.is_admin(user):
         raise CannotResetPasswordError("You cannot reset another admin's password; change their role first")
     temporary = "".join(secrets.choice(TEMPORARY_ALPHABET) for _ in range(TEMPORARY_LENGTH))
     user.password_hash = hash_password(temporary)

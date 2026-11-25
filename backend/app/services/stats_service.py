@@ -82,7 +82,7 @@ def admin_stats(session: Session) -> dict:
         "check_ins": checkin_service.check_in_stats(session),
         "classes": class_service.class_stats(session),
         "workouts": workout_service.workout_stats(session, utc_now() - WEEK),
-        "groups": {"total": group_service.count_groups(session)},
+        "groups": group_service.group_stats(session, utc_now() - WEEK),
         "equipment": equipment_service.equipment_stats(session),
     }
 

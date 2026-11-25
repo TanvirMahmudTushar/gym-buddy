@@ -5,7 +5,7 @@ import { getUserDetail } from "../services/adminService"
 import { ApiError } from "../services/api"
 import type { AdminUserDetail } from "../types/auth"
 import { activityLink, eventLabel, eventPill } from "../utils/activity"
-import { can, usersLink } from "../utils/auth"
+import { can, isAdminAccount, usersLink } from "../utils/auth"
 import { memberStatus, membersLink } from "../utils/member"
 import { describeBrowser } from "../utils/session"
 import { count, errorText } from "../utils/text"
@@ -180,7 +180,7 @@ export default function UserDetail({ userId }: { userId: number }) {
   const d = detail
   const isMe = d.id === me?.id
   // The API has the same rules: not yourself, and not another admin.
-  const canAct = !isMe && d.role !== "admin"
+  const canAct = !isMe && !isAdminAccount(d)
 
   return (
     <div className="page">

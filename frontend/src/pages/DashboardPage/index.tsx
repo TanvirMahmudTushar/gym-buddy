@@ -107,9 +107,9 @@ function GymReport({ stats: s, revenue }: { stats: AdminStats; revenue: RevenueS
         <section className="card">
           <h2>Records and groups</h2>
           <div className="stats">
-            <Stat label="Training groups" value={s.groups.total} href={trainingLink("all-groups")} />
-            <Stat label="Workouts" value={s.workouts.total} href={trainingLink("all-workouts")} note={`${s.workouts.completed} done`} />
-            <Stat label="New workouts, 7 days" value={s.workouts.last_7_days} />
+            <Stat label="Training groups" value={s.groups.total} href={trainingLink("all-groups")} note={`${s.groups.new_last_7_days} new in 7 days`} />
+            <Stat label="Workouts" value={s.workouts.total} href={trainingLink("all-workouts")} note={`${s.workouts.last_7_days} new in 7 days`} />
+            <Stat label="Workouts done" value={s.workouts.completed} />
             <Stat label="Upcoming classes" value={s.classes.upcoming} href="#/classes" />
             <Stat label="Equipment" value={s.equipment.total} href={equipmentLink("")} />
           </div>

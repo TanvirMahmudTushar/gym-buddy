@@ -154,7 +154,7 @@ def test_deleting_a_former_trainers_account_leaves_their_clients(admin, manager,
     manager.client.patch(f"/api/v1/members/{member.id}", json={"trainer_id": trainer.id})
     admin.client.patch(f"/api/v1/admin/users/{trainer.id}/role", json={"role": "user"})
     manager.client.post("/api/v1/members", json={"email": trainer.email, "plan": "monthly"})
-    assert manager.client.delete(f"/api/v1/members/{trainer.id}").status_code == 204
+    assert admin.client.delete(f"/api/v1/members/{trainer.id}").status_code == 204
     assert manager.client.get(f"/api/v1/members/{member.id}").json()["trainer_id"] is None
 
 

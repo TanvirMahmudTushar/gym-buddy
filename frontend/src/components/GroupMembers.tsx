@@ -111,7 +111,7 @@ export default function GroupMembers({ group, members, meId, onMembersChange, on
       <div className="toolbar">
         <div>
           <h2>People and permissions</h2>
-          <p className="hint">{isOwner ? "Everyone sees the workouts. Tick what else each person may do." : "Only the owner can change these."}</p>
+          <p className="hint">{isOwner ? "Everyone sees the workouts. Tick what else each person may do; only you can delete." : "Only the owner can change these, and delete workouts."}</p>
         </div>
         {isOwner && (
           <button type="button" className="small primary" onClick={() => setAdding(true)}>

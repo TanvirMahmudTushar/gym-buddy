@@ -5,7 +5,16 @@ from datetime import datetime, timedelta
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, col, select, update
 
-from app.models import ActivityEvent, LoginRequest, SignupRequest, User, as_utc, utc_now
+from app.models import (
+    MAX_PASSWORD_LENGTH,
+    MIN_PASSWORD_LENGTH,
+    ActivityEvent,
+    LoginRequest,
+    SignupRequest,
+    User,
+    as_utc,
+    utc_now,
+)
 from app.request_info import Client
 from app.security import hash_password, password_needs_rehash, verify_password
 from app.services import activity_service, session_service
@@ -28,6 +37,10 @@ class WrongPasswordError(Exception):
     """The current password given when changing the password is wrong."""
 
 
+class PasswordLengthError(Exception):
+    """The new password is too short or too long."""
+
+
 class SamePasswordError(Exception):
     """The new password is the same as the current one (such as the temporary password an admin gave)."""
 
@@ -36,13 +49,14 @@ class InvalidCredentialsError(Exception):
     """Wrong email or wrong password; the two are deliberately not told apart."""
 
 
-# Login lockout (FR-34, TDD 10.2): this many wrong passwords in a row block the account's logins for LOCKOUT.
+# Lockout (FR-34, TDD 10.2): this many wrong passwords in a row, on Log in or on a password change, block the account's
+# logins and password changes for LOCKOUT.
 MAX_FAILED_LOGINS = 5
 LOCKOUT = timedelta(minutes=15)
 
 
 class AccountLockedError(Exception):
-    """Too many wrong passwords in a row: logins are blocked until `until` (UTC), even with the right password."""
+    """Too many wrong passwords in a row: blocked until `until` (UTC), even with the right password."""
 
     def __init__(self, until: datetime):
         super().__init__(until)
@@ -85,9 +99,9 @@ def _locked_until(user: User) -> datetime | None:
     return until if until > utc_now() else None
 
 
-def _record_failed_login(session: Session, user: User, client: Client) -> None:
-    """Count a wrong password; the 5th in a row locks the account and starts the count again."""
-    _log_failed_login(session, client, user.email, user, "Wrong password")
+def _count_wrong_password(session: Session, user: User, client: Client) -> None:
+    """Count a wrong password; the 5th in a row locks the account and starts the count again. The caller has already
+    added its activity row, which is saved here."""
     # The + 1 runs in the database, so two wrong passwords sent at the same moment both count.
     session.exec(
         update(User).where(col(User.id) == user.id).values(failed_login_count=col(User.failed_login_count) + 1)
@@ -125,7 +139,8 @@ def authenticate(session: Session, data: LoginRequest, client: Client) -> User:
             _log_failed_login(session, client, email, None, "No account has this email")
             session.commit()
         else:
-            _record_failed_login(session, user, client)
+            _log_failed_login(session, client, email, user, "Wrong password")
+            _count_wrong_password(session, user, client)
         raise InvalidCredentialsError
     # The right password ends the run of failures.
     changed = bool(user.failed_login_count or user.locked_until is not None)
@@ -156,16 +171,27 @@ def change_password(
     session: Session, user: User, current_password: str, new_password: str, current_session_id: int, client: Client
 ) -> None:
     """Every other session of the user is revoked in the same transaction (FR-41); the one making the change stays
-    logged in. Also ends the must-change-password state an admin reset leaves."""
+    logged in. Also ends the must-change-password state an admin reset leaves. Every refused attempt is recorded, and
+    wrong current passwords count towards the lockout, so a stolen login cannot be used to guess the password."""
+    if (until := _locked_until(user)) is not None:
+        _log_failed_change(session, user, client, "Account is locked")
+        raise AccountLockedError(until)
     if not verify_password(current_password, user.password_hash):
-        _log_failed_change(session, user, client, "Current password was wrong")
+        activity_service.record(
+            session, ActivityEvent.PASSWORD_CHANGE_FAILED, client, actor=user, details="Current password was wrong"
+        )
+        _count_wrong_password(session, user, client)
         raise WrongPasswordError
+    if not MIN_PASSWORD_LENGTH <= len(new_password) <= MAX_PASSWORD_LENGTH:
+        _log_failed_change(session, user, client, "New password was too short or too long")
+        raise PasswordLengthError
     if verify_password(new_password, user.password_hash):
         _log_failed_change(session, user, client, "New password was the same as the current one")
         raise SamePasswordError
     user.password_hash = hash_password(new_password)
     user.password_changed_at = utc_now()
     user.must_change_password = False
+    user.failed_login_count = 0
     session.add(user)
     ended = session_service.revoke_all(session, user.id, keep=current_session_id)
     activity_service.record(

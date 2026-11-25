@@ -176,7 +176,7 @@ backend/
       group_service.py   # training groups: access() and require() on rbac.group_permissions(), list with counts, members, delete_for_accounts(); raises GroupNotFoundError / GroupPermissionError / GroupOwnerError
       moderation_service.py # admin lists, CSVs and deletes of anyone's workouts and groups (one activity row per delete)
       workout_service.py # workouts in groups: lists, add, edit, assign, mark done, delete; raises WorkoutNotFoundError / NotAssignedToYouError / AssigneeNotInGroupError
-  tests/               # pytest suite (section 14): conftest.py, test_login.py, test_tokens.py, test_refresh.py, test_rbac.py, test_gym.py, test_startup.py, test_robustness.py, test_cors.py, test_config.py
+  tests/               # pytest suite (section 14): conftest.py, test_login.py, test_tokens.py, test_refresh.py, test_rbac.py, test_gym.py, test_startup.py, test_robustness.py, test_rules.py, test_cors.py, test_config.py
   .env.example         # the four variables with placeholders only (copy to backend/.env)
   requirements-dev.txt # -r requirements.txt + pytest, httpx (not installed by Vercel)
   pytest.ini
@@ -424,7 +424,7 @@ Voiding is a conditional `UPDATE ... WHERE voided_at IS NULL`, so voiding twice 
 | `group_id` | integer | PK part, FK → `training_group.id`, on delete cascade |
 | `user_id` | integer | PK part, FK → `app_user.id`, on delete cascade, indexed (`ix_group_member_user_id`: "my groups") |
 | `can_create` | boolean | Default false: add workouts to the group |
-| `can_update` | boolean | Default false: edit and delete the group's workouts |
+| `can_update` | boolean | Default false: edit the group's workouts |
 | `can_assign` | boolean | Default false: assign the group's workouts |
 | `added_at` | timestamp (UTC) | Not null |
 
@@ -769,7 +769,7 @@ In the MVP no login is needed. In the Beta the member endpoints need `members:re
 | `GET` | `/api/v1/members/waiting?offset&limit&q` | Gym Manager, Admin | — | `200` `AccountPage` (role `user`, no plan, newest first; declared before `/{member_id}`) | `403` | FR-55 |
 | `GET` | `/api/v1/members/{id}` | Gym Manager, Admin | — | `200` `MemberRead` | `403`, `404` | FR-19 |
 | `PATCH` | `/api/v1/members/{id}` | Gym Manager, Admin | `MemberUpdate` | `200` `MemberRead` | `403`, `404`, `422` | FR-19 |
-| `DELETE` | `/api/v1/members/{id}` | Gym Manager, Admin | — | `204` | `403`, `404` | FR-19 |
+| `DELETE` | `/api/v1/members/{id}` | Admin (`members:delete`) | — | `204` | `403`, `404` | FR-19 |
 | `POST` | `/api/v1/members/{id}/check-ins` | Gym Manager, Admin | — | `201` `CheckInRead` | `400` (frozen: "Membership is frozen"; expired: "Membership expired on YYYY-MM-DD"), `403`, `404`, `409` (already inside) | FR-30, FR-32 |
 | `GET` | `/api/v1/members/{id}/check-ins?offset&limit` | Gym Manager, Admin | — | `200` `CheckInPage` (newest first) | `403`, `404`, `422` | FR-31 |
 | `GET` | `/api/v1/check-ins?day&inside&q&offset&limit` | Gym Manager, Admin | — | `200` `CheckInPage` (a day, today by default, newest first; `limit` up to 100, default 50) | `401`, `403`, `422` | FR-42 |
@@ -872,7 +872,7 @@ Ban rules: banning is idempotent (banning a banned user changes nothing), an adm
 | `PATCH` | `/api/v1/workouts/{workout_id}` | `update` in the group | `WorkoutUpdate` | `200` `WorkoutRead` | `403`, `404`, `422` | FR-93 |
 | `PUT` | `/api/v1/workouts/{workout_id}/assignee` | `assign` in the group | `WorkoutAssign` | `200` `WorkoutRead` (not done, if the person changed) | `403`, `404`, `422` (not in the group) | FR-93, FR-116 |
 | `PUT` | `/api/v1/workouts/{workout_id}/completion` | The person it is assigned to | `WorkoutCompletion` | `200` `WorkoutRead` | `403`, `404` | FR-116 |
-| `DELETE` | `/api/v1/workouts/{workout_id}` | `update` in the group | — | `204` | `403`, `404` | FR-93 |
+| `DELETE` | `/api/v1/workouts/{workout_id}` | `manage` in the group (its owner) | — | `204` | `403`, `404` | FR-93 |
 | `GET` | `/api/v1/groups?offset&limit` | Any logged-in user | — | `200` `GroupPage` (groups I own or am in, by name) | `401` | FR-91 |
 | `POST` | `/api/v1/groups` | Trainer, Gym Manager, Admin (`groups:create`) | `GroupCreate` | `201` `GroupRead` (I am the owner) | `401`, `403`, `422` | FR-91 |
 | `GET` | `/api/v1/groups/{group_id}` | `read` | — | `200` `GroupRead` | `404` | FR-91 |
@@ -999,7 +999,7 @@ A catch-all exception handler returns `500` with `{"detail": "Internal server er
 | `DATABASE_URL` | not set (SQLite default) | Supabase transaction pooler URL (port `6543`) | MVP |
 | `JWT_SECRET` | optional (a temporary secret per run) | Required: random 32+ byte secret (`python -c "import secrets; print(secrets.token_urlsafe(48))"`) | Beta |
 | `PASSWORD_PEPPER` | optional (a fixed development pepper) | Required: random 32+ byte secret, generated the same way. Never changed once set: every password hashed with it would stop verifying | Beta |
-| `FRONTEND_ORIGIN` | optional (default `http://localhost:5173`, the Vite dev server) | `https://2321648gymbuddy.vercel.app`; unset allows no other origin (the app and the API share one). One exact origin or several separated by commas; `*` stops the backend at start-up | Beta |
+| `FRONTEND_ORIGIN` | optional (default `http://localhost:5173`, the Vite dev server) | optional: `https://2321648gymbuddy.vercel.app` is always allowed. One exact origin or several separated by commas; `*` stops the backend at start-up | Beta |
 
 Token lifetimes are constants, not env vars: `ACCESS_TOKEN_LIFETIME` (15 minutes) in `app/security.py`, `REFRESH_LIFETIME` (7 days) and `ROTATION_GRACE` (30 seconds) in `app/services/session_service.py`.
 
@@ -1100,7 +1100,8 @@ def ban_user(user_id: int, session: SessionDep, admin: Banner, body: BanRequest 
 |---|---|
 | `/api/v1/users/me/*`, `GET /classes`, `GET /classes/{id}`, `POST` / `DELETE /classes/{id}/bookings`, `GET /plans`, `GET /announcements` | `CurrentUser` only: the caller's own data |
 | `GET /members`, `GET /members/waiting`, `GET /members/{id}`, `GET /members/{id}/check-ins`, `GET /members/{id}/bookings` | `members:read` |
-| `POST /members`, `PATCH` / `DELETE /members/{id}`, `POST /members/bulk-delete`, `DELETE /members/{id}/bookings/{class_id}` | `members:manage` |
+| `POST /members`, `PATCH /members/{id}` (staff accounts: an admin, `rbac.may_edit_account()`), `DELETE /members/{id}/bookings/{class_id}` | `members:manage` |
+| `DELETE /members/{id}`, `POST /members/bulk-delete` | `members:delete` |
 | `POST /members/{id}/check-ins`, `GET /check-ins`, `POST /check-ins/{id}/check-out` | `check_ins:record` |
 | `POST` / `GET /members/{id}/payments`, `GET /payments` | `payments:manage` |
 | `POST /payments/{id}/void` / `GET /payments/export.csv` | `payments:void` / `payments:export` |
@@ -1141,7 +1142,8 @@ def group_permissions(user, owner_id, member: GroupMember | None) -> frozenset[G
 |---|---|
 | Read the group, its people, its workouts | `read`, else `404` |
 | Add a workout | `create` (and `assign` with `assigned_to`), else `403` |
-| Edit or delete a workout | `update`, else `403` |
+| Edit a workout | `update`, else `403` |
+| Delete a workout | `manage` (the owner), else `403` |
 | Assign a workout | `assign`, else `403` |
 | Mark a workout done | being the person it is assigned to (`rbac.is_owner(user, workout.assigned_to)`), else `403` |
 | Rename or delete the group; add, change or remove members | `manage`, else `403` (a member may remove themself) |
@@ -1221,7 +1223,8 @@ stats = AdminStats(
 | `ban`, `unban` | `user_service.ban_user()`, `unban_user()`, only when the state changes | the admin / the account | the reason and how many sessions ended |
 | `account_delete` | `member_service.delete_member()`, `bulk_delete_members()` (one row each) | the gym manager or admin / the email only | the person's name and how it was deleted |
 | `export` | `payment_service.export_csv()`, `expense_service.export_csv()`, `activity_service.export_csv()`, `user_service.export_csv()`, `moderation_service.export_*_csv()`, after the rows are read | the admin / — | the file, the row count and the filters |
-| `workout_delete`, `group_delete` | `moderation_service.delete_workouts()` / `delete_groups()`, one row per item, in the delete's transaction | the admin / the owner (by email if the account is gone) | the title, date and personal or group; or the group's name and how many workouts went with it |
+| `group_member_remove`, `booking_cancel` | `group_service.remove_member()`, `class_service.cancel_booking()` | whoever did it / the person affected, when it is someone else | the group, or the class and its time |
+| `workout_delete`, `group_delete` | `moderation_service.delete_workouts()` / `delete_groups()`, one row per item, in the delete's transaction (`workout_service` and `group_service` log the owner's own deletes) | the admin / the owner (by email if the account is gone) | the title, date and personal or group; or the group's name and how many workouts went with it |
 
 - **Client address:** routes take `ClientDep` (`app/request_info.py`), a `Client(ip, user_agent)` built from the request, and pass it to the service. On Vercel (`VERCEL` is set) the IP is the first address in `X-Forwarded-For`, which the platform overwrites; elsewhere it is the connection's address, because the header could be made up. Both are cut to the column lengths.
 - **No secrets (NFR-23):** `record()` takes no request body. Every `details` text is built in the service from names, roles, reasons, ids and counts; no service passes a password, the temporary password, a token or a hash. The end-to-end check scans every row for the passwords and tokens it used.
@@ -1236,7 +1239,7 @@ stats = AdminStats(
 | Passwords | Argon2 (`argon2-cffi`) over HMAC-SHA256 with `PASSWORD_PEPPER`, minimum 8 characters |
 | Tokens | Section 10.1: 15-minute access token checked against its session on every request; rotating refresh token with reuse detection; `JWT_SECRET` and `PASSWORD_PEPPER` only in env vars, required on Vercel |
 | Cookies | `HttpOnly`, `Secure`, `SameSite=Strict`, path-limited |
-| CORS | Frontend and API share the Vercel origin (locally Vite proxies `/api`), so the app needs no CORS. `AllowlistCORSMiddleware` (Starlette's `CORSMiddleware` with `allow_origins=frontend_origins()`, `allow_credentials=True`, methods `GET`/`POST`/`PUT`/`PATCH`/`DELETE`, headers `Authorization`/`Content-Type`) answers only `FRONTEND_ORIGIN`. A request whose `Origin` is not on the list skips the middleware entirely, so it gets no CORS headers (plain Starlette would still add `Access-Control-Allow-Credentials`), and its preflight gets the app's `405`. `*` is refused at start-up |
+| CORS | Frontend and API share the Vercel origin (locally Vite proxies `/api`), so the app needs no CORS. `AllowlistCORSMiddleware` (Starlette's `CORSMiddleware` with `allow_origins=frontend_origins()`, `allow_credentials=True`, methods `GET`/`POST`/`PUT`/`PATCH`/`DELETE`, headers `Authorization`/`Content-Type`) answers only the deployed frontend (`https://2321648gymbuddy.vercel.app`, built in, so it is allowed even when the variable is not set) and what `FRONTEND_ORIGIN` lists. A request whose `Origin` is not on the list skips the middleware entirely, so it gets no CORS headers (plain Starlette would still add `Access-Control-Allow-Credentials`), and its preflight gets the app's `405`. `*` is refused at start-up |
 | Security headers | Added for all routes in `vercel.json` (below) |
 | Brute force | Login lockout (section 10.2) |
 | Injection | SQLModel/SQLAlchemy parameterised queries only; the member-name filter escapes `%` and `_` |

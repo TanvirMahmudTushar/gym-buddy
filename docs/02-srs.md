@@ -207,7 +207,7 @@ Every Admin is also a logged-in user, so they can log out, edit their profile an
 | FR-15 | The system shall log a user out by revoking the refresh token's session and clearing the cookie. The session's access token is refused from the next request on, not only when it expires. | Beta | US-10 |
 | FR-16 | The system shall return the logged-in user's profile (`id`, `email`, `name`, `role`). The password hash is never returned. | Beta | US-10 |
 | FR-40 | A user shall be able to change their own `name`. Email and role cannot be changed through the profile. | Beta | US-23, US-24 |
-| FR-41 | A user shall be able to change their password by sending the current and the new password. A wrong current password returns `400`. On success every other session of the user is revoked; the session that made the change stays logged in. | Beta | US-24 |
+| FR-41 | A user shall be able to change their password by sending the current and the new password. A wrong current password returns `400`, a new one shorter than 8 or longer than 128 characters `422`, and the same one `400`; every failed attempt is recorded, and wrong current passwords count towards the lockout (FR-34). On success every other session of the user is revoked; the session that made the change stays logged in. | Beta | US-24 |
 | FR-80 | A user shall be able to list their own active sessions (one per browser where they are logged in) with the time it started, the time it was last used, its IP address and browser, and which one is the current session. | Beta | US-10 |
 | FR-81 | A user shall be able to revoke one of their own sessions. Its refresh token and access token stop working at once. Another user's session, or one that is no longer active, returns `404`. | Beta | US-10 |
 | FR-82 | A refresh token used again more than 30 seconds after it was replaced shall revoke its whole session (`401`), because only a copy can still hold it. Within the 30 seconds (two tabs refreshing at once) the request gets an access token without a new cookie. | Beta | US-10 |
@@ -225,7 +225,7 @@ Every Admin is also a logged-in user, so they can log out, edit their profile an
 
 | ID | Requirement | Release | Story |
 |---|---|---|---|
-| FR-19 | In the Beta, the member endpoints (`/api/v1/members`) create, list, view, update and delete shall be available to gym managers and admins only. A caller who is not logged in gets `401`; a `user` gets `403`. | Beta | US-13 |
+| FR-19 | In the Beta, the member endpoints (`/api/v1/members`) create, list, view, update and delete shall be available to gym managers and admins only; deleting an account, and starting or editing the membership of a staff account, to admins only (`403` for a gym manager). A caller who is not logged in gets `401`; a `user` gets `403`. | Beta | US-13 |
 | FR-23 | When creating or updating a member, a gym manager or admin may set `user_id` to link the record to an existing account. A user can be linked to only one member (`409` otherwise); an unknown `user_id` returns `422`. | Beta | US-13 |
 
 > **Built so far (member management):** FR-19, and FR-23 in its final form: there is no record to link, because the membership is stored on the account. `POST /members` takes the `email` the person signed up with and starts the membership on that account; an email with no account gives `422` ("Ask the person to sign up first") and an account that already has a membership gives `409`. FR-55 lists the accounts waiting for one, and **Start membership** fills the email in.
@@ -385,7 +385,7 @@ Story US-29: as an admin, I want to see who did what to which account, from wher
 | ID | Requirement | Release | Story |
 |---|---|---|---|
 | FR-84 | The system shall keep an activity log: one row per security event with the time (UTC), the event, the account that did it and its email, the account it was done to and its email, details, the client IP address and the browser (User-Agent). Rows are only ever added. The emails are copied into the row, so it still reads correctly after the account is deleted. The log is indexed on time, event and actor. | Beta | US-29 |
-| FR-85 | The system shall record sign up, login, failed login (a wrong password, an email with no account, a locked account or a banned account, always with the email that was typed), account lockout, logout, password change, failed password change, password reset, role change, ban, unban, session revoke (by its owner, or by the server when a replaced refresh token is used again), account deletion (one or many), every delete of a workout, group, class, piece of equipment, announcement, plan or expense, a voided payment, and every CSV export. The row is saved in the same transaction as the change. An action that changes nothing (banning a banned user, giving the same role, logging out twice) adds no row. | Beta | US-29 |
+| FR-85 | The system shall record sign up, login, failed login (a wrong password, an email with no account, a locked account or a banned account, always with the email that was typed), account lockout, logout, password change, failed password change, password reset, role change, ban, unban, session revoke (by its owner, or by the server when a replaced refresh token is used again), account deletion (one or many), every delete of a workout, group, class, piece of equipment, announcement, plan or expense, someone removed from or leaving a group, a cancelled booking, a voided payment, and every CSV export. The row is saved in the same transaction as the change. An action that changes nothing (banning a banned user, giving the same role, logging out twice) adds no row. | Beta | US-29 |
 | FR-86 | On Vercel the client IP address shall be the first address in `X-Forwarded-For`, which the platform sets; anywhere else it is the address of the connection, since the header could be made up. | Beta | US-29 |
 | FR-87 | An admin shall be able to list the log, newest first, paginated, filtered by `event`, by `user_id` (rows where that account acted or was acted on), by date range (`date_from`, `date_to`: days at the gym, both inclusive) and by `q` (part of an email, the IP address or the details, any case). An unknown event or `date_from` after `date_to` gives `422`. Every other role gets `403`. | Beta | US-29 |
 | FR-88 | An admin shall be able to download the rows matching the FR-87 filters as CSV, in the same order, up to the newest 10,000 rows, with the FR-51 format (byte order mark, formula-safe cells). The download is itself recorded (FR-85), after the rows are read. | Beta | US-29 |
@@ -402,8 +402,8 @@ Story US-30: as a trainer, I want to run a training group where I decide what ea
 | FR-90 | *Withdrawn.* Personal workouts (a private diary only its owner could read) were built in PR #70 and removed: nobody at the gym could see them, so they did not help run it. Every workout is now in a training group (`422` without `group_id`). | Beta | US-30 |
 | FR-91 | A trainer, gym manager or admin (`groups:create`; a user gets `403`) shall be able to start a training group (`name`, 1–100 characters) and becomes its owner. Any logged-in user shall be able to list the groups they own or belong to, each with their own permissions in it (`my_permissions`). | Beta | US-30 |
 | FR-92 | The owner shall be able to add an existing account to the group by its email, with `can_create`, `can_update` and `can_assign` (`422` if no account has the email, `409` if it is already in the group), change those permissions, and remove a member. A member may leave the group. The owner cannot leave or lose a permission (`400`). Only the owner sees the members' emails. | Beta | US-30 |
-| FR-93 | Everyone in a group shall be able to read the group, its people and its workouts. `can_create` allows adding a workout to the group, `can_update` editing or deleting one, and `can_assign` assigning one to someone in the group or unassigning it (`422` for someone outside the group). The owner holds all three. A member without the permission gets `403`. | Beta | US-30 |
-| FR-94 | Only the owner shall be able to rename or delete the group and add, remove or change the permissions of members: other members get `403`. Anyone outside the group gets `404` for the group, its people, its workouts and each of its workouts. Deleting a group deletes its workouts and memberships. | Beta | US-30 |
+| FR-93 | Everyone in a group shall be able to read the group, its people and its workouts. `can_create` allows adding a workout to the group, `can_update` editing one, and `can_assign` assigning one to someone in the group or unassigning it (`422` for someone outside the group). The owner holds all three. A member without the permission gets `403`. | Beta | US-30 |
+| FR-94 | Only the owner shall be able to delete a workout (whoever added it), rename or delete the group and add, remove or change the permissions of members: other members get `403`. Anyone outside the group gets `404` for the group, its people, its workouts and each of its workouts. Deleting a group deletes its workouts and memberships. | Beta | US-30 |
 | FR-95 | The per-group permissions shall be worked out in the RBAC module (`rbac.group_permissions()`) and checked on the server on every request; a changed permission applies on the member's next request. The app shall show only the buttons the caller's `my_permissions` allow. | Beta | US-30 |
 | FR-96 | A user shall be able to list the workouts assigned to them. Leaving or being removed from a group unassigns that group's workouts from them. Marking one done is FR-116. | Beta | US-30 |
 | FR-97 | Deleting an account shall delete the groups it owns (with their workouts and memberships), and its memberships in other groups; the workouts it added stay without an owner, and the ones assigned to it become unassigned. | Beta | US-30 |
@@ -450,7 +450,7 @@ Stories: US-32 as an admin, I want to decide which plans the gym sells, so price
 
 | ID | Requirement | Release | Story |
 |---|---|---|---|
-| FR-34 | After 5 failed logins in a row for an email, the system shall block logins for that account for 15 minutes and return `429`. A successful login resets the counter. | Beta | US-19 |
+| FR-34 | After 5 wrong passwords in a row for an account, on login or as the current password of a password change, the system shall block both for that account for 15 minutes and return `429`. A successful login resets the counter. | Beta | US-19 |
 
 ### 3.9 Validation rules
 
@@ -552,7 +552,8 @@ Every endpoint except sign up, log in, refresh, health and the docs returns `401
 | Permission | Allows | User | Trainer | Gym Manager | Admin |
 |---|---|---|---|---|---|
 | `members:read` | Member list and details, waiting list, a member's visits and bookings | No | No | Yes | Yes |
-| `members:manage` | Start, edit and delete memberships; cancel a booking for a member | No | No | Yes | Yes |
+| `members:manage` | Start and edit memberships (not of staff accounts, except for an admin); cancel a booking for a member | No | No | Yes | Yes |
+| `members:delete` | Delete a member's whole account, one or many | No | No | No | Yes |
 | `check_ins:record` | Check members in and out; the attendance list of any day | No | No | Yes | Yes |
 | `payments:manage` | Take payments; a member's payments; the list of all payments | No | No | Yes | Yes |
 | `payments:void` | Void a payment | No | No | No | Yes |
@@ -583,7 +584,7 @@ Every endpoint except sign up, log in, refresh, health and the docs returns `401
 |---|---|---|---|---|
 | `read` | See the group, its people and its workouts | Yes | Yes | No (`404`) |
 | `create` | Add a workout to the group | Yes | If `can_create` (else `403`) | No (`404`) |
-| `update` | Edit or delete the group's workouts | Yes | If `can_update` (else `403`) | No (`404`) |
+| `update` | Edit the group's workouts | Yes | If `can_update` (else `403`) | No (`404`) |
 | `assign` | Assign a group workout to someone in the group | Yes | If `can_assign` (else `403`) | No (`404`) |
 | `manage` | Rename or delete the group; add, remove and set the permissions of members | Yes | No (`403`); a member may only remove themself (leave) | No (`404`) |
 
@@ -626,7 +627,7 @@ Actions on one's own account and data (profile, password, sessions, own membersh
 | NFR-12 | Security | Access tokens are JWTs signed with a secret of at least 32 bytes from an env var, valid for 15 minutes. | Beta |
 | NFR-13 | Security | Refresh tokens are random, valid for 7 days, stored only as a hash, and replaced on every refresh. | Beta |
 | NFR-14 | Security | The refresh token cookie is `HttpOnly`, `Secure`, `SameSite=Strict` and limited to path `/api/v1/auth`. | Beta |
-| NFR-15 | Security | Frontend and API share one origin. CORS allows only the origins in `FRONTEND_ORIGIN` (exact origins, never `*`, with credentials); a request from any other origin, preflight included, gets no CORS headers. | Beta |
+| NFR-15 | Security | Frontend and API share one origin. CORS allows only the deployed frontend (`https://2321648gymbuddy.vercel.app`, built in, so it is allowed even when the variable is not set) and what `FRONTEND_ORIGIN` lists (exact origins, never `*`, with credentials); a request from any other origin, preflight included, gets no CORS headers. | Beta |
 | NFR-16 | Security | Responses include security headers: `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Strict-Transport-Security`. | Beta |
 | NFR-17 | Security | Every permission check runs on the server for every request; the frontend hiding a button is never the only protection. | Beta |
 | NFR-18 | Performance | Sign up and login answer in under 1 s (password hashing is slow on purpose). | Beta |

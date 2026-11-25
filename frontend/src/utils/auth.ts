@@ -1,7 +1,7 @@
 // Role names, and which pages a logged-in person may open. Page access follows the permissions the server sends
 // (GET /users/me), so the menu always matches what the API allows. Hiding a page is not the security: the API
 // checks the same permission on every request (backend/app/rbac.py).
-import type { Me, Permission, Role } from "../types/auth"
+import type { Me, Permission, Role, User } from "../types/auth"
 import { pageLink } from "./hash"
 
 export const ROLES: { value: Role; label: string; description: string }[] = [
@@ -15,6 +15,15 @@ export const roleLabel = (role: Role) => ROLES.find((r) => r.value === role)?.la
 
 /** The Users page, or one user's details on it: #/users?user=5. */
 export const usersLink = (id: number | null = null) => pageLink("users", { user: id })
+
+/** "a Trainer", "an Admin". */
+export function aRole(role: Role): string {
+  const label = roleLabel(role)
+  return `${/^[AEIOU]/.test(label) ? "an" : "a"} ${label}`
+}
+
+/** An admin's account: other admins cannot ban it or reset its password (backend/app/rbac.py, is_admin). */
+export const isAdminAccount = (user: Pick<User, "role">) => user.role === "admin"
 
 /** True when the logged-in person's role holds this permission. */
 export const can = (user: Me | null, permission: Permission) => user?.permissions.includes(permission) ?? false
@@ -46,6 +55,8 @@ export const PAGE_TITLES = {
 export type Page = keyof typeof PAGE_TITLES
 export type ProtectedPage = Exclude<Page, "login" | "signup">
 
+const isGymMember = (u: Me) => u.plan !== null || u.permissions.length === 0
+
 /** What each page needs: the permission of the API calls it makes. */
 const PAGE_ACCESS: Record<ProtectedPage, (user: Me) => boolean> = {
   // The Dashboard shows its front desk part with overview:read and its admin part with dashboard:read.
@@ -67,10 +78,10 @@ const PAGE_ACCESS: Record<ProtectedPage, (user: Me) => boolean> = {
   // Training shows the groups the caller is in: any login. Inside a group, the buttons follow the caller's group
   // permissions (my_permissions), which the API checks again on every request.
   training: () => true,
-  // The member pages call only endpoints about the caller's own account, which any login may use, so no
-  // permission is involved. They are laid out for gym members, so they are shown to the User role.
-  membership: (u) => u.role === "user",
-  timetable: (u) => u.role === "user",
+  // The member pages call only endpoints about the caller's own account, which any login may use. They are for whoever
+  // has a membership, and for plain Users (a role with no permissions) who may still get one.
+  membership: isGymMember,
+  timetable: isGymMember,
 }
 
 export const canOpen = (user: Me, page: ProtectedPage) => PAGE_ACCESS[page](user)

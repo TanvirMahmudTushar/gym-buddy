@@ -338,7 +338,7 @@ def list_newest_bookings(session: Session, member_id: int, limit: int) -> list[d
     return _booked_classes(session, [col(ClassBooking.member_id) == member_id], newest, 0, limit)
 
 
-def cancel_booking(session: Session, class_id: int, member: User) -> None:
+def cancel_booking(session: Session, class_id: int, member: User, actor: User, client: Client) -> None:
     """Cancel a member's booking: the member themself, or staff at the front desk for them.
     A class that has started is history, so its booking can no longer be cancelled."""
     gym_class = _get(session, class_id)
@@ -347,5 +347,13 @@ def cancel_booking(session: Session, class_id: int, member: User) -> None:
     booking = session.get(ClassBooking, (class_id, member.id))
     if booking is None:
         raise BookingNotFoundError
+    activity_service.record(
+        session,
+        ActivityEvent.BOOKING_CANCEL,
+        client,
+        actor=actor,
+        target=None if actor.id == member.id else member,
+        details=f"{gym_class.name}, {utc_text(gym_class.starts_at)} UTC",
+    )
     session.delete(booking)
     session.commit()

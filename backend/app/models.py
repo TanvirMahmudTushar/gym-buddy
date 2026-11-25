@@ -269,7 +269,9 @@ class MemberBulkDeleteResult(SQLModel):
 # --- Accounts and roles ---
 
 Role = Literal["user", "trainer", "gym_manager", "admin"]
-Password = Annotated[str, StringConstraints(min_length=8, max_length=128)]
+MIN_PASSWORD_LENGTH = 8
+MAX_PASSWORD_LENGTH = 128
+Password = Annotated[str, StringConstraints(min_length=MIN_PASSWORD_LENGTH, max_length=MAX_PASSWORD_LENGTH)]
 
 
 class SignupRequest(SQLModel):
@@ -476,6 +478,8 @@ class WorkoutStats(SQLModel):
 
 class GroupStats(SQLModel):
     total: int
+    # Started in the last 7 days (rolling, from now).
+    new_last_7_days: int
 
 
 class EquipmentStats(SQLModel):
@@ -671,8 +675,12 @@ class BookedClassPage(SQLModel):
 
 
 class PasswordChange(SQLModel):
-    current_password: Annotated[str, StringConstraints(max_length=128)]
-    new_password: Password
+    """The lengths are checked in auth_service.change_password(), not here, so a refused new password is recorded as a
+    failed attempt too (a schema error would never reach the service). The limit only keeps the request small."""
+
+    current_password: Annotated[str, StringConstraints(max_length=1000)]
+    # 8 to 128 characters, and not the current password.
+    new_password: Annotated[str, StringConstraints(max_length=1000)]
 
 
 # --- Plans and payments ---
@@ -992,6 +1000,9 @@ class ActivityEvent(str, Enum):
     ANNOUNCEMENT_DELETE = "announcement_delete"
     PLAN_DELETE = "plan_delete"
     PAYMENT_VOID = "payment_void"
+    # Someone was removed from a group, or left it; a class booking was cancelled, by the member or by staff.
+    GROUP_MEMBER_REMOVE = "group_member_remove"
+    BOOKING_CANCEL = "booking_cancel"
 
 
 class ActivityLog(SQLModel, table=True):

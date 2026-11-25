@@ -13,6 +13,7 @@ export type Role = "user" | "trainer" | "gym_manager" | "admin"
 export type Permission =
   | "members:read"
   | "members:manage"
+  | "members:delete"
   | "check_ins:record"
   | "payments:manage"
   | "payments:void"
@@ -111,7 +112,7 @@ export interface AdminStats {
   check_ins: { today: number; last_7_days: number; inside_now: number; by_day: { day: string; count: number }[] }
   classes: { total: number; upcoming: number }
   workouts: { total: number; last_7_days: number; completed: number }
-  groups: { total: number }
+  groups: { total: number; new_last_7_days: number }
   equipment: { total: number; needs_attention: number; service_due: number }
 }
 

@@ -23,7 +23,8 @@ from app.models import GroupMember, User
 
 class Permission(str, Enum):
     MEMBERS_READ = "members:read"  # member list and details, waiting list, a member's visits and bookings
-    MEMBERS_MANAGE = "members:manage"  # start, edit and delete memberships; cancel a booking for a member
+    MEMBERS_MANAGE = "members:manage"  # start and edit memberships; cancel a booking for a member
+    MEMBERS_DELETE = "members:delete"  # delete a member's whole account, one or many
     CHECK_INS_RECORD = "check_ins:record"  # check members in and out; the attendance list of any day
     PAYMENTS_MANAGE = "payments:manage"  # take a payment; a member's payments and the list of all payments
     PAYMENTS_VOID = "payments:void"
@@ -78,6 +79,7 @@ ROLE_PERMISSIONS: dict[str, frozenset[Permission]] = {
     "gym_manager": _GYM_MANAGER,
     "admin": _GYM_MANAGER
     | {
+        Permission.MEMBERS_DELETE,
         Permission.PAYMENTS_VOID,
         Permission.PAYMENTS_EXPORT,
         Permission.EXPENSES_MANAGE,
@@ -109,6 +111,27 @@ def has_permission(user: User, permission: Permission) -> bool:
 def roles_with(permission: Permission) -> list[str]:
     """The roles that hold a permission, for database queries (such as every account that can teach)."""
     return [role for role, permissions in ROLE_PERMISSIONS.items() if permission in permissions]
+
+
+def is_staff(user: User) -> bool:
+    """True for a role that may do anything beyond its own account. A plain User's role holds no permissions."""
+    return bool(permissions_for(user.role))
+
+
+def is_admin(user: User) -> bool:
+    """True for an account that manages users. Admins are protected from each other (no ban, no password reset)."""
+    return has_permission(user, Permission.USERS_BAN)
+
+
+def plain_roles() -> list[str]:
+    """The roles of gym members, which hold no permissions, for database queries."""
+    return [role for role, permissions in ROLE_PERMISSIONS.items() if not permissions]
+
+
+def may_edit_account(actor: User, account: User) -> bool:
+    """Whoever manages members may edit a plain User's membership and details. A staff member's are for admins only,
+    so a gym manager cannot change an admin's account."""
+    return is_admin(actor) or not is_staff(account)
 
 
 def is_owner(user: User, owner_id: int | None) -> bool:
@@ -143,9 +166,10 @@ class GroupPermission(str, Enum):
 
     READ = "read"  # see the group, its members and its workouts
     CREATE = "create"  # add a workout to the group (group_member.can_create)
-    UPDATE = "update"  # edit or delete the group's workouts (group_member.can_update)
+    UPDATE = "update"  # edit the group's workouts (group_member.can_update)
     ASSIGN = "assign"  # assign a group workout to someone in the group (group_member.can_assign)
-    MANAGE = "manage"  # rename or delete the group; add, remove and set the permissions of members (owner only)
+    # Owner only: delete a workout, rename or delete the group, and add, remove and set the permissions of members.
+    MANAGE = "manage"
 
 
 def group_permissions(user: User, owner_id: int, member: GroupMember | None) -> frozenset[GroupPermission]:

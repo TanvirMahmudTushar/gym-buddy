@@ -25,6 +25,8 @@ export const EVENTS: { value: ActivityEvent; label: string; look?: "bad" | "info
   { value: "announcement_delete", label: "Announcement deleted", look: "info" },
   { value: "plan_delete", label: "Plan deleted", look: "info" },
   { value: "expense_delete", label: "Expense deleted", look: "info" },
+  { value: "group_member_remove", label: "Left a group", look: "info" },
+  { value: "booking_cancel", label: "Booking cancelled" },
   { value: "payment_void", label: "Payment voided", look: "info" },
   { value: "export", label: "Export", look: "info" },
 ]
