@@ -7,7 +7,7 @@ from sqlmodel import Session, col, func, select
 from app.models import ActivityEvent, Expense, ExpenseCreate, ExpenseFilter, User
 from app.request_info import Client
 from app.services import activity_service
-from app.services.csv_export import describe_filters, to_csv
+from app.services.csv_export import EXPORT_LIMIT, describe_filters, to_csv
 from app.services.search import contains_any
 
 Recorder = aliased(User)
@@ -96,8 +96,8 @@ def delete_expense(session: Session, expense_id: int, admin: User, client: Clien
 
 
 def export_csv(session: Session, f: ExpenseFilter, admin: User, client: Client) -> str:
-    """Every matching expense, in the list's order. The download is written to the activity log."""
-    rows = session.exec(_with_recorder(_conditions(f))).all()
+    """The matching expenses, in the list's order, up to EXPORT_LIMIT. The download is written to the activity log."""
+    rows = session.exec(_with_recorder(_conditions(f)).limit(EXPORT_LIMIT)).all()
     text = to_csv(
         CSV_HEADER,
         ([e.id, e.spent_on.isoformat(), e.category, e.amount, e.description, name] for e, name in rows),

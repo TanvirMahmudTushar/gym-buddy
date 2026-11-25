@@ -43,7 +43,7 @@ def create_expense(body: ExpenseCreate, session: SessionDep, manager: Manager) -
     responses={200: {"content": {"text/csv": {}}, "description": "The matching expenses as CSV"}},
 )
 def export_expenses(session: SessionDep, filters: Filters, manager: Manager, client: ClientDep) -> Response:
-    """The same filters and order as the list, every matching expense. The download is logged."""
+    """The same filters and order as the list, up to 10,000 expenses. The download is logged."""
     filename = f"expenses-{gym_today().isoformat()}.csv"
     return Response(
         content=expense_service.export_csv(session, filters, manager, client),

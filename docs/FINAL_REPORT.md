@@ -303,7 +303,7 @@ sequenceDiagram
 
 - Every request checks that its session is still active, so logging out, a password change, an admin reset, "log out everywhere" and a ban take effect on the very next request, not after 5 minutes.
 - A replaced refresh token that comes back more than 30 seconds later can only be a copy, so the whole session is ended.
-- After 5 wrong passwords in a row, on Log in or on a password change, an account is locked for 15 minutes (`429` with `Retry-After`). The count is kept in the database because serverless functions share no memory.
+- After 5 wrong passwords in a row, on Log in or on a password change, an account is locked for 15 minutes (`429` with `Retry-After`); an email with no account is blocked the same way, so the answer does not show which emails exist. The count is kept in the database because serverless functions share no memory.
 
 ### 5.7 Deployment and configuration
 
@@ -321,7 +321,7 @@ On start the backend creates any missing table, adds any missing column and give
 
 | File | What it proves |
 |---|---|
-| `test_login.py` | Correct login and cookie flags; wrong password and unknown email look the same; the 5th wrong password locks the account, even against the right password; the failed login is logged without the password |
+| `test_login.py` | Correct login and cookie flags; wrong password and unknown email look the same; the 5th wrong password locks the account (or the unknown email), even against the right password; the failed login is logged without the password |
 | `test_tokens.py` | Missing, tampered, forged and expired tokens get `401`; a token stops working after logout; a banned user gets `403` |
 | `test_refresh.py` | Rotation, the 30-second grace period, reuse ending the whole session, and refresh refused after logout or a ban |
 | `test_devices.py` | Login devices follow the refresh tokens: a refresh keeps the device, an expired token or a logout removes it, and a new login on the same browser replaces it |

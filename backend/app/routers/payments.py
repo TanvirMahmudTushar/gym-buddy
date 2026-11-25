@@ -39,13 +39,14 @@ def list_payments(
     responses={200: {"content": {"text/csv": {}}, "description": "The matching payments as CSV"}},
 )
 def export_payments(session: SessionDep, filters: Filters, exporter: Exporter, client: ClientDep) -> Response:
-    """Needs payments:export (admins). The same filters as the list, every matching payment, newest first.
+    """Needs payments:export (admins). The same filters as the list, up to 10,000 payments, newest first.
     The download is written to the activity log."""
     filename = f"payments-{gym_today().isoformat()}.csv"
     return Response(
         content=payment_service.export_csv(session, filters, exporter, client),
         media_type="text/csv; charset=utf-8",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        # Names and amounts: no cache on the way may keep a copy.
+        headers={"Content-Disposition": f'attachment; filename="{filename}"', "Cache-Control": "no-store"},
     )
 
 

@@ -20,7 +20,7 @@ from app.models import (
 )
 from app.request_info import Client
 from app.services import activity_service, group_service
-from app.services.csv_export import describe_filters, to_csv, utc_text
+from app.services.csv_export import EXPORT_LIMIT, describe_filters, to_csv, utc_text
 from app.services.search import contains_any
 
 Owner = aliased(User)
@@ -113,8 +113,8 @@ def list_workouts(session: Session, f: ModerationWorkoutFilter, offset: int, lim
 
 
 def export_workouts_csv(session: Session, f: ModerationWorkoutFilter, admin: User, client: Client) -> str:
-    """The same rows and order as the list with the same filters. The download is logged."""
-    rows = session.exec(_workouts(_workout_conditions(f))).all()
+    """The same rows and order as the list with the same filters, up to EXPORT_LIMIT. The download is logged."""
+    rows = session.exec(_workouts(_workout_conditions(f)).limit(EXPORT_LIMIT)).all()
     text = to_csv(
         WORKOUTS_CSV_HEADER,
         (
@@ -225,7 +225,7 @@ def list_groups(session: Session, f: ModerationGroupFilter, offset: int, limit: 
 
 
 def export_groups_csv(session: Session, f: ModerationGroupFilter, admin: User, client: Client) -> str:
-    rows = session.exec(_groups(_group_conditions(f))).all()
+    rows = session.exec(_groups(_group_conditions(f)).limit(EXPORT_LIMIT)).all()
     text = to_csv(
         GROUPS_CSV_HEADER,
         (

@@ -290,7 +290,7 @@ class UserRead(SQLModel):
     email: str
     name: str
     role: Role
-    created_at: datetime
+    created_at: UtcDateTime
     # True after an admin reset the password: the app asks for a new one before anything else.
     must_change_password: bool
 
@@ -340,7 +340,7 @@ class AdminUserRead(UserRead):
     """What an admin sees about a user: the ban status and their membership as well."""
 
     is_banned: bool
-    banned_at: datetime | None
+    banned_at: UtcDateTime | None
     ban_reason: str | None
     # The membership: plan is None for an account without one.
     plan: Plan | None

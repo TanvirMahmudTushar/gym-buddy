@@ -6,6 +6,9 @@ from datetime import datetime
 
 from app.models import as_utc
 
+# Every CSV holds at most this many rows (newest first), so one download cannot outgrow a serverless function.
+EXPORT_LIMIT = 10_000
+
 # A cell starting with one of these could run as a formula when the CSV is opened in a spreadsheet.
 _FORMULA_START = ("=", "+", "-", "@", "\t", "\r")
 

@@ -74,7 +74,7 @@ def list_users(
     responses={200: {"content": {"text/csv": {}}, "description": "The matching users as CSV"}},
 )
 def export_users(session: SessionDep, filters: UserFilters, admin: Exporter, client: ClientDep) -> Response:
-    """Needs users:export. The same filters and order as the list, every matching user. The download is logged."""
+    """Needs users:export. The same filters and order as the list, up to 10,000 users. The download is logged."""
     filename = f"users-{gym_today().isoformat()}.csv"
     return Response(
         content=user_service.export_csv(session, filters, admin, client),

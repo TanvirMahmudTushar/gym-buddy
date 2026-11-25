@@ -9,6 +9,7 @@ from app.models import (
     MAX_PASSWORD_LENGTH,
     MIN_PASSWORD_LENGTH,
     ActivityEvent,
+    ActivityLog,
     LoginRequest,
     SignupRequest,
     User,
@@ -25,6 +26,8 @@ class EmailTakenError(Exception):
 
 
 ACCOUNT_BANNED_MESSAGE = "Account banned"
+# The activity row a login with an email that has no account leaves; the lockout for such emails counts these rows.
+NO_ACCOUNT_REASON = "No account has this email"
 # The answer to every request but GET /users/me and POST /users/me/password after an admin reset the password.
 MUST_CHANGE_PASSWORD_MESSAGE = "Choose a new password first"
 
@@ -124,9 +127,49 @@ def _count_wrong_password(session: Session, user: User, client: Client) -> None:
         raise AccountLockedError(as_utc(user.locked_until))
 
 
+def _unknown_email_lock(session: Session, email: str) -> datetime | None:
+    """An email with no account has no row to count on, so its wrong attempts are counted in the activity log: the
+    same 5 in 15 minutes as an account has. Without this, only a real account would ever answer 429, and the answer
+    would tell a stranger which emails have an account. Returns when the block ends, or None if it is not blocked."""
+    recent = session.exec(
+        select(ActivityLog.created_at)
+        .where(
+            col(ActivityLog.event) == ActivityEvent.LOGIN_FAILED.value,
+            col(ActivityLog.actor_email) == email,
+            col(ActivityLog.details) == NO_ACCOUNT_REASON,
+            col(ActivityLog.created_at) >= utc_now() - LOCKOUT,
+        )
+        .order_by(col(ActivityLog.created_at).desc())
+        .limit(MAX_FAILED_LOGINS)
+    ).all()
+    # Like an account, the block ends LOCKOUT after the 5th wrong attempt, and attempts made while blocked do not extend it.
+    return as_utc(recent[0]) + LOCKOUT if len(recent) >= MAX_FAILED_LOGINS else None
+
+
+def _count_unknown_email(session: Session, email: str, client: Client) -> None:
+    """The caller has added its activity row; this saves it and, on the 5th in a row, records the lockout."""
+    session.commit()
+    until = _unknown_email_lock(session, email)
+    if until is not None:
+        minutes = int(LOCKOUT.total_seconds() // 60)
+        activity_service.record(
+            session,
+            ActivityEvent.ACCOUNT_LOCKED,
+            client,
+            target_email=email,
+            details=f"{MAX_FAILED_LOGINS} wrong passwords in a row; logins blocked for {minutes} minutes",
+        )
+        session.commit()
+        raise AccountLockedError(until)
+
+
 def authenticate(session: Session, data: LoginRequest, client: Client) -> User:
     email = data.email.lower()
     user = _find_by_email(session, email)
+    if user is None and (until := _unknown_email_lock(session, email)) is not None:
+        _log_failed_login(session, client, email, None, "Account is locked")
+        session.commit()
+        raise AccountLockedError(until)
     # A locked account is refused before the password is checked, so even the right password waits.
     if user is not None and (until := _locked_until(user)) is not None:
         _log_failed_login(session, client, email, user, "Account is locked")
@@ -136,8 +179,8 @@ def authenticate(session: Session, data: LoginRequest, client: Client) -> User:
     password_ok = verify_password(data.password, user.password_hash if user else None)
     if user is None or not password_ok:
         if user is None:
-            _log_failed_login(session, client, email, None, "No account has this email")
-            session.commit()
+            _log_failed_login(session, client, email, None, NO_ACCOUNT_REASON)
+            _count_unknown_email(session, email, client)
         else:
             _log_failed_login(session, client, email, user, "Wrong password")
             _count_wrong_password(session, user, client)

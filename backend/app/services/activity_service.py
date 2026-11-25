@@ -11,11 +11,9 @@ from sqlmodel import Session, col, func, or_, select
 
 from app.models import ActivityEvent, ActivityFilter, ActivityLog, User, start_of_day, utc_now
 from app.request_info import Client
-from app.services.csv_export import describe_filters, to_csv, utc_text
+from app.services.csv_export import EXPORT_LIMIT, describe_filters, to_csv, utc_text
 from app.services.search import contains_any
 
-# The CSV holds at most this many rows (newest first), so one download cannot outgrow a serverless function.
-EXPORT_LIMIT = 10_000
 # How many addresses and accounts the Security page lists.
 TOP_GROUPS = 10
 # What the Security page counts as a hostile request. A lockout is only the result of failed logins, so it is not one.
