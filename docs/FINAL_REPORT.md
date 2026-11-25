@@ -45,7 +45,7 @@ The mid-term MVP was a member CRUD API with a one-page front end. The final rele
 | Front end | 22 pages, 62 components, 18 service modules |
 | Tests | 113 automated backend tests (pytest), passing on SQLite and PostgreSQL |
 | GitHub | One issue and one pull request into `main` for each piece of work, each from its own branch. The gym management rework (#76) was committed to `main` directly |
-| Code | about 7,300 lines of Python in the backend and 9,300 lines of TypeScript in the front end |
+| Code | about 7,400 lines of Python in the backend and 9,300 lines of TypeScript in the front end |
 
 ## 2. How to test the live system
 
@@ -79,7 +79,7 @@ Gym staff need one reliable place to keep members, see who has a valid membershi
 | Goal | Status |
 |---|---|
 | G-1 to G-3: a documented REST API for member CRUD, backed by a database | Done in the MVP; kept in the final under staff permissions |
-| G-4: deployed on Vercel | Done. Production is deployed with `vercel --prod` from an up-to-date `main` (the Vercel project is not connected to GitHub) |
+| G-4: deployed on Vercel | Done. The Vercel project is connected to GitHub, so a push to `main` deploys production |
 | G-5: members have accounts and see only their own data | Done: every "my" endpoint takes the user from the token, never from the request |
 | G-6: access controlled by role | Done, and extended from the planned two roles to four, with permissions instead of role checks |
 | G-7: class bookings that never exceed capacity | Done, including two people booking the last place at the same moment |
@@ -189,7 +189,7 @@ The server never asks "is this an admin?". Every protected endpoint names a perm
 | Maintainability | NFR-08, NFR-24 | Routers → services → database layers; 113 automated tests |
 | Secrets | NFR-05 | Only in Vercel environment variables; `backend/.env.example` holds placeholders only |
 
-Two NFRs were changed during the project and are recorded in the SRS: schema changes are applied by the app on start rather than by Alembic (NFR-19, see section 8), and production is deployed with `vercel --prod` rather than on every push (NFR-10).
+One NFR was changed during the project and is recorded in the SRS: schema changes are applied by the app on start rather than by Alembic (NFR-19, see section 8).
 
 ## 5. Technical design (TDD)
 
@@ -313,7 +313,7 @@ sequenceDiagram
 | `JWT_SECRET`, `PASSWORD_PEPPER` | 32+ byte secrets, required on Vercel; the pepper must never change once set |
 | `FRONTEND_ORIGIN` | Optional on Vercel: another origin CORS answers besides the deployed frontend, `https://2321648gymbuddy.vercel.app`, which is always allowed |
 
-On start the backend creates any missing table, adds any missing column and gives a new database its first plans, keeping existing data, so an older database upgrades itself. Production is deployed with `vercel --prod` from an up-to-date `main`.
+On start the backend creates any missing table, adds any missing column and gives a new database its first plans, keeping existing data, so an older database upgrades itself. Vercel deploys production on every push to `main` and a preview of every other branch, and GitHub shows the result on the commit.
 
 ## 6. Testing and quality
 
@@ -327,14 +327,14 @@ On start the backend creates any missing table, adds any missing column and give
 | `test_rbac.py` | Every admin route is `403` for the other three roles and `401` for a visitor; a role change applies with the same token; another person's session is `404` and member record `403`; members cannot start a group; a group and its workouts are `404` to outsiders, even an admin; group permissions; admins cannot ban each other |
 | `test_gym.py` | Plans (add, retire, delete rules), a membership paid in the same step, check-in and check-out, class attendance (own class only, not a day before), a trainer's own clients only, marking a workout done (assignee only), equipment services and faults, expenses and net income, a user's record counts |
 | `test_robustness.py` | Ids, offsets and dates no column can hold are `422`, never `500`; a validation error is one sentence without the password; no class in the past; days are the gym's days; every delete and void is logged; a user's newest records; moderation filters; logout with a just-replaced token |
-| `test_rules.py` | The final spec's rules: every endpoint but sign in and the health check is `401` for a visitor; every staff and admin endpoint is `403` for a plain user; nobody gives themself a role; role names are compared only in `rbac.py`; only a group's owner deletes a workout; gym managers cannot edit staff accounts or delete accounts; every failed password change is recorded and guessing is locked out; leaving, removing and cancelling are logged; the deployed frontend is always allowed by CORS |
+| `test_rules.py` | The final spec's rules: every endpoint but sign in, refresh, log out and the health check is `401` for a visitor; every staff and admin endpoint is `403` for a plain user; nobody gives themself a role; role names are compared only in `rbac.py`; only a group's owner deletes a workout; gym managers cannot edit staff accounts or delete accounts; every failed password change is recorded and guessing is locked out; leaving, removing and cancelling are logged; the deployed frontend is always allowed by CORS |
 | `test_startup.py` | A normal start and the login check are one query each; an older schema is filled in again; a token does not open another account's session |
-| `test_cors.py` | Only `FRONTEND_ORIGIN` gets CORS headers; look-alike origins and `null` get none; `*` is never sent |
+| `test_cors.py` | Only an allowed origin gets CORS headers; look-alike origins and `null` get none; `*` is never sent |
 | `test_config.py` | Settings loading and the `FRONTEND_ORIGIN` rules |
 
 Run with `pip install -r requirements-dev.txt` and `pytest` in `backend/`.
 
-**End-to-end checks.** A browser run (Playwright, Chrome, against the app on PostgreSQL) drives 24 flows as every role: sign up, reload and logout with the old cookie refused, lockout, tampered and expired tokens, silent refresh, a server outage, pages and API calls denied by RBAC, a ban, a role change, a reset and a revoke while the person is logged in, group permissions for an owner, three kinds of members and an outsider, members, classes, payments, equipment, moderation, filters, CSV contents, deep links and a phone screen, with no console errors. The API was also fuzzed from its OpenAPI schema (9,571 requests on PostgreSQL): the first run found 40 ways to get a `500` from ids, offsets or text the database cannot hold, which are now `422`. The demo data script doubles as a smoke test: it drives sign-up, roles, memberships, payments, check-ins and check-outs, classes, bookings, announcements, equipment, expenses, the training group and its permissions through the public API and stops at the first unexpected answer. Its results were then checked by role: the right landing page and permissions for each account, `403` for a group member editing without permission, `404` for an outsider, and the Dashboard numbers matching their lists.
+**End-to-end checks.** A browser run (Playwright, Chrome, against the app on PostgreSQL) drives 24 flows as every role: sign up, reload and logout with the old cookie refused, lockout, tampered and expired tokens, silent refresh, a server outage, pages and API calls denied by RBAC, a ban, a role change, a reset and a revoke while the person is logged in, group permissions for an owner, three kinds of members and an outsider, members, classes, payments, equipment, moderation, filters, CSV contents, deep links and a phone screen, with no console errors. The API was also fuzzed from its OpenAPI schema (9,579 requests on PostgreSQL): the first run found 40 ways to get a `500` from ids, offsets or text the database cannot hold, which are now `422`. The demo data script doubles as a smoke test: it drives sign-up, roles, memberships, payments, check-ins and check-outs, classes, bookings, announcements, equipment, expenses, the training group and its permissions through the public API and stops at the first unexpected answer. Its results were then checked by role: the right landing page and permissions for each account, `403` for a group member editing without permission, `404` for an outsider, and the Dashboard numbers matching their lists.
 
 **Checks on the live site.** After a deployment the site is checked without logging in (the pages, reloads, deep links such as `/members`, the browser console, the API's `401` answers, CORS and the security headers), and the deployed script files are compared with a build of `main`.
 
@@ -356,8 +356,9 @@ Work went through GitHub issues and pull requests, one issue per feature, with o
 | Gym operations | 20 – 21 Nov | #44 – #58 | Lockout and headers, connected pages, bookings and renewals, Overview, password reset, trainers, announcements, profile details |
 | Security and admin | 21 – 22 Nov | #67 – #74 | Refresh sessions, the RBAC module, activity log, workouts and groups, admin user tools, moderation, CORS allowlist and the test suite |
 | Gym management | 25 Nov | Issue #76, commit `f4554bb` | Plans, attendance, class attendance, personal trainers and clients, equipment, expenses and net income, the sidebar; the private workout diary and the separate Overview and Moderation pages removed |
+| Speed | 25 Nov | #77 | Reused database connections, a one-query login check, combined Dashboard counts and a one-query start |
 | Robustness and design | 25 Nov | #79 | Server errors found by fuzzing, the gym's day, session handling, fuller activity log and user details, one set of shared interface parts |
-| Speed | 25 Nov | Issue #75 | Reused database connections, a one-query login check, combined Dashboard counts and a one-query start |
+| Final rules | 25 Nov | #81, #83 | Every role rule in one module, owner-only workout deletes, admin-only account deletes, lockout on password changes, CORS always allowing the deployed frontend, `test_rules.py`; a correction of `vercel.json` |
 
 The one point of mid-term feedback, on the backend's folder structure, was the first thing fixed in the final phase (PR #22).
 
@@ -376,11 +377,12 @@ The one point of mid-term feedback, on the backend's folder structure, was the f
 | **Private by default** | A training group someone is not in answers `404`, not `403`, so ids do not reveal what exists. Admins moderate through separate lists that can delete but never edit |
 | **Gym management, not a fitness diary** | The first version let anyone keep a private workout diary and start a social group. Neither helped run a gym, so the diary was removed, groups became training groups that trainers and staff run for members, and the time went into what a gym needs: plans, attendance, trainers' clients, equipment and expenses. The per-group permissions stayed as they were |
 | **Retiring a plan instead of deleting it** | Members and payments hold a plan's code. Deleting a used plan would leave them without a name, so a used plan can only be retired: it is not offered again, and old records still read correctly |
+| **A deployment refused** (PR #83) | PR #81 put a block in `vercel.json` twice, and Vercel refused the file although every test and the build passed, because neither reads it. The last good version stayed live. The copy was removed, and the file was checked against Vercel's schema; the Vercel status on a branch shows such a failure before a merge |
 | **Safe exports** | CSV cells that start with `=`, `+`, `-` or `@` get a leading `'`, so a name cannot run as a spreadsheet formula, and every export is written to the activity log |
 
 ## 9. Limitations and future work
 
-- **CI:** the tests run locally before each merge. A GitHub Actions job running `pytest` on every pull request, and connecting Vercel to GitHub so `main` deploys by itself, are the next steps.
+- **CI:** the tests run locally before each merge. A GitHub Actions job running `pytest` and `npm run build` on every pull request is the next step. Deployment is already automatic.
 - **Migrations:** adopt Alembic before the first change that renames or removes a column.
 - **Front-end tests in the repository:** the browser run in section 6 is a local script; adding it to CI would catch regressions before each merge.
 - **Notifications:** renewal reminders and class changes by email or SMS.
