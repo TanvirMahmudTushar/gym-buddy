@@ -25,6 +25,8 @@ export type ActivityEvent =
   | "announcement_delete"
   | "plan_delete"
   | "payment_void"
+  | "group_member_remove"
+  | "booking_cancel"
 
 /** One security event: who did it, to which account, from where and when. */
 export interface ActivityEntry {

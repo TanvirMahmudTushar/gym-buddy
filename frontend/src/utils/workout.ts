@@ -10,7 +10,7 @@ export const canInGroup = (group: Group | null, permission: GroupPermission) => 
 /** The three permissions the owner ticks for each member, with how the members table names them. */
 export const MEMBER_FLAGS: { flag: MemberFlag; label: string; description: string }[] = [
   { flag: "can_create", label: "Add", description: "Add workouts to the group" },
-  { flag: "can_update", label: "Edit", description: "Edit and delete the group's workouts" },
+  { flag: "can_update", label: "Edit", description: "Edit the group's workouts" },
   { flag: "can_assign", label: "Assign", description: "Assign workouts to people in the group" },
 ]
 

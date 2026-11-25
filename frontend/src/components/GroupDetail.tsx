@@ -137,6 +137,7 @@ export default function GroupDetail({ groupId }: { groupId: number }) {
               workout={w}
               meId={user?.id ?? 0}
               canEdit={canInGroup(group, "update")}
+              canDelete={isOwner}
               canAssign={canAssign}
               members={members}
               onChanged={(updated) => list.replace((items) => items.map((x) => (x.id === updated.id ? updated : x)))}

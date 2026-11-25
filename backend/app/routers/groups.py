@@ -90,7 +90,9 @@ def update_member(
 
 
 @router.delete("/{group_id}/members/{user_id}", status_code=204)
-def remove_member(group_id: RowId, user_id: RowId, user: CurrentUser, session: SessionDep) -> None:
+def remove_member(
+    group_id: RowId, user_id: RowId, user: CurrentUser, session: SessionDep, client: ClientDep
+) -> None:
     """The owner removes a member, or a member leaves with their own id. 403 for a member removing someone else;
     400 for the owner (delete the group instead). Workouts assigned to that person become unassigned."""
-    group_service.remove_member(session, user, group_id, user_id)
+    group_service.remove_member(session, user, group_id, user_id, client)

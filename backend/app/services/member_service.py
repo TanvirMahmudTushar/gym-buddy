@@ -5,6 +5,7 @@ from typing import Literal
 
 from sqlmodel import Session, col, delete, func, select, update
 
+from app import rbac
 from app.models import (
     ActivityEvent,
     ActivityLog,
@@ -48,6 +49,10 @@ class AlreadyMemberError(Exception):
     """That account already has a membership."""
 
 
+class StaffAccountError(Exception):
+    """A gym manager tried to start or edit the membership of a staff account, which only an admin may."""
+
+
 class NoMembershipError(Exception):
     """The logged-in user has no membership yet."""
 
@@ -88,6 +93,7 @@ def start_membership(session: Session, data: MemberCreate, recorded_by: User) ->
         raise AccountNotFoundError(data.email)
     if user.plan is not None:
         raise AlreadyMemberError(user.id)
+    _check_editable(recorded_by, user)
     plan = plan_service.get_offered(session, data.plan)
     if data.trainer_id is not None:
         trainer_service.check_trainer(session, data.trainer_id)
@@ -165,7 +171,7 @@ def list_members(
 
 
 # Accounts that signed up as a User but have no membership yet: the people to start one for.
-WAITING = [col(User.role) == "user", col(User.plan).is_(None)]
+WAITING = [col(User.role).in_(rbac.plain_roles()), col(User.plan).is_(None)]
 
 
 def list_waiting(session: Session, offset: int, limit: int, q: str | None = None) -> tuple[list[User], int]:
@@ -178,10 +184,16 @@ def list_waiting(session: Session, offset: int, limit: int, q: str | None = None
     return list(session.exec(query.offset(offset).limit(limit)).all()), total
 
 
-def update_member(session: Session, member_id: int, changes: dict) -> User:
+def _check_editable(actor: User, account: User) -> None:
+    if not rbac.may_edit_account(actor, account):
+        raise StaffAccountError(account.id)
+
+
+def update_member(session: Session, member_id: int, changes: dict, actor: User) -> User:
     """Apply only the given fields. A later expires_on renews; is_frozen true / false freezes / unfreezes.
     The contact and safety details follow the same rules as the member's own edits (profile_service)."""
     member = get_member(session, member_id)
+    _check_editable(actor, member)
     if "expires_on" in changes and changes["expires_on"] < member.joined_on:
         raise InvalidExpiryError("expires_on must be on or after joined_on")
     profile_service.check_emergency_contact(member, changes)
@@ -199,7 +211,7 @@ def update_member(session: Session, member_id: int, changes: dict) -> User:
 
 def _check_deletable(member: User) -> None:
     # Staff accounts are never deleted here (this also stops anyone deleting themself): an admin changes the role first.
-    if member.role != "user":
+    if rbac.is_staff(member):
         raise CannotDeleteAccountError(f"{member.name} is staff; only a User's account can be deleted here")
 
 

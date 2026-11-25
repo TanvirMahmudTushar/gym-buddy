@@ -1,9 +1,11 @@
 import { useCallback, useMemo, useState } from "react"
+import { useAuth } from "../context/AuthContext"
 import { usePlans } from "../context/PlansContext"
 import { usePagedList } from "../hooks/usePagedList"
 import { useSelection } from "../hooks/useSelection"
 import { deleteMembers, listMembers } from "../services/memberService"
 import type { MemberFilter } from "../types/member"
+import { can } from "../utils/auth"
 import { expiresSoonNote, memberStatus, membersLink } from "../utils/member"
 import { formatDate } from "../utils/time"
 import Alert from "./Alert"
@@ -22,6 +24,9 @@ interface Props {
 // The members, newest first, with the search and the status filter. A name opens the member.
 export default function MemberTable({ status, q, empty }: Props) {
   const { planLabel } = usePlans()
+  const { user } = useAuth()
+  // Deleting accounts is for admins, so nobody else gets the tick boxes.
+  const canDelete = can(user, "members:delete")
   const filters = useMemo(() => ({ status, q }), [status, q])
   const [reloadKey, setReloadKey] = useState(0)
   const list = usePagedList(listMembers, filters, reloadKey)
@@ -48,7 +53,7 @@ export default function MemberTable({ status, q, empty }: Props) {
           <table>
             <thead>
               <tr>
-                <TickAll selection={selection} label="Select all members shown" />
+                {canDelete && <TickAll selection={selection} label="Select all members shown" />}
                 <th>Member</th>
                 <th>Phone</th>
                 <th>Plan</th>
@@ -60,9 +65,11 @@ export default function MemberTable({ status, q, empty }: Props) {
             <tbody>
               {list.items.map((m) => (
                 <tr key={m.id}>
-                  <td className="tick" data-label="Select">
-                    <input type="checkbox" aria-label={`Select ${m.name}`} checked={selection.has(m.id)} onChange={() => selection.toggle(m.id)} />
-                  </td>
+                  {canDelete && (
+                    <td className="tick" data-label="Select">
+                      <input type="checkbox" aria-label={`Select ${m.name}`} checked={selection.has(m.id)} onChange={() => selection.toggle(m.id)} />
+                    </td>
+                  )}
                   <td className="name">
                     <a href={membersLink({ member: m.id })}>{m.name}</a>
                     <span className="hint">{m.email}</span>

@@ -164,8 +164,8 @@ def complete_workout(session: Session, user: User, workout_id: int, done: bool) 
 
 
 def delete_workout(session: Session, user: User, workout_id: int, client: Client) -> None:
-    """Deleting counts as editing: it needs the update permission."""
-    workout = _access(session, user, workout_id, GroupPermission.UPDATE)
+    """Only the group's owner, whoever added the workout (an admin can also, through moderation)."""
+    workout = _access(session, user, workout_id, GroupPermission.MANAGE)
     group = session.get(TrainingGroup, workout.group_id)
     activity_service.record(
         session,

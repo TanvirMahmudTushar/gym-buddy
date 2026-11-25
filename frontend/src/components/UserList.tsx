@@ -6,7 +6,7 @@ import { usePagedList } from "../hooks/usePagedList"
 import { useSelection } from "../hooks/useSelection"
 import { exportUsersCsv, listUsers } from "../services/adminService"
 import type { AdminUser, Role, UserFilters } from "../types/auth"
-import { ROLES, can, usersLink } from "../utils/auth"
+import { ROLES, can, isAdminAccount, usersLink } from "../utils/auth"
 import { hashParams } from "../utils/hash"
 import { memberStatus, membersLink } from "../utils/member"
 import { count } from "../utils/text"
@@ -170,7 +170,7 @@ export default function UserList() {
                       </td>
                       <td className="act">
                         {/* Admins cannot be banned: change their role first. */}
-                        {!isMe && u.role !== "admin" && (
+                        {!isMe && !isAdminAccount(u) && (
                           <div className="actions">
                             {u.is_banned ? (
                               <button type="button" className="small" onClick={() => setAction({ kind: "unban", user: u })}>

@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from "react"
+import { useAuth } from "../context/AuthContext"
 import { usePlans } from "../context/PlansContext"
 import { useSave } from "../hooks/useSave"
 import { ApiError } from "../services/api"
 import { cancelMemberBooking, deleteMember, getMember, listMemberBookings, updateMember } from "../services/memberService"
 import type { Member, MemberUpdate } from "../types/member"
+import { can } from "../utils/auth"
 import { expiresSoonNote, memberStatus, membersLink } from "../utils/member"
 import { birthDateText, emergencyContactText } from "../utils/profile"
 import { errorText } from "../utils/text"
@@ -23,6 +25,7 @@ const BACK = { href: membersLink(), label: "All members" }
 // One member: the membership and contact details, with their visits, bookings and payments.
 export default function MemberDetail({ memberId }: { memberId: number }) {
   const { planLabel } = usePlans()
+  const { user } = useAuth()
   const [member, setMember] = useState<Member | null>(null)
   const [loadError, setLoadError] = useState("")
   const [dialog, setDialog] = useState<"edit" | "delete" | null>(null)
@@ -72,9 +75,11 @@ export default function MemberDetail({ memberId }: { memberId: number }) {
         <button type="button" onClick={() => save({ is_frozen: !member.is_frozen })} disabled={saving}>
           {member.is_frozen ? "Unfreeze" : "Freeze"}
         </button>
-        <button type="button" className="danger" onClick={() => setDialog("delete")}>
-          Delete
-        </button>
+        {can(user, "members:delete") && (
+          <button type="button" className="danger" onClick={() => setDialog("delete")}>
+            Delete
+          </button>
+        )}
       </PageHeader>
       {dialog === null && <Alert>{error}</Alert>}
       <div className="split">

@@ -34,7 +34,7 @@ export default function TrainingPage() {
 
   const allowed = TABS.filter((t) => t.needs(user))
   // Members come to see their workouts; everyone else comes to run groups.
-  const home: TrainingTab = user.role === "user" ? "assigned" : "groups"
+  const home: TrainingTab = can(user, "groups:create") ? "groups" : "assigned"
   const tab = allowed.find((t) => t.tab === view.tab)?.tab ?? home
 
   const chips = (

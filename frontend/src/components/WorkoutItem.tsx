@@ -14,8 +14,10 @@ interface Props {
   workout: Workout
   /** My account id: only the person a workout is assigned to marks it done. */
   meId: number
-  /** Edit and Delete: the update permission in its group. */
+  /** Edit: the update permission in its group. */
   canEdit?: boolean
+  /** Delete: only the group's owner. */
+  canDelete?: boolean
   /** The Assign to list: the assign permission in its group. */
   canAssign?: boolean
   /** The people in the group, for the Assign to list. */
@@ -27,7 +29,7 @@ interface Props {
 }
 
 // One workout: title, date and notes, who added it and who it is for, and the buttons my permissions allow.
-export default function WorkoutItem({ workout: w, meId, canEdit = false, canAssign = false, members = [], showGroup = false, onChanged, onDeleted }: Props) {
+export default function WorkoutItem({ workout: w, meId, canEdit = false, canDelete = false, canAssign = false, members = [], showGroup = false, onChanged, onDeleted }: Props) {
   const [dialog, setDialog] = useState<"edit" | "delete" | null>(null)
   const { saving, error, setError, run } = useSave()
 
@@ -89,7 +91,7 @@ export default function WorkoutItem({ workout: w, meId, canEdit = false, canAssi
         </div>
       )}
       {dialog === null && <Alert>{error}</Alert>}
-      {(canEdit || isMine) && (
+      {(canEdit || canDelete || isMine) && (
         <div className="actions">
           {isMine && (
             <button type="button" className={w.completed_at ? "small" : "small primary"} onClick={() => mark(!w.completed_at)} disabled={saving}>
@@ -97,14 +99,14 @@ export default function WorkoutItem({ workout: w, meId, canEdit = false, canAssi
             </button>
           )}
           {canEdit && (
-            <>
-              <button type="button" className="small" onClick={() => setDialog("edit")} disabled={saving}>
-                Edit
-              </button>
-              <button type="button" className="small danger" onClick={() => setDialog("delete")} disabled={saving}>
-                Delete
-              </button>
-            </>
+            <button type="button" className="small" onClick={() => setDialog("edit")} disabled={saving}>
+              Edit
+            </button>
+          )}
+          {canDelete && (
+            <button type="button" className="small danger" onClick={() => setDialog("delete")} disabled={saving}>
+              Delete
+            </button>
           )}
         </div>
       )}

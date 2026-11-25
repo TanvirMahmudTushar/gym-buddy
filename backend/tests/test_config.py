@@ -58,6 +58,6 @@ def test_default_origins(monkeypatch):
     monkeypatch.delenv("FRONTEND_ORIGIN")
     monkeypatch.delenv("VERCEL", raising=False)
     assert config.frontend_origins() == [config.LOCAL_FRONTEND_ORIGIN]
-    # On Vercel the app and the API share one origin, so no other origin is allowed unless FRONTEND_ORIGIN says so.
+    # On Vercel the deployed frontend, and nothing else unless FRONTEND_ORIGIN says so.
     monkeypatch.setenv("VERCEL", "1")
-    assert config.frontend_origins() == []
+    assert config.frontend_origins() == [config.DEPLOYED_FRONTEND_ORIGIN]

@@ -258,7 +258,7 @@ def update_member(session: Session, user: User, group_id: int, member_id: int, c
     return _member_read(member, session.get(User, member_id), show_email=True)
 
 
-def remove_member(session: Session, user: User, group_id: int, member_id: int) -> None:
+def remove_member(session: Session, user: User, group_id: int, member_id: int, client: Client) -> None:
     """The owner removes a member, or a member leaves (removes themself). The workouts they added stay in the group;
     the ones assigned to them become unassigned."""
     group, permissions = access(session, user, group_id)
@@ -269,6 +269,15 @@ def remove_member(session: Session, user: User, group_id: int, member_id: int) -
         update(Workout)
         .where(col(Workout.group_id) == group_id, col(Workout.assigned_to) == member_id)
         .values(assigned_to=None, completed_at=None)
+    )
+    left = member_id == user.id
+    activity_service.record(
+        session,
+        ActivityEvent.GROUP_MEMBER_REMOVE,
+        client,
+        actor=user,
+        target=None if left else session.get(User, member_id),
+        details=f"Left {group.name}" if left else f"Removed from {group.name}",
     )
     session.delete(member)
     session.commit()
@@ -307,5 +316,9 @@ def groups_of(session: Session, user_id: int) -> list[dict]:
     ]
 
 
-def count_groups(session: Session) -> int:
-    return session.exec(select(func.count()).select_from(TrainingGroup)).one()
+def group_stats(session: Session, since) -> dict:
+    """Every group, and the ones started since `since`, for the admin dashboard."""
+    total, new = session.exec(
+        select(func.count(), func.count().filter(col(TrainingGroup.created_at) >= since)).select_from(TrainingGroup)
+    ).one()
+    return {"total": total, "new_last_7_days": new}

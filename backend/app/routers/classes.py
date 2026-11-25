@@ -98,6 +98,6 @@ def book_class(class_id: RowId, session: SessionDep, user: CurrentUser) -> dict:
 
 
 @router.delete("/{class_id}/bookings", status_code=204)
-def cancel_booking(class_id: RowId, session: SessionDep, user: CurrentUser) -> None:
+def cancel_booking(class_id: RowId, session: SessionDep, user: CurrentUser, client: ClientDep) -> None:
     """Cancels the logged-in user's own booking: 404 if there is none, 400 once the class has started."""
-    class_service.cancel_booking(session, class_id, member_service.get_own_membership(user))
+    class_service.cancel_booking(session, class_id, member_service.get_own_membership(user), user, client)
