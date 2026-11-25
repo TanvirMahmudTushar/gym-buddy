@@ -4,7 +4,9 @@ import re
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, col, func, select
 
-from app.models import MembershipPlan, Payment, PlanCreate, User, utc_now
+from app.models import ActivityEvent, MembershipPlan, Payment, PlanCreate, User, utc_now
+from app.request_info import Client
+from app.services import activity_service
 
 # Room in the code column for a number added to keep the code unique.
 _SLUG_LENGTH = 30
@@ -88,7 +90,7 @@ def update_plan(session: Session, code: str, changes: dict) -> MembershipPlan:
     return plan
 
 
-def delete_plan(session: Session, code: str) -> None:
+def delete_plan(session: Session, code: str, actor: User, client: Client) -> None:
     """Only a plan nobody ever had. One in use is retired instead, so its members and payments keep its name."""
     plan = get_plan(session, code)
     used = session.exec(select(User.id).where(col(User.plan) == code).limit(1)).first() or session.exec(
@@ -96,5 +98,6 @@ def delete_plan(session: Session, code: str) -> None:
     ).first()
     if used is not None:
         raise PlanInUseError(code)
+    activity_service.record(session, ActivityEvent.PLAN_DELETE, client, actor=actor, details=plan.name)
     session.delete(plan)
     session.commit()

@@ -1,19 +1,24 @@
 import { type ReactNode, createContext, useCallback, useContext, useEffect, useMemo, useState } from "react"
 import * as authService from "../services/authService"
-import { refreshSession, setSessionExpiredHandler, setToken } from "../services/api"
+import { type SessionEnd, refreshSession, setSessionHandlers, setToken } from "../services/api"
 import type { Me, SignupBody } from "../types/auth"
+import { errorText } from "../utils/text"
 
 interface AuthValue {
   user: Me | null
   /** True while the app asks the server, on first load, whether this browser is still logged in. */
   loading: boolean
+  /** Why that first question could not be answered (the server was not reached); "" when it was. */
+  startError: string
+  /** Ask again after startError. */
+  retryStart: () => void
+  /** Why the last login ended by itself, for the Log in page. */
+  ended: SessionEnd | null
   login: (email: string, password: string) => Promise<void>
   /** Creates the account, then logs in with it. */
   signup: (body: SignupBody) => Promise<void>
   /** Ends the session on the server too, so the refresh cookie and the access token stop working. */
   logout: () => Promise<void>
-  /** Forget the login in this tab only, after the server has already ended the session. */
-  endSession: () => void
   setUser: (user: Me) => void
 }
 
@@ -24,11 +29,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Starts true on every load: the refresh cookie cannot be read by scripts, so only the server can say whether
   // there is a session. Until it answers the app shows "Loading…", never the Log in page for a split second.
   const [loading, setLoading] = useState(true)
-
-  const endSession = useCallback(() => {
-    setToken(null)
-    setUser(null)
-  }, [])
+  const [startError, setStartError] = useState("")
+  const [startKey, setStartKey] = useState(0)
+  const [ended, setEnded] = useState<SessionEnd | null>(null)
 
   const logout = useCallback(async () => {
     try {
@@ -36,30 +39,43 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch {
       // Offline: the session still ends here, and on the server when its refresh token expires.
     }
-    endSession()
-  }, [endSession])
+    setToken(null)
+    setUser(null)
+  }, [])
 
-  // A refused refresh or a ban ends the login wherever the request came from.
   useEffect(() => {
-    setSessionExpiredHandler(endSession)
-    return () => setSessionExpiredHandler(null)
-  }, [endSession])
+    setSessionHandlers({
+      onEnd: (reason) => {
+        setToken(null)
+        setUser(null)
+        setEnded(reason)
+      },
+      onUser: setUser,
+      // The menus follow the role as it is now; if it did not change, nothing on screen does.
+      onForbidden: () => void authService.getMe().then(setUser, () => undefined),
+    })
+    return () => setSessionHandlers(null)
+  }, [])
 
   // Pick the login back up after a reload: swap the refresh cookie for a new access token.
   useEffect(() => {
     let ignore = false
+    setLoading(true)
+    setStartError("")
     refreshSession()
-      .then((result) => !ignore && result && setUser(result.user))
+      .then((result) => !ignore && setUser(result?.user ?? null))
+      .catch((err) => !ignore && setStartError(errorText(err)))
       .finally(() => !ignore && setLoading(false))
     return () => {
       ignore = true
     }
-  }, [])
+  }, [startKey])
 
   const login = useCallback(async (email: string, password: string) => {
     const result = await authService.login(email, password)
     setToken(result.access_token)
     setUser(result.user)
+    setEnded(null)
   }, [])
 
   const signup = useCallback(
@@ -70,9 +86,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [login],
   )
 
+  const retryStart = useCallback(() => setStartKey((k) => k + 1), [])
+
   const value = useMemo(
-    () => ({ user, loading, login, signup, logout, endSession, setUser }),
-    [user, loading, login, signup, logout, endSession],
+    () => ({ user, loading, startError, retryStart, ended, login, signup, logout, setUser }),
+    [user, loading, startError, retryStart, ended, login, signup, logout],
   )
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }

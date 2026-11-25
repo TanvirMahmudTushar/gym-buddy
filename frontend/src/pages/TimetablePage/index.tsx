@@ -1,149 +1,74 @@
-import { useEffect, useState } from "react"
+import Alert from "../../components/Alert"
+import ClassSummary from "../../components/ClassSummary"
+import ListState from "../../components/ListState"
+import PageHeader from "../../components/PageHeader"
+import Pager from "../../components/Pager"
+import { usePagedList } from "../../hooks/usePagedList"
+import { useSave } from "../../hooks/useSave"
 import { bookClass, cancelBooking, listClasses } from "../../services/classService"
 import type { GymClass } from "../../types/gymClass"
-import { formatClassTime } from "../../utils/gymClass"
-import { errorText } from "../../utils/member"
+
+const load = (_filters: null, offset: number) => listClasses(offset, true)
 
 interface ItemProps {
   gymClass: GymClass
   /** Called when the class changed, with its new booking state. */
   onBooked: (id: number, booked: boolean) => void
-  /** Called when a booking was refused, so the list can refresh its numbers. */
-  onRefused: () => void
 }
 
-function TimetableItem({ gymClass: c, onBooked, onRefused }: ItemProps) {
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState("")
+function TimetableItem({ gymClass: c, onBooked }: ItemProps) {
+  const { saving, error, run } = useSave()
   const full = c.booked_count >= c.capacity
 
-  async function toggle() {
-    setBusy(true)
-    setError("")
-    try {
-      if (c.is_booked_by_me) await cancelBooking(c.id)
-      else await bookClass(c.id)
+  const toggle = () =>
+    run(async () => {
+      await (c.is_booked_by_me ? cancelBooking(c.id) : bookClass(c.id))
       onBooked(c.id, !c.is_booked_by_me)
-    } catch (err) {
-      setError(errorText(err))
-      onRefused()
-    } finally {
-      setBusy(false)
-    }
-  }
+    })
 
   return (
-    <li className="class-item">
-      <div className="toolbar">
-        <h3>{c.name}</h3>
-        <span className={full ? "pill expired" : "pill active"}>
-          {c.booked_count} / {c.capacity} booked
-        </span>
-      </div>
-      <p className="hint">
-        {formatClassTime(c.starts_at)} · {c.duration_minutes} min{c.trainer_name ? ` · ${c.trainer_name}` : ""}
-      </p>
-      {c.description && <p>{c.description}</p>}
+    <li className="item">
+      <ClassSummary gymClass={c} />
+      <Alert>{error}</Alert>
       <div className="actions">
         {c.is_booked_by_me ? (
           <>
-            <span className="pill active">You are booked</span>
-            <button type="button" onClick={toggle} disabled={busy}>
-              {busy ? "Cancelling…" : "Cancel booking"}
+            <button type="button" className="small" onClick={toggle} disabled={saving}>
+              {saving ? "Cancelling…" : "Cancel booking"}
             </button>
+            <span className="pill good">You are booked</span>
           </>
         ) : (
-          <button type="button" className="primary" onClick={toggle} disabled={busy || full}>
-            {busy ? "Booking…" : full ? "Class full" : "Book"}
+          <button type="button" className="small primary" onClick={toggle} disabled={saving || full}>
+            {saving ? "Booking…" : full ? "Class full" : "Book"}
           </button>
         )}
       </div>
-      {error && (
-        <p className="error" role="alert">
-          {error}
-        </p>
-      )}
     </li>
   )
 }
 
 // A User's view of the timetable: upcoming classes, with Book and Cancel.
 export default function TimetablePage() {
-  const [classes, setClasses] = useState<GymClass[]>([])
-  const [total, setTotal] = useState(0)
-  const [loading, setLoading] = useState(true)
-  const [loadingMore, setLoadingMore] = useState(false)
-  const [error, setError] = useState("")
-  const [reloadKey, setReloadKey] = useState(0)
-
-  useEffect(() => {
-    let ignore = false
-    listClasses(0, true)
-      .then((page) => {
-        if (ignore) return
-        setClasses(page.items)
-        setTotal(page.total)
-      })
-      .catch((err) => !ignore && setError(errorText(err)))
-      .finally(() => !ignore && setLoading(false))
-    return () => {
-      ignore = true
-    }
-  }, [reloadKey])
-
-  async function loadMore() {
-    setLoadingMore(true)
-    try {
-      const page = await listClasses(classes.length, true)
-      setClasses((prev) => [...prev, ...page.items])
-      setTotal(page.total)
-    } catch (err) {
-      setError(errorText(err))
-    } finally {
-      setLoadingMore(false)
-    }
-  }
+  const list = usePagedList(load, null)
 
   // Update the one class on screen right away: one more or one fewer booking, and whether it is mine.
-  function handleBooked(id: number, booked: boolean) {
-    setClasses((prev) =>
-      prev.map((c) => (c.id === id ? { ...c, is_booked_by_me: booked, booked_count: c.booked_count + (booked ? 1 : -1) } : c)),
-    )
-  }
-
-  let body
-  if (loading) body = <p className="empty">Loading classes…</p>
-  else if (error) body = <p className="error">{error}</p>
-  else if (classes.length === 0) body = <p className="empty">No upcoming classes right now.</p>
-  else
-    body = (
-      <ul className="class-list">
-        {classes.map((c) => (
-          <TimetableItem key={c.id} gymClass={c} onBooked={handleBooked} onRefused={() => setReloadKey((k) => k + 1)} />
-        ))}
-      </ul>
+  const handleBooked = (id: number, booked: boolean) =>
+    list.replace((items) =>
+      items.map((c) => (c.id === id ? { ...c, is_booked_by_me: booked, booked_count: c.booked_count + (booked ? 1 : -1) } : c)),
     )
 
   return (
-    <section className="card narrow-wide" aria-labelledby="timetable-heading">
-      <h2 id="timetable-heading">Classes</h2>
-      <p className="hint">
-        Book a place in an upcoming class. You need a valid membership, and you can cancel until the class starts. Your
-        bookings are also listed on <a href="#/membership">My membership</a>.
-      </p>
-      {body}
-      {!loading && classes.length > 0 && (
-        <div className="list-foot">
-          <span>
-            Showing {classes.length} of {total}
-          </span>
-          {classes.length < total && (
-            <button onClick={loadMore} disabled={loadingMore}>
-              {loadingMore ? "Loading…" : "Load more"}
-            </button>
-          )}
-        </div>
-      )}
-    </section>
+    <div className="page">
+      <PageHeader title="Book a class" subtitle="You need a valid membership, and you can cancel until the class starts." />
+      <ListState loading={list.loading} error={list.error} isEmpty={list.items.length === 0} empty="No upcoming classes right now.">
+        <ul className="card-grid">
+          {list.items.map((c) => (
+            <TimetableItem key={c.id} gymClass={c} onBooked={handleBooked} />
+          ))}
+        </ul>
+        <Pager {...list} onChange={list.goTo} />
+      </ListState>
+    </div>
   )
 }

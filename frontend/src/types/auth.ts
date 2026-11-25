@@ -1,6 +1,11 @@
 // Account types matching the FastAPI schemas (TDD 5.3).
 import type { ActivityEntry } from "./activity"
+import type { CheckIn } from "./checkIn"
+import type { BookedClass } from "./gymClass"
 import type { Plan } from "./member"
+import type { Payment } from "./payment"
+import type { Workout } from "./workout"
+import type { Page } from "./page"
 
 export type Role = "user" | "trainer" | "gym_manager" | "admin"
 
@@ -89,12 +94,7 @@ export interface AdminUser extends User {
 }
 
 /** A page of accounts, such as the ones waiting for a membership. */
-export interface AccountPage {
-  items: User[]
-  total: number
-  offset: number
-  limit: number
-}
+export type AccountPage = Page<User>
 
 /** After an admin resets a password: the account and the temporary password, shown only this once. */
 export interface PasswordResetResult {
@@ -102,17 +102,12 @@ export interface PasswordResetResult {
   temporary_password: string
 }
 
-export interface AdminUserPage {
-  items: AdminUser[]
-  total: number
-  offset: number
-  limit: number
-}
+export type AdminUserPage = Page<AdminUser>
 
 export interface AdminStats {
   members: { total: number; active: number; expired: number; frozen: number; new_last_7_days: number; expiring_soon: number }
   users: { total: number; users: number; trainers: number; gym_managers: number; admins: number; banned: number; new_last_7_days: number }
-  /** by_day: each of the last 7 UTC days, oldest first. */
+  /** by_day: each of the last 7 days, oldest first. */
   check_ins: { today: number; last_7_days: number; inside_now: number; by_day: { day: string; count: number }[] }
   classes: { total: number; upcoming: number }
   workouts: { total: number; last_7_days: number; completed: number }
@@ -154,11 +149,13 @@ export interface AdminSession {
   user_agent: string | null
 }
 
-/** GET /admin/users/{id}: the account and membership, logins, how much it has on record, groups, activity. */
+/** GET /admin/users/{id}: the account and membership, logins, records, groups and activity. */
 export interface AdminUserDetail extends AdminUser {
   joined_on: string | null
   /** Set while too many wrong passwords block the account's logins. */
   locked_until: string | null
+  /** null: never changed since signing up. */
+  password_changed_at: string | null
   sessions: AdminSession[]
   records: {
     visits: number
@@ -168,6 +165,8 @@ export interface AdminUserDetail extends AdminUser {
     workouts_assigned: number
     workouts_completed: number
   }
+  /** The newest of each kind (5 of each). */
+  recent_records: { workouts: Workout[]; bookings: BookedClass[]; visits: CheckIn[]; payments: Payment[] }
   groups: { id: number; name: string; is_owner: boolean; member_count: number }[]
   recent_activity: ActivityEntry[]
 }

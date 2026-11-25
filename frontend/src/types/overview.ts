@@ -9,7 +9,7 @@ export interface Overview {
   expiring_soon: number
   /** User accounts with no membership yet (the Members page's waiting list). */
   waiting: number
-  /** Payments since midnight UTC that are not voided. */
+  /** Payments since midnight that are not voided. */
   payments_today: { count: number; amount: number }
   /** Equipment that is broken or being repaired, and services due within 7 days or overdue. */
   equipment_attention: number

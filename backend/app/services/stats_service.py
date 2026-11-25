@@ -3,7 +3,7 @@ from datetime import timedelta
 
 from sqlmodel import Session, col, func, select
 
-from app.models import User, utc_now, utc_today
+from app.models import User, gym_today, utc_now
 from app.services import (
     checkin_service,
     class_service,
@@ -35,7 +35,7 @@ def member_stats(session: Session) -> dict:
             count(*status_filters("expired")),
             count(*status_filters("frozen")),
             # Memberships started in the last 7 days (joined_on is a date, so today counts as day one).
-            count(col(User.joined_on) > utc_today() - timedelta(days=7)),
+            count(col(User.joined_on) > gym_today() - timedelta(days=7)),
             count(*status_filters("expiring_soon")),
         ).select_from(User)
     ).one()
@@ -91,7 +91,7 @@ def staff_overview(session: Session) -> dict:
     """The front desk part of the Dashboard. Each number is computed the way the page it links to computes its list:
     Attendance, the Expiring soon filter, the waiting list, the payments list for today and the Equipment filters."""
     equipment = equipment_service.equipment_stats(session)
-    count, amount = payment_service.totals_since(session, utc_today())
+    count, amount = payment_service.totals_since(session, gym_today())
     check_ins_today, inside_now = checkin_service.today_counts(session)
     expiring_soon, waiting = session.exec(
         select(

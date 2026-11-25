@@ -1,7 +1,9 @@
 import { type FormEvent, useState } from "react"
 import type { GroupMember, Workout } from "../types/workout"
-import { todayUtc } from "../utils/member"
+import { gymToday } from "../utils/time"
 import { EARLIEST_WORKOUT_DATE, latestWorkoutDate } from "../utils/workout"
+import FieldError from "./FieldError"
+import FormActions from "./FormActions"
 
 export interface WorkoutFormValues {
   title: string
@@ -19,7 +21,7 @@ interface Props {
   saving: boolean
   error: string
   onSave: (values: WorkoutFormValues) => void
-  onCancel?: () => void
+  onCancel: () => void
 }
 
 type Errors = Partial<Record<"title" | "workout_date", string>>
@@ -29,12 +31,11 @@ export default function WorkoutForm({ workout, assignees, saving, error, onSave,
   const editing = workout !== undefined
   const [form, setForm] = useState({
     title: workout?.title ?? "",
-    workout_date: workout?.workout_date ?? todayUtc(),
+    workout_date: workout?.workout_date ?? gymToday(),
     notes: workout?.notes ?? "",
     assigned_to: "",
   })
   const [errors, setErrors] = useState<Errors>({})
-  const id = editing ? `edit-workout-${workout.id}` : "add-workout"
   const latest = latestWorkoutDate()
   const set = (key: keyof typeof form) => (e: { target: { value: string } }) =>
     setForm((prev) => ({ ...prev, [key]: e.target.value }))
@@ -58,20 +59,20 @@ export default function WorkoutForm({ workout, assignees, saving, error, onSave,
 
   return (
     <form className="fields" onSubmit={handleSubmit} noValidate>
-      <div className="field">
-        <label htmlFor={`${id}-title`}>Title</label>
-        <input id={`${id}-title`} value={form.title} onChange={set("title")} maxLength={100} placeholder="Leg day" autoComplete="off" />
-        {errors.title && <span className="field-error">{errors.title}</span>}
+      <div className="field wide">
+        <label htmlFor="workout-title">Title</label>
+        <input id="workout-title" value={form.title} onChange={set("title")} maxLength={100} placeholder="Leg day" autoComplete="off" autoFocus />
+        <FieldError>{errors.title}</FieldError>
       </div>
       <div className="field">
-        <label htmlFor={`${id}-date`}>Date</label>
-        <input id={`${id}-date`} type="date" min={EARLIEST_WORKOUT_DATE} max={latest} value={form.workout_date} onChange={set("workout_date")} />
-        {errors.workout_date && <span className="field-error">{errors.workout_date}</span>}
+        <label htmlFor="workout-date">Date</label>
+        <input id="workout-date" type="date" min={EARLIEST_WORKOUT_DATE} max={latest} value={form.workout_date} onChange={set("workout_date")} />
+        <FieldError>{errors.workout_date}</FieldError>
       </div>
       {!editing && assignees && (
         <div className="field">
-          <label htmlFor={`${id}-assignee`}>Assign to (optional)</label>
-          <select id={`${id}-assignee`} value={form.assigned_to} onChange={set("assigned_to")}>
+          <label htmlFor="workout-assignee">Assign to (optional)</label>
+          <select id="workout-assignee" value={form.assigned_to} onChange={set("assigned_to")}>
             <option value="">Nobody</option>
             {assignees.map((m) => (
               <option key={m.user_id} value={m.user_id}>
@@ -82,31 +83,17 @@ export default function WorkoutForm({ workout, assignees, saving, error, onSave,
         </div>
       )}
       <div className="field wide">
-        <label htmlFor={`${id}-notes`}>Notes (optional)</label>
+        <label htmlFor="workout-notes">Notes (optional)</label>
         <textarea
-          id={`${id}-notes`}
+          id="workout-notes"
           value={form.notes}
           onChange={set("notes")}
           maxLength={1000}
-          rows={3}
+          rows={4}
           placeholder="Squats 5×5 at 60 kg, then 20 minutes on the bike"
         />
       </div>
-      <div className="field wide actions">
-        <button className="primary" type="submit" disabled={saving}>
-          {saving ? "Saving…" : editing ? "Save workout" : "Add workout"}
-        </button>
-        {onCancel && (
-          <button type="button" onClick={onCancel} disabled={saving}>
-            Cancel
-          </button>
-        )}
-      </div>
-      {error && (
-        <p className="error wide-error" role="alert">
-          {error}
-        </p>
-      )}
+      <FormActions label={editing ? "Save changes" : "Add workout"} saving={saving} error={error} onCancel={onCancel} />
     </form>
   )
 }

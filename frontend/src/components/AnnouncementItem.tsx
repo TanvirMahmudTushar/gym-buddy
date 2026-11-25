@@ -1,103 +1,73 @@
 import { useState } from "react"
+import { useSave } from "../hooks/useSave"
 import { deleteAnnouncement, updateAnnouncement } from "../services/announcementService"
 import type { Announcement, AnnouncementBody } from "../types/announcement"
 import { endNote, hasEnded, postedNote } from "../utils/announcement"
-import { errorText } from "../utils/member"
 import AnnouncementForm from "./AnnouncementForm"
+import ConfirmModal from "./ConfirmModal"
+import Modal from "./Modal"
 
 interface Props {
   announcement: Announcement
-  onChanged: (updated: Announcement) => void
-  onDeleted: (id: number) => void
+  /** An edit can change the end date and a delete removes it, so the list loads again. */
+  onChanged: () => void
 }
 
 // One announcement on the Announcements page (gym managers and admins): the text, when it ends, and Edit / Delete.
-export default function AnnouncementItem({ announcement: a, onChanged, onDeleted }: Props) {
-  const [editing, setEditing] = useState(false)
-  const [confirmingDelete, setConfirmingDelete] = useState(false)
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState("")
+export default function AnnouncementItem({ announcement: a, onChanged }: Props) {
+  const [dialog, setDialog] = useState<"edit" | "delete" | null>(null)
+  const { saving, error, setError, run } = useSave()
   const ended = hasEnded(a)
 
-  async function save(body: AnnouncementBody) {
-    setBusy(true)
+  function close() {
+    setDialog(null)
     setError("")
-    try {
-      onChanged(await updateAnnouncement(a.id, body))
-      setEditing(false)
-    } catch (err) {
-      setError(errorText(err))
-    } finally {
-      setBusy(false)
-    }
   }
 
-  async function remove() {
-    setBusy(true)
-    setError("")
-    try {
-      await deleteAnnouncement(a.id)
-      onDeleted(a.id)
-    } catch (err) {
-      setError(errorText(err))
-      setBusy(false)
-    }
-  }
-
-  if (editing)
-    return (
-      <li className="class-item">
-        <h3>Edit announcement</h3>
-        <AnnouncementForm
-          announcement={a}
-          saving={busy}
-          error={error}
-          onSave={save}
-          onCancel={() => {
-            setEditing(false)
-            setError("")
-          }}
-        />
-      </li>
-    )
+  const save = (body: AnnouncementBody) =>
+    run(async () => {
+      await updateAnnouncement(a.id, body)
+      close()
+      onChanged()
+    })
 
   return (
-    <li className="class-item">
-      <div className="toolbar">
-        <h3 className="wrap-text">{a.title}</h3>
-        <span className={ended ? "pill expired" : "pill active"}>{ended ? "Ended" : "Showing"}</span>
+    <li className="item">
+      <div className="item-head">
+        <h2>{a.title}</h2>
+        <span className={ended ? "pill" : "pill good"}>{ended ? "Ended" : "Showing"}</span>
       </div>
-      <p className="announcement-message">{a.message}</p>
-      <p className="hint">
-        {postedNote(a)} · {endNote(a)}
-      </p>
+      <p className="prose">{a.message}</p>
+      <div className="meta">
+        <span>{postedNote(a)}</span>
+        <span>{endNote(a)}</span>
+      </div>
       <div className="actions">
-        <button type="button" onClick={() => setEditing(true)} disabled={busy}>
+        <button type="button" className="small" onClick={() => setDialog("edit")}>
           Edit
         </button>
-        <button type="button" className="danger" onClick={() => setConfirmingDelete(true)} disabled={busy}>
+        <button type="button" className="small danger" onClick={() => setDialog("delete")}>
           Delete
         </button>
       </div>
-      {confirmingDelete && (
-        <div className="confirm" role="alertdialog" aria-labelledby={`confirm-announcement-${a.id}`}>
-          <span id={`confirm-announcement-${a.id}`}>
-            Delete "{a.title}"? {ended ? "It has already ended." : "Members stop seeing it straight away."} This cannot be undone.
-          </span>
-          <div className="actions">
-            <button type="button" className="danger solid" onClick={remove} disabled={busy}>
-              {busy ? "Deleting…" : "Yes, delete"}
-            </button>
-            <button type="button" onClick={() => setConfirmingDelete(false)} disabled={busy}>
-              Keep it
-            </button>
-          </div>
-        </div>
+      {dialog === "edit" && (
+        <Modal title="Edit announcement" onClose={close}>
+          <AnnouncementForm announcement={a} saving={saving} error={error} onSave={save} onCancel={close} />
+        </Modal>
       )}
-      {error && (
-        <p className="error" role="alert">
-          {error}
-        </p>
+      {dialog === "delete" && (
+        <ConfirmModal
+          title={`Delete "${a.title}"?`}
+          confirmLabel="Delete"
+          busyLabel="Deleting…"
+          onClose={close}
+          onConfirm={async () => {
+            await deleteAnnouncement(a.id)
+            onChanged()
+          }}
+        >
+          {ended ? "It has already ended." : "Members stop seeing it straight away."} This cannot be undone.
+        </ConfirmModal>
       )}
     </li>
   )

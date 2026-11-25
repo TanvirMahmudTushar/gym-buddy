@@ -1,8 +1,9 @@
-# Member CRUD endpoints under /api/v1/members (TDD 6.1). Routes only handle HTTP; the rules live in app/services/member_service.py.
+# Member CRUD endpoints under /api/v1/members (TDD 6.1). Routes only handle HTTP; the rules live in
+# app/services/member_service.py.
 # A member is a user with a membership, so {member_id} is the user's id.
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends
 
 from app.database import SessionDep
 from app.deps import CurrentUser
@@ -22,13 +23,11 @@ from app.models import (
     PaymentRead,
     User,
 )
+from app.params import Limit, Offset, RowId, Search
 from app.rbac import Permission, require_permission
 from app.request_info import ClientDep
 from app.services import checkin_service, class_service, member_service, payment_service
 from app.services.member_service import MemberStatus
-
-# Part of a name, email or phone typed in a search box; surrounding spaces are ignored.
-Search = Annotated[str | None, Query(max_length=100)]
 
 router = APIRouter(prefix="/api/v1/members", tags=["members"])
 
@@ -52,8 +51,8 @@ def create_member(body: MemberCreate, session: SessionDep, manager: Manager) -> 
 @router.get("", response_model=MemberPage, dependencies=[READ_MEMBERS])
 def list_members(
     session: SessionDep,
-    offset: Annotated[int, Query(ge=0)] = 0,
-    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    offset: Offset = 0,
+    limit: Limit = 20,
     status: MemberStatus | None = None,
     q: Search = None,
 ) -> dict:
@@ -66,8 +65,8 @@ def list_members(
 @router.get("/waiting", response_model=AccountPage, dependencies=[READ_MEMBERS])
 def list_waiting(
     session: SessionDep,
-    offset: Annotated[int, Query(ge=0)] = 0,
-    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    offset: Offset = 0,
+    limit: Limit = 20,
     q: Search = None,
 ) -> dict:
     """User accounts with no membership yet, newest sign-up first: the people to start a membership for.
@@ -84,12 +83,12 @@ def bulk_delete_members(body: MemberBulkDelete, session: SessionDep, manager: Ma
 
 
 @router.get("/{member_id}", response_model=MemberRead, dependencies=[READ_MEMBERS])
-def get_member(member_id: int, session: SessionDep) -> dict:
+def get_member(member_id: RowId, session: SessionDep) -> dict:
     return member_service.read(session, member_service.get_member(session, member_id))
 
 
 @router.patch("/{member_id}", response_model=MemberRead, dependencies=[MANAGE_MEMBERS])
-def update_member(member_id: int, body: MemberUpdate, session: SessionDep) -> dict:
+def update_member(member_id: RowId, body: MemberUpdate, session: SessionDep) -> dict:
     """Only the fields sent change. A later expires_on renews; is_frozen true / false freezes / unfreezes; trainer_id
     sets the personal trainer (an account with the Trainer role, or null for none).
     phone, date_of_birth and the emergency contact follow the same rules as PATCH /users/me/profile."""
@@ -98,17 +97,17 @@ def update_member(member_id: int, body: MemberUpdate, session: SessionDep) -> di
 
 
 @router.post("/{member_id}/check-ins", status_code=201, response_model=CheckInRead, dependencies=[RECORD_CHECK_INS])
-def record_check_in(member_id: int, session: SessionDep, user: CurrentUser) -> dict:
+def record_check_in(member_id: RowId, session: SessionDep, user: CurrentUser) -> dict:
     """400 if the membership is frozen or expired; 409 if the member is checked in today and not checked out yet."""
     return checkin_service.record_check_in(session, member_id, user)
 
 
 @router.get("/{member_id}/check-ins", response_model=CheckInPage, dependencies=[READ_MEMBERS])
 def list_member_check_ins(
-    member_id: int,
+    member_id: RowId,
     session: SessionDep,
-    offset: Annotated[int, Query(ge=0)] = 0,
-    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    offset: Offset = 0,
+    limit: Limit = 20,
 ) -> dict:
     """This member's visits, newest first."""
     items, total = checkin_service.list_member_check_ins(session, member_id, offset, limit)
@@ -116,17 +115,17 @@ def list_member_check_ins(
 
 
 @router.post("/{member_id}/payments", status_code=201, response_model=PaymentRead, dependencies=[MANAGE_PAYMENTS])
-def record_payment(member_id: int, body: PaymentCreate, session: SessionDep, user: CurrentUser) -> dict:
+def record_payment(member_id: RowId, body: PaymentCreate, session: SessionDep, user: CurrentUser) -> dict:
     """Records a payment. With renew_plan the membership is extended by that plan's days in the same step."""
     return payment_service.record_payment(session, member_id, body, user)
 
 
 @router.get("/{member_id}/payments", response_model=PaymentPage, dependencies=[MANAGE_PAYMENTS])
 def list_member_payments(
-    member_id: int,
+    member_id: RowId,
     session: SessionDep,
-    offset: Annotated[int, Query(ge=0)] = 0,
-    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    offset: Offset = 0,
+    limit: Limit = 20,
 ) -> dict:
     """This member's payments, newest first."""
     items, total = payment_service.list_member_payments(session, member_id, offset, limit)
@@ -135,11 +134,11 @@ def list_member_payments(
 
 @router.get("/{member_id}/bookings", response_model=BookedClassPage, dependencies=[READ_MEMBERS])
 def list_member_bookings(
-    member_id: int,
+    member_id: RowId,
     session: SessionDep,
     when: Literal["upcoming", "past"] = "upcoming",
-    offset: Annotated[int, Query(ge=0)] = 0,
-    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    offset: Offset = 0,
+    limit: Limit = 20,
 ) -> dict:
     """This member's bookings: upcoming ones soonest first (the default), or past ones latest first."""
     member_service.get_member(session, member_id)
@@ -148,13 +147,13 @@ def list_member_bookings(
 
 
 @router.delete("/{member_id}/bookings/{class_id}", status_code=204, dependencies=[MANAGE_MEMBERS])
-def cancel_member_booking(member_id: int, class_id: int, session: SessionDep) -> None:
+def cancel_member_booking(member_id: RowId, class_id: RowId, session: SessionDep) -> None:
     """The front desk cancels a booking for the member. 400 once the class has started; 404 if there is none."""
     class_service.cancel_booking(session, class_id, member_service.get_member(session, member_id))
 
 
 @router.delete("/{member_id}", status_code=204)
-def delete_member(member_id: int, session: SessionDep, manager: Manager, client: ClientDep) -> None:
+def delete_member(member_id: RowId, session: SessionDep, manager: Manager, client: ClientDep) -> None:
     """Deletes the member's account with their check-ins and bookings; payments stay on record.
     400 for a gym manager or admin: change their role first."""
     member_service.delete_member(session, member_id, manager, client)

@@ -1,5 +1,5 @@
 // The one place that talks to fetch: adds the access token, gets a new one when it expires, turns errors into text.
-import type { LoginResult } from "../types/auth"
+import type { LoginResult, Me } from "../types/auth"
 
 // The access token is kept only in memory, never in localStorage or sessionStorage, so a script injected into
 // the page cannot find it there. After a reload a new one comes from the refresh cookie, which scripts cannot read.
@@ -9,40 +9,25 @@ export function setToken(token: string | null): void {
   accessToken = token
 }
 
-// Called when the session has ended (refresh refused, or the account banned), so the app can show Log in.
-let onSessionExpired: (() => void) | null = null
-export function setSessionExpiredHandler(handler: (() => void) | null): void {
-  onSessionExpired = handler
+/** Why a login ended without the person logging out. */
+export type SessionEnd = "expired" | "banned"
+
+interface SessionHandlers {
+  /** The server no longer accepts the login, so the app shows Log in. */
+  onEnd: (reason: SessionEnd) => void
+  /** A refresh answered with the account as it is now, such as with a new role. */
+  onUser: (user: Me) => void
+  /** The server refused something for lack of permission: the role may have changed since the app loaded it. */
+  onForbidden: () => void
 }
 
-// One refresh at a time. Requests that fail together, and React running the start-up effect twice in development,
-// all wait for the same one, so the refresh token is not rotated twice at once.
-let refreshing: Promise<LoginResult | null> | null = null
-
-/** Swap the refresh cookie for a new access token. null when this browser has no valid session. */
-export function refreshSession(): Promise<LoginResult | null> {
-  refreshing ??= (async () => {
-    try {
-      // The browser adds the HttpOnly refresh cookie itself (same origin, path /api/v1/auth).
-      const res = await fetch("/api/v1/auth/refresh", { method: "POST" })
-      // 204: no cookie (not logged in). 401: the session expired or was revoked.
-      if (res.status !== 200) return null
-      const result: LoginResult = await res.json()
-      accessToken = result.access_token
-      return result
-    } catch {
-      return null
-    } finally {
-      refreshing = null
-    }
-  })()
-  return refreshing
+// Set by AuthContext, which holds the login.
+let handlers: SessionHandlers | null = null
+export function setSessionHandlers(next: SessionHandlers | null): void {
+  handlers = next
 }
 
-// The text the API sends when an admin has banned the account (must match the backend).
-const ACCOUNT_BANNED = "Account banned"
-
-/** An error from the API, with the HTTP status so a page can react to a 404 or 409. */
+/** An error from the API, with the HTTP status so a page can react to a 404 or 409. 0: the server was not reached. */
 export class ApiError extends Error {
   status: number
 
@@ -52,29 +37,52 @@ export class ApiError extends Error {
   }
 }
 
-interface ValidationError {
-  loc: (string | number)[]
-  msg: string
+async function reach(path: string, init: RequestInit): Promise<Response> {
+  try {
+    return await fetch(path, init)
+  } catch {
+    throw new ApiError("Could not reach the server. Check your connection and try again.", 0)
+  }
 }
 
-/** Turn FastAPI's {"detail": ...} into one readable sentence. */
+// One refresh at a time. Requests that fail together, and React running the start-up effect twice in development,
+// all wait for the same one, so the refresh token is not rotated twice at once.
+let refreshing: Promise<LoginResult | null> | null = null
+
+/** Swap the refresh cookie for a new access token. null when this browser has no valid session. Throws when the server
+ * could not be reached or failed: that says nothing about the session, so nobody is logged out for it. */
+export function refreshSession(): Promise<LoginResult | null> {
+  refreshing ??= (async () => {
+    try {
+      // The browser adds the HttpOnly refresh cookie itself (same origin, path /api/v1/auth).
+      const res = await reach("/api/v1/auth/refresh", { method: "POST" })
+      // 204: no cookie (not logged in). 401: the session expired or was revoked.
+      if (res.status === 204 || res.status === 401) return null
+      if (!res.ok) throw new ApiError(await errorMessage(res), res.status)
+      const result: LoginResult = await res.json()
+      accessToken = result.access_token
+      handlers?.onUser(result.user)
+      return result
+    } finally {
+      refreshing = null
+    }
+  })()
+  return refreshing
+}
+
+// Texts the API sends that the app acts on (they must match the backend).
+const ACCOUNT_BANNED = "Account banned"
+const NO_PERMISSION = "You do not have permission to do this"
+
+/** The {"detail": "one sentence"} every error from the API has. */
 async function errorMessage(res: Response): Promise<string> {
   try {
-    const body: { detail?: string | ValidationError[] } = await res.json()
+    const body: { detail?: unknown } = await res.json()
     if (typeof body.detail === "string") return body.detail
-    if (Array.isArray(body.detail)) {
-      return body.detail
-        .map((e) => {
-          const field = e.loc.slice(1).join(".")
-          const msg = e.msg.replace(/^Value error, /, "")
-          return field ? `${field}: ${msg}` : msg
-        })
-        .join("; ")
-    }
   } catch {
-    // Not JSON: fall through to the status code.
+    // Not JSON, such as an error page from the host: fall through to the status code.
   }
-  return `Request failed: ${res.status}`
+  return `The server could not answer (${res.status}). Try again in a moment.`
 }
 
 /** Send a request with the access token; throws ApiError for any error status. */
@@ -84,7 +92,7 @@ async function send(path: string, init: RequestInit, isRetry = false): Promise<R
   const token = accessToken
   if (token) headers.Authorization = `Bearer ${token}`
 
-  const res = await fetch(path, { ...init, headers })
+  const res = await reach(path, { ...init, headers })
   if (res.ok) return res
 
   // A 401 while holding a token: it expired (after 15 minutes) or its session ended. Get a new one once and try
@@ -93,8 +101,10 @@ async function send(path: string, init: RequestInit, isRetry = false): Promise<R
     return send(path, init, true)
   }
   const message = await errorMessage(res)
-  // The refresh failed too, or the account is banned: the session is over, so the app shows Log in.
-  if (token && (res.status === 401 || (res.status === 403 && message === ACCOUNT_BANNED))) onSessionExpired?.()
+  // The refresh was refused too, or the account is banned: the session is over, so the app shows Log in.
+  if (token && res.status === 401) handlers?.onEnd("expired")
+  if (token && res.status === 403 && message === ACCOUNT_BANNED) handlers?.onEnd("banned")
+  if (token && res.status === 403 && message === NO_PERMISSION) handlers?.onForbidden()
   throw new ApiError(message, res.status)
 }
 

@@ -1,5 +1,7 @@
 import { type FormEvent, useState } from "react"
 import type { MembershipPlan, PlanBody } from "../types/payment"
+import FieldError from "./FieldError"
+import FormActions from "./FormActions"
 
 interface Props {
   /** The plan being edited; leave out to add a new one. */
@@ -7,7 +9,7 @@ interface Props {
   saving: boolean
   error: string
   onSave: (body: PlanBody) => void
-  onCancel?: () => void
+  onCancel: () => void
 }
 
 type Errors = Partial<Record<"name" | "price" | "days", string>>
@@ -21,7 +23,6 @@ export default function PlanForm({ plan, saving, error, onSave, onCancel }: Prop
     description: plan?.description ?? "",
   })
   const [errors, setErrors] = useState<Errors>({})
-  const id = plan ? `plan-${plan.plan}` : "add-plan-form"
   const set = (key: keyof typeof form) => (e: { target: { value: string } }) => setForm((prev) => ({ ...prev, [key]: e.target.value }))
 
   function handleSubmit(e: FormEvent) {
@@ -40,39 +41,25 @@ export default function PlanForm({ plan, saving, error, onSave, onCancel }: Prop
   return (
     <form className="fields" onSubmit={handleSubmit} noValidate>
       <div className="field wide">
-        <label htmlFor={`${id}-name`}>Name</label>
-        <input id={`${id}-name`} value={form.name} onChange={set("name")} maxLength={60} placeholder="Student monthly" autoComplete="off" />
-        {errors.name && <span className="field-error">{errors.name}</span>}
+        <label htmlFor="plan-name">Name</label>
+        <input id="plan-name" value={form.name} onChange={set("name")} maxLength={60} placeholder="Student monthly" autoComplete="off" autoFocus />
+        <FieldError>{errors.name}</FieldError>
       </div>
       <div className="field">
-        <label htmlFor={`${id}-price`}>Price (৳)</label>
-        <input id={`${id}-price`} type="number" min={1} step={1} inputMode="numeric" value={form.price} onChange={set("price")} />
-        {errors.price && <span className="field-error">{errors.price}</span>}
+        <label htmlFor="plan-price">Price (taka)</label>
+        <input id="plan-price" type="number" min={1} step={1} inputMode="numeric" value={form.price} onChange={set("price")} />
+        <FieldError>{errors.price}</FieldError>
       </div>
       <div className="field">
-        <label htmlFor={`${id}-days`}>Length in days</label>
-        <input id={`${id}-days`} type="number" min={1} step={1} inputMode="numeric" value={form.days} onChange={set("days")} />
-        {errors.days && <span className="field-error">{errors.days}</span>}
+        <label htmlFor="plan-days">Length in days</label>
+        <input id="plan-days" type="number" min={1} step={1} inputMode="numeric" value={form.days} onChange={set("days")} />
+        <FieldError>{errors.days}</FieldError>
       </div>
       <div className="field wide">
-        <label htmlFor={`${id}-description`}>What it includes (optional)</label>
-        <input id={`${id}-description`} value={form.description} onChange={set("description")} maxLength={300} autoComplete="off" />
+        <label htmlFor="plan-description">What it includes (optional)</label>
+        <input id="plan-description" value={form.description} onChange={set("description")} maxLength={300} autoComplete="off" />
       </div>
-      <div className="field wide actions">
-        <button className="primary" type="submit" disabled={saving}>
-          {saving ? "Saving…" : plan ? "Save plan" : "Add plan"}
-        </button>
-        {onCancel && (
-          <button type="button" onClick={onCancel} disabled={saving}>
-            Cancel
-          </button>
-        )}
-      </div>
-      {error && (
-        <p className="error wide-error" role="alert">
-          {error}
-        </p>
-      )}
+      <FormActions label={plan ? "Save changes" : "Add plan"} saving={saving} error={error} onCancel={onCancel} />
     </form>
   )
 }

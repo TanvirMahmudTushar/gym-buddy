@@ -1,5 +1,5 @@
 // Content moderation types (admins), matching the FastAPI schemas (TDD 5.3).
-import type { Workout } from "./workout"
+import type { Workout, WorkoutStatus } from "./workout"
 
 /** A workout as a moderator sees it: with the owner's email, so it is clear whose it is. */
 export interface ModerationWorkout extends Workout {
@@ -18,22 +18,17 @@ export interface ModerationGroup {
   workout_count: number
 }
 
-export interface Page<T> {
-  items: T[]
-  total: number
-  offset: number
-  limit: number
-}
-
-/** The workouts tab's filters. Dates are the workout's date, both included; empty means any. */
+/** The All workouts filters. Dates are the workout's date, both included; empty means any. */
 export interface WorkoutFilters {
   owner_id: number | null
+  group_id: number | null
+  status: WorkoutStatus | ""
   date_from: string
   date_to: string
   q: string
 }
 
-/** The groups tab's filters. Dates are the UTC day the group was made, both included. */
+/** The All groups filters. Dates are the day the group was made, both included. */
 export interface GroupFilters {
   owner_id: number | null
   date_from: string

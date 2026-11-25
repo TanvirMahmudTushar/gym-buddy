@@ -1,4 +1,5 @@
 // Expense types matching the FastAPI schemas (TDD 5.3).
+import type { Page } from "./page"
 
 export type ExpenseCategory = "rent" | "salaries" | "utilities" | "equipment" | "maintenance" | "marketing" | "other"
 
@@ -20,11 +21,7 @@ export interface ExpenseBody {
   description: string | null
 }
 
-export interface ExpensePage {
-  items: Expense[]
-  total: number
-  offset: number
-  limit: number
+export interface ExpensePage extends Page<Expense> {
   /** The sum of every matching expense, not just this page. */
   total_amount: number
 }

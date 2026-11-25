@@ -53,6 +53,12 @@ def _workout_conditions(f: ModerationWorkoutFilter) -> list:
         conditions.append(col(Workout.owner_id) == f.owner_id)
     if f.group_id:
         conditions.append(col(Workout.group_id) == f.group_id)
+    if f.status == "unassigned":
+        conditions.append(col(Workout.assigned_to).is_(None))
+    elif f.status == "to_do":
+        conditions += [col(Workout.assigned_to).is_not(None), col(Workout.completed_at).is_(None)]
+    elif f.status == "done":
+        conditions.append(col(Workout.completed_at).is_not(None))
     if f.date_from:
         conditions.append(col(Workout.workout_date) >= f.date_from)
     if f.date_to:

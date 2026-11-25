@@ -9,7 +9,16 @@ from app.models import ActivityEvent, ActivityFilter, CheckIn, ClassBooking, Pay
 from app.rbac import Permission
 from app.request_info import Client
 from app.security import hash_password
-from app.services import activity_service, group_service, session_service, trainer_service, workout_service
+from app.services import (
+    activity_service,
+    checkin_service,
+    class_service,
+    group_service,
+    payment_service,
+    session_service,
+    trainer_service,
+    workout_service,
+)
 from app.services.csv_export import describe_filters, to_csv, utc_text
 from app.services.search import contains_any
 
@@ -39,6 +48,8 @@ TEMPORARY_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789"
 TEMPORARY_LENGTH = 12
 # How many activity rows the user details show.
 RECENT_ACTIVITY = 10
+# How many workouts, bookings, visits and payments they show, newest first.
+RECENT_RECORDS = 5
 
 # Why a ban is refused, for the single ban (400) and for the bulk ban's skipped list.
 BAN_SELF = "You cannot ban yourself"
@@ -132,6 +143,7 @@ def user_detail(session: Session, user_id: int) -> dict:
         **user.model_dump(exclude={"password_hash"}),
         "sessions": session_service.list_active_sessions(session, user_id),
         "records": record_counts(session, user_id),
+        "recent_records": recent_records(session, user_id),
         "groups": group_service.groups_of(session, user_id),
         "recent_activity": recent,
     }
@@ -153,6 +165,16 @@ def record_counts(session: Session, user_id: int) -> dict:
         "bookings": bookings,
         "payments": payments,
         **workout_service.counts_for(session, user_id),
+    }
+
+
+def recent_records(session: Session, user_id: int) -> dict:
+    """The newest of each kind of record. Each list comes from the service that owns it."""
+    return {
+        "workouts": workout_service.list_of_account(session, user_id, RECENT_RECORDS),
+        "bookings": class_service.list_newest_bookings(session, user_id, RECENT_RECORDS),
+        "visits": checkin_service.list_of_account(session, user_id, RECENT_RECORDS),
+        "payments": payment_service.list_of_account(session, user_id, RECENT_RECORDS),
     }
 
 

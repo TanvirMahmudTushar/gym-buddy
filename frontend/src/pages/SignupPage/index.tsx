@@ -1,9 +1,18 @@
 import { type FormEvent, useState } from "react"
+import Alert from "../../components/Alert"
 import { useAuth } from "../../context/AuthContext"
-import { errorText } from "../../utils/member"
+import { Brand } from "../../layouts/AppLayout"
+import { errorText } from "../../utils/text"
 
 const EMPTY = { name: "", email: "", password: "", confirm: "" }
 type Errors = Partial<Record<keyof typeof EMPTY, string>>
+
+const FIELDS: { key: keyof typeof EMPTY; label: string; type: string; maxLength: number; autoComplete: string; hint?: string }[] = [
+  { key: "name", label: "Full name", type: "text", maxLength: 100, autoComplete: "name" },
+  { key: "email", label: "Email", type: "email", maxLength: 254, autoComplete: "email" },
+  { key: "password", label: "Password", type: "password", maxLength: 128, autoComplete: "new-password", hint: "At least 8 characters." },
+  { key: "confirm", label: "Confirm password", type: "password", maxLength: 128, autoComplete: "new-password" },
+]
 
 export default function SignupPage() {
   const { signup } = useAuth()
@@ -11,9 +20,6 @@ export default function SignupPage() {
   const [fieldErrors, setFieldErrors] = useState<Errors>({})
   const [error, setError] = useState("")
   const [busy, setBusy] = useState(false)
-
-  const set = (key: keyof typeof EMPTY) => (e: { target: { value: string } }) =>
-    setForm((prev) => ({ ...prev, [key]: e.target.value }))
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -37,63 +43,36 @@ export default function SignupPage() {
   }
 
   return (
-    <section className="card auth-card" aria-labelledby="signup-heading">
-      <h2 id="signup-heading">Create an account</h2>
-      <form className="stack" onSubmit={handleSubmit} noValidate>
-        <div className="field">
-          <label htmlFor="signup-name">Full name</label>
-          <input
-            id="signup-name"
-            value={form.name}
-            onChange={set("name")}
-            maxLength={100}
-            autoComplete="name"
-            autoFocus
-          />
-          {fieldErrors.name && <span className="field-error">{fieldErrors.name}</span>}
-        </div>
-        <div className="field">
-          <label htmlFor="signup-email">Email</label>
-          <input id="signup-email" type="email" value={form.email} onChange={set("email")} autoComplete="email" />
-          {fieldErrors.email && <span className="field-error">{fieldErrors.email}</span>}
-        </div>
-        <div className="field">
-          <label htmlFor="signup-password">Password</label>
-          <input
-            id="signup-password"
-            type="password"
-            value={form.password}
-            onChange={set("password")}
-            maxLength={128}
-            autoComplete="new-password"
-          />
-          {fieldErrors.password && <span className="field-error">{fieldErrors.password}</span>}
-        </div>
-        <div className="field">
-          <label htmlFor="signup-confirm">Confirm password</label>
-          <input
-            id="signup-confirm"
-            type="password"
-            value={form.confirm}
-            onChange={set("confirm")}
-            maxLength={128}
-            autoComplete="new-password"
-          />
-          {fieldErrors.confirm && <span className="field-error">{fieldErrors.confirm}</span>}
-        </div>
-        {error && (
-          <p className="error" role="alert">
-            {error}
-          </p>
-        )}
-        <button className="primary" type="submit" disabled={busy}>
-          {busy ? "Creating account…" : "Sign up"}
-        </button>
-      </form>
-      <p className="hint">New accounts start as a User. An admin can give you more access later.</p>
-      <p className="hint">
-        Already have an account? <a href="#/login">Log in</a>
-      </p>
-    </section>
+    <main className="auth">
+      <Brand />
+      <section className="card">
+        <h1>Create an account</h1>
+        <form className="stack" onSubmit={handleSubmit} noValidate>
+          {FIELDS.map((f, i) => (
+            <div key={f.key} className="field">
+              <label htmlFor={`signup-${f.key}`}>{f.label}</label>
+              <input
+                id={`signup-${f.key}`}
+                type={f.type}
+                value={form[f.key]}
+                onChange={(e) => setForm((prev) => ({ ...prev, [f.key]: e.target.value }))}
+                maxLength={f.maxLength}
+                autoComplete={f.autoComplete}
+                aria-invalid={!!fieldErrors[f.key]}
+                autoFocus={i === 0}
+              />
+              {fieldErrors[f.key] ? <span className="field-error">{fieldErrors[f.key]}</span> : f.hint && <span className="hint">{f.hint}</span>}
+            </div>
+          ))}
+          <Alert>{error}</Alert>
+          <button className="primary" type="submit" disabled={busy}>
+            {busy ? "Creating account…" : "Sign up"}
+          </button>
+        </form>
+        <p className="hint">
+          Already have an account? <a href="#/login">Log in</a>
+        </p>
+      </section>
+    </main>
   )
 }

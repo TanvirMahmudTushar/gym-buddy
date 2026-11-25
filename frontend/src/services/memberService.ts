@@ -8,17 +8,17 @@ const BASE = "/api/v1/members"
 const PAGE_SIZE = 20
 
 /** q finds members by part of the name, email or phone. */
-export function listMembers(offset: number, status: MemberFilter | null, q = ""): Promise<MemberPage> {
+export function listMembers(filters: { status: MemberFilter | null; q: string }, offset: number): Promise<MemberPage> {
   const params = new URLSearchParams({ offset: String(offset), limit: String(PAGE_SIZE) })
-  if (status) params.set("status", status)
-  if (q.trim()) params.set("q", q.trim())
+  if (filters.status) params.set("status", filters.status)
+  if (filters.q.trim()) params.set("q", filters.q.trim())
   return request<MemberPage>(`${BASE}?${params}`)
 }
 
 /** Accounts that signed up but have no membership yet, newest first. */
-export function listWaiting(offset: number, limit: number, q = ""): Promise<AccountPage> {
-  const params = new URLSearchParams({ offset: String(offset), limit: String(limit) })
-  if (q.trim()) params.set("q", q.trim())
+export function listWaiting(filters: { q: string }, offset: number): Promise<AccountPage> {
+  const params = new URLSearchParams({ offset: String(offset), limit: String(PAGE_SIZE) })
+  if (filters.q.trim()) params.set("q", filters.q.trim())
   return request<AccountPage>(`${BASE}/waiting?${params}`)
 }
 

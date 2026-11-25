@@ -1,26 +1,29 @@
 import { useEffect, useState } from "react"
+import Alert from "../../components/Alert"
 import ClassForm from "../../components/ClassForm"
 import ClassItem from "../../components/ClassItem"
+import Icon from "../../components/Icon"
+import ListState from "../../components/ListState"
+import Modal from "../../components/Modal"
+import PageHeader from "../../components/PageHeader"
+import Pager from "../../components/Pager"
+import { usePagedList } from "../../hooks/usePagedList"
+import { useSave } from "../../hooks/useSave"
 import { createClass, listClasses } from "../../services/classService"
 import { listTrainers } from "../../services/trainerService"
-import type { ClassBody, GymClass, Trainer } from "../../types/gymClass"
-import { errorText } from "../../utils/member"
+import type { ClassBody, Trainer } from "../../types/gymClass"
+import { errorText } from "../../utils/text"
 
-type Filter = "upcoming" | "all"
+const load = (upcomingOnly: boolean, offset: number) => listClasses(offset, upcomingOnly)
 
 // Gym managers and admins: the class timetable. Add, edit and delete classes, and see who booked.
 export default function ClassesPage() {
-  const [classes, setClasses] = useState<GymClass[]>([])
-  const [total, setTotal] = useState(0)
-  const [filter, setFilter] = useState<Filter>("upcoming")
-  const [loading, setLoading] = useState(true)
-  const [loadingMore, setLoadingMore] = useState(false)
-  const [error, setError] = useState("")
-  const [creating, setCreating] = useState(false)
-  const [createError, setCreateError] = useState("")
-  // Changing this remounts the add form, which clears it after a class is added.
-  const [formKey, setFormKey] = useState(0)
+  const [upcomingOnly, setUpcomingOnly] = useState(true)
   const [reloadKey, setReloadKey] = useState(0)
+  const reload = () => setReloadKey((k) => k + 1)
+  const list = usePagedList(load, upcomingOnly, reloadKey)
+  const [adding, setAdding] = useState(false)
+  const { saving, error, setError, run } = useSave()
   const [trainers, setTrainers] = useState<Trainer[]>([])
   const [trainersError, setTrainersError] = useState("")
 
@@ -28,115 +31,54 @@ export default function ClassesPage() {
   useEffect(() => {
     let ignore = false
     listTrainers()
-      .then((list) => !ignore && setTrainers(list))
+      .then((found) => !ignore && setTrainers(found))
       .catch((err) => !ignore && setTrainersError(`Could not load the trainers: ${errorText(err)}`))
     return () => {
       ignore = true
     }
   }, [])
 
-  useEffect(() => {
-    let ignore = false
-    setLoading(true)
+  function close() {
+    setAdding(false)
     setError("")
-    listClasses(0, filter === "upcoming")
-      .then((page) => {
-        if (ignore) return
-        setClasses(page.items)
-        setTotal(page.total)
-      })
-      .catch((err) => !ignore && setError(errorText(err)))
-      .finally(() => !ignore && setLoading(false))
-    return () => {
-      ignore = true
-    }
-  }, [filter, reloadKey])
-
-  async function loadMore() {
-    setLoadingMore(true)
-    try {
-      const page = await listClasses(classes.length, filter === "upcoming")
-      setClasses((prev) => [...prev, ...page.items])
-      setTotal(page.total)
-    } catch (err) {
-      setError(errorText(err))
-    } finally {
-      setLoadingMore(false)
-    }
   }
 
-  async function handleCreate(body: ClassBody) {
-    setCreating(true)
-    setCreateError("")
-    try {
+  const add = (body: ClassBody) =>
+    run(async () => {
       await createClass(body)
-      setFormKey((k) => k + 1)
-      // Reload so the new class appears in its place in the list.
-      setReloadKey((k) => k + 1)
-    } catch (err) {
-      setCreateError(errorText(err))
-    } finally {
-      setCreating(false)
-    }
-  }
-
-  // An edit can change the start time, so reload to keep the list in order.
-  const handleChanged = () => setReloadKey((k) => k + 1)
-  const handleDeleted = (id: number) => {
-    setClasses((prev) => prev.filter((c) => c.id !== id))
-    setTotal((n) => n - 1)
-  }
-
-  let body
-  if (loading && classes.length === 0) body = <p className="empty">Loading classes…</p>
-  else if (error) body = <p className="error">{error}</p>
-  else if (classes.length === 0)
-    body = <p className="empty">{filter === "upcoming" ? "No upcoming classes. Add one above." : "No classes yet. Add the first one above."}</p>
-  else
-    body = (
-      <ul className="class-list">
-        {classes.map((c) => (
-          <ClassItem key={c.id} gymClass={c} trainers={trainers} onChanged={handleChanged} onDeleted={handleDeleted} />
-        ))}
-      </ul>
-    )
+      close()
+      reload()
+    })
 
   return (
-    <div className="column narrow-wide">
-      <section className="card" aria-labelledby="add-class-heading">
-        <h2 id="add-class-heading">Add class</h2>
-        {trainersError && (
-          <p className="error" role="alert">
-            {trainersError}
-          </p>
-        )}
-        <ClassForm key={formKey} trainers={trainers} saving={creating} error={createError} onSave={handleCreate} />
-      </section>
-      <section className="card" aria-labelledby="classes-heading">
-        <div className="toolbar">
-          <h2 id="classes-heading">Classes</h2>
-          <div className="chips" role="group" aria-label="Which classes to show">
-            {(["upcoming", "all"] as const).map((f) => (
-              <button key={f} type="button" className="chip" aria-pressed={filter === f} onClick={() => setFilter(f)}>
-                {f === "upcoming" ? "Upcoming" : "All"}
-              </button>
-            ))}
-          </div>
-        </div>
-        {body}
-        {!loading && classes.length > 0 && (
-          <div className="list-foot">
-            <span>
-              Showing {classes.length} of {total} {total === 1 ? "class" : "classes"}
-            </span>
-            {classes.length < total && (
-              <button onClick={loadMore} disabled={loadingMore}>
-                {loadingMore ? "Loading…" : "Load more"}
-              </button>
-            )}
-          </div>
-        )}
-      </section>
+    <div className="page">
+      <PageHeader title="Classes" subtitle="The timetable members book from.">
+        <button type="button" className="primary" onClick={() => setAdding(true)}>
+          <Icon name="plus" /> Add class
+        </button>
+      </PageHeader>
+      <div className="chips" role="group" aria-label="Which classes to show">
+        <button type="button" className="chip" aria-pressed={upcomingOnly} onClick={() => setUpcomingOnly(true)}>
+          Upcoming
+        </button>
+        <button type="button" className="chip" aria-pressed={!upcomingOnly} onClick={() => setUpcomingOnly(false)}>
+          All, with past
+        </button>
+      </div>
+      <Alert>{trainersError}</Alert>
+      <ListState loading={list.loading} error={list.error} isEmpty={list.items.length === 0} empty={upcomingOnly ? "No upcoming classes." : "No classes yet."}>
+        <ul className="card-grid">
+          {list.items.map((c) => (
+            <ClassItem key={c.id} gymClass={c} trainers={trainers} onChanged={reload} />
+          ))}
+        </ul>
+        <Pager {...list} onChange={list.goTo} />
+      </ListState>
+      {adding && (
+        <Modal title="Add a class" onClose={close}>
+          <ClassForm trainers={trainers} saving={saving} error={error} onSave={add} onCancel={close} />
+        </Modal>
+      )}
     </div>
   )
 }

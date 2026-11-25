@@ -1,19 +1,17 @@
 import { type FormEvent, useEffect, useState } from "react"
 import { useAuth } from "../context/AuthContext"
+import { useSave } from "../hooks/useSave"
 import { addMember, removeMember, updateMember } from "../services/groupService"
 import { listMyClients } from "../services/trainerService"
 import type { Client } from "../types/gymClass"
 import type { Group, GroupMember, MemberFlag } from "../types/workout"
 import { can } from "../utils/auth"
-import { errorText } from "../utils/member"
 import { MEMBER_FLAGS, canInGroup } from "../utils/workout"
-
-interface Props {
-  group: Group
-  members: GroupMember[]
-  meId: number
-  onMembersChange: (members: GroupMember[]) => void
-}
+import Alert from "./Alert"
+import ConfirmModal from "./ConfirmModal"
+import FormActions from "./FormActions"
+import Icon from "./Icon"
+import Modal from "./Modal"
 
 const NO_FLAGS: Record<MemberFlag, boolean> = { can_create: false, can_update: false, can_assign: false }
 
@@ -21,22 +19,21 @@ const NO_FLAGS: Record<MemberFlag, boolean> = { can_create: false, can_update: f
 const ordered = (list: GroupMember[]) =>
   [...list].sort((a, b) => Number(b.is_owner) - Number(a.is_owner) || a.name.localeCompare(b.name) || a.user_id - b.user_id)
 
-// Who is in a group and what each person may do. The owner ticks the permissions, adds people by email and removes
-// them; everyone else sees the same table read-only.
-export default function GroupMembers({ group, members, meId, onMembersChange }: Props) {
-  const isOwner = canInGroup(group, "manage")
+interface AddProps {
+  groupId: number
+  members: GroupMember[]
+  onAdded: (member: GroupMember) => void
+  onCancel: () => void
+}
+
+// The owner adds an existing account by its email, with the permissions ticked. A trainer's own clients are suggested.
+function AddPersonForm({ groupId, members, onAdded, onCancel }: AddProps) {
   const { user } = useAuth()
-  // A trainer's own clients are suggested in the email box.
-  const suggestClients = isOwner && can(user, "clients:read")
+  const suggestClients = can(user, "clients:read")
   const [clients, setClients] = useState<Client[]>([])
-  const [busyId, setBusyId] = useState<number | null>(null)
-  const [removingId, setRemovingId] = useState<number | null>(null)
-  const [error, setError] = useState("")
-  const [notice, setNotice] = useState("")
   const [email, setEmail] = useState("")
   const [flags, setFlags] = useState(NO_FLAGS)
-  const [adding, setAdding] = useState(false)
-  const [addError, setAddError] = useState("")
+  const { saving, error, setError, run } = useSave()
 
   useEffect(() => {
     if (!suggestClients) return
@@ -49,189 +46,164 @@ export default function GroupMembers({ group, members, meId, onMembersChange }: 
     }
   }, [suggestClients])
 
-  async function toggle(m: GroupMember, flag: MemberFlag, value: boolean) {
-    setBusyId(m.user_id)
-    setError("")
-    setNotice("")
-    try {
-      const updated = await updateMember(group.id, m.user_id, { [flag]: value })
-      onMembersChange(members.map((x) => (x.user_id === updated.user_id ? updated : x)))
-    } catch (err) {
-      setError(errorText(err))
-    } finally {
-      setBusyId(null)
-    }
-  }
-
-  async function remove(m: GroupMember) {
-    setBusyId(m.user_id)
-    setError("")
-    try {
-      await removeMember(group.id, m.user_id)
-      onMembersChange(members.filter((x) => x.user_id !== m.user_id))
-      setNotice(`${m.name} is no longer in the group. Workouts assigned to them are now unassigned.`)
-      setRemovingId(null)
-    } catch (err) {
-      setError(errorText(err))
-    } finally {
-      setBusyId(null)
-    }
-  }
-
-  async function add(e: FormEvent) {
+  function handleSubmit(e: FormEvent) {
     e.preventDefault()
-    if (!email.trim()) {
-      setAddError("Enter the email the person signed up with.")
-      return
-    }
-    setAdding(true)
-    setAddError("")
-    setNotice("")
-    try {
-      const added = await addMember(group.id, { email: email.trim(), ...flags })
-      onMembersChange(ordered([...members, added]))
-      setNotice(`${added.name} is now in the group.`)
-      setEmail("")
-      setFlags(NO_FLAGS)
-    } catch (err) {
-      setAddError(errorText(err))
-    } finally {
-      setAdding(false)
-    }
+    if (!email.trim()) return setError("Enter the email the person signed up with.")
+    void run(async () => onAdded(await addMember(groupId, { email: email.trim(), ...flags })))
   }
 
   return (
-    <section className="card" aria-labelledby="group-members-heading">
-      <h2 id="group-members-heading">People and permissions</h2>
-      <p className="hint">
-        Everyone in the group sees its workouts. {MEMBER_FLAGS.map((f) => `${f.label}: ${f.description.toLowerCase()}`).join(". ")}.
-        {isOwner ? " Tick a box to change it straight away." : " Only the owner can change these."}
-      </p>
-      {error && (
-        <p className="error" role="alert">
-          {error}
-        </p>
-      )}
-      {notice && (
-        <p className="hint" role="status">
-          {notice}
-        </p>
-      )}
+    <form className="fields" onSubmit={handleSubmit} noValidate>
+      <div className="field wide">
+        <label htmlFor="group-add-email">Account email</label>
+        <input id="group-add-email" list="my-clients" type="email" value={email} onChange={(e) => setEmail(e.target.value)} maxLength={254} placeholder="rafi@example.com" autoComplete="off" autoFocus />
+        <datalist id="my-clients">
+          {clients
+            .filter((c) => !members.some((m) => m.user_id === c.id))
+            .map((c) => (
+              <option key={c.id} value={c.email}>
+                {c.name}
+              </option>
+            ))}
+        </datalist>
+        <span className="hint">They see the group straight away. Everyone in it sees its workouts; tick what else they may do.</span>
+      </div>
+      <div className="wide">
+        {MEMBER_FLAGS.map((f) => (
+          <label key={f.flag} className="checkbox-row" htmlFor={`group-add-${f.flag}`}>
+            <input id={`group-add-${f.flag}`} type="checkbox" checked={flags[f.flag]} onChange={(e) => setFlags({ ...flags, [f.flag]: e.target.checked })} />
+            {f.description}
+          </label>
+        ))}
+      </div>
+      <FormActions label="Add to group" saving={saving} error={error} onCancel={onCancel} />
+    </form>
+  )
+}
+
+interface Props {
+  group: Group
+  members: GroupMember[]
+  meId: number
+  onMembersChange: (members: GroupMember[]) => void
+  /** Someone was removed: workouts assigned to them are now unassigned, so the list loads again. */
+  onRemoved: () => void
+}
+
+// Who is in a group and what each person may do. The owner ticks the permissions, adds people by email and removes
+// them; everyone else sees the same table read-only.
+export default function GroupMembers({ group, members, meId, onMembersChange, onRemoved }: Props) {
+  const isOwner = canInGroup(group, "manage")
+  const { saving, error, run } = useSave()
+  const [notice, setNotice] = useState("")
+  const [adding, setAdding] = useState(false)
+  const [removing, setRemoving] = useState<GroupMember | null>(null)
+
+  const toggle = (m: GroupMember, flag: MemberFlag, value: boolean) =>
+    run(async () => {
+      setNotice("")
+      const updated = await updateMember(group.id, m.user_id, { [flag]: value })
+      onMembersChange(members.map((x) => (x.user_id === updated.user_id ? updated : x)))
+    })
+
+  return (
+    <section className="card">
+      <div className="toolbar">
+        <div>
+          <h2>People and permissions</h2>
+          <p className="hint">{isOwner ? "Everyone sees the workouts. Tick what else each person may do." : "Only the owner can change these."}</p>
+        </div>
+        {isOwner && (
+          <button type="button" className="small primary" onClick={() => setAdding(true)}>
+            <Icon name="plus" /> Add person
+          </button>
+        )}
+      </div>
+      <Alert>{error}</Alert>
+      <Alert kind="success">{notice}</Alert>
       <div className="table-wrap">
         <table>
           <thead>
             <tr>
-              <th>Name</th>
-              {isOwner && <th>Email</th>}
+              <th>Person</th>
               {MEMBER_FLAGS.map((f) => (
-                <th key={f.flag} className="check" title={f.description}>
+                <th key={f.flag} className="tick" title={f.description}>
                   {f.label}
                 </th>
               ))}
-              {isOwner && <th>Action</th>}
+              {isOwner && (
+                <th className="act">
+                  <span className="visually-hidden">Action</span>
+                </th>
+              )}
             </tr>
           </thead>
           <tbody>
-            {members.map((m) => {
-              const busy = busyId === m.user_id
-              return (
-                <tr key={m.user_id}>
-                  <td className="name">
-                    {m.name}
-                    {m.user_id === meId && <span className="hint"> (you)</span>}
-                    {m.is_owner && (
-                      <>
-                        {" "}
-                        <span className="pill frozen">Owner</span>
-                      </>
-                    )}
+            {members.map((m) => (
+              <tr key={m.user_id}>
+                <td className="name">
+                  {m.name}
+                  {m.user_id === meId && " (you)"} {m.is_owner && <span className="pill accent">Owner</span>}
+                  {m.email && <span className="hint">{m.email}</span>}
+                </td>
+                {MEMBER_FLAGS.map((f) => (
+                  <td key={f.flag} className="tick" data-label={f.label}>
+                    <input
+                      type="checkbox"
+                      checked={m[f.flag]}
+                      // The owner always holds every permission; only the owner changes anyone else's.
+                      disabled={!isOwner || m.is_owner || saving}
+                      onChange={(e) => toggle(m, f.flag, e.target.checked)}
+                      aria-label={`${m.name}: ${f.description}`}
+                    />
                   </td>
-                  {isOwner && <td>{m.email}</td>}
-                  {MEMBER_FLAGS.map((f) => (
-                    <td key={f.flag} className="check">
-                      <input
-                        type="checkbox"
-                        checked={m[f.flag]}
-                        // The owner always holds every permission; only the owner changes anyone else's.
-                        disabled={!isOwner || m.is_owner || busy}
-                        onChange={(e) => toggle(m, f.flag, e.target.checked)}
-                        aria-label={`${m.name}: ${f.description}`}
-                      />
-                    </td>
-                  ))}
-                  {isOwner && (
-                    <td>
-                      {m.is_owner ? (
-                        <span className="hint">—</span>
-                      ) : removingId === m.user_id ? (
-                        <div className="actions">
-                          <button type="button" className="danger solid" onClick={() => remove(m)} disabled={busy}>
-                            {busy ? "Removing…" : `Remove ${m.name}`}
-                          </button>
-                          <button type="button" onClick={() => setRemovingId(null)} disabled={busy}>
-                            Cancel
-                          </button>
-                        </div>
-                      ) : (
-                        <button type="button" className="danger" onClick={() => setRemovingId(m.user_id)} disabled={busy}>
+                ))}
+                {isOwner && (
+                  <td className="act">
+                    {!m.is_owner && (
+                      <div className="actions">
+                        <button type="button" className="small danger" onClick={() => setRemoving(m)} disabled={saving}>
                           Remove
                         </button>
-                      )}
-                    </td>
-                  )}
-                </tr>
-              )
-            })}
+                      </div>
+                    )}
+                  </td>
+                )}
+              </tr>
+            ))}
           </tbody>
         </table>
       </div>
-      {isOwner && (
-        <form className="filters" onSubmit={add} noValidate aria-label="Add someone to the group">
-          <div className="field">
-            <label htmlFor="group-add-email">Add someone by email</label>
-            <input
-              id="group-add-email"
-              list="my-clients"
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              maxLength={254}
-              placeholder="rafi@example.com"
-              autoComplete="off"
-            />
-            <datalist id="my-clients">
-              {clients
-                .filter((c) => !members.some((m) => m.user_id === c.id))
-                .map((c) => (
-                  <option key={c.id} value={c.email}>
-                    {c.name}
-                  </option>
-                ))}
-            </datalist>
-          </div>
-          {MEMBER_FLAGS.map((f) => (
-            <label key={f.flag} className="checkbox-row" htmlFor={`group-add-${f.flag}`}>
-              <input
-                id={`group-add-${f.flag}`}
-                type="checkbox"
-                checked={flags[f.flag]}
-                onChange={(e) => setFlags({ ...flags, [f.flag]: e.target.checked })}
-              />
-              {f.description}
-            </label>
-          ))}
-          <div className="actions">
-            <button className="primary" type="submit" disabled={adding}>
-              {adding ? "Adding…" : "Add to group"}
-            </button>
-          </div>
-        </form>
+      {adding && (
+        <Modal title="Add someone to the group" onClose={() => setAdding(false)}>
+          <AddPersonForm
+            groupId={group.id}
+            members={members}
+            onCancel={() => setAdding(false)}
+            onAdded={(added) => {
+              onMembersChange(ordered([...members, added]))
+              setNotice(`${added.name} is now in the group.`)
+              setAdding(false)
+            }}
+          />
+        </Modal>
       )}
-      {isOwner && <p className="hint">The person must have an account already. There are no invitations: they see the group straight away.</p>}
-      {addError && (
-        <p className="error" role="alert">
-          {addError}
-        </p>
+      {removing && (
+        <ConfirmModal
+          title={`Remove ${removing.name}?`}
+          confirmLabel="Remove"
+          busyLabel="Removing…"
+          onClose={() => setRemoving(null)}
+          onConfirm={async () => {
+            await removeMember(group.id, removing.user_id)
+            onMembersChange(members.filter((x) => x.user_id !== removing.user_id))
+            setNotice(`${removing.name} is no longer in the group.`)
+            setRemoving(null)
+            onRemoved()
+          }}
+        >
+          They stop seeing the group, and workouts assigned to them become unassigned. The workouts they added stay.
+        </ConfirmModal>
       )}
     </section>
   )

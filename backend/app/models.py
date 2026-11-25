@@ -1,6 +1,6 @@
 # The tables and the request / response schemas built on them (TDD 5.1, 5.3).
 # There is no separate member table: a member is a user whose account has a membership (a plan).
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from enum import Enum
 from typing import Annotated, Literal
 
@@ -38,14 +38,23 @@ def as_utc(value: datetime) -> datetime:
 UtcDateTime = Annotated[datetime, PlainSerializer(lambda v: as_utc(v).isoformat().replace("+00:00", "Z"), return_type=str)]
 
 
-def utc_today() -> date:
-    """'Today' for expiry checks is the server's UTC date (SRS C-7)."""
-    return utc_now().date()
+# The gym is in Bangladesh: one time zone, 6 hours ahead of UTC, with no daylight saving time. Times are stored in UTC;
+# a "day" (an expiry date, a date filter, today's check-ins) is always the gym's own calendar day (SRS C-7).
+GYM_TIMEZONE = timezone(timedelta(hours=6), "Asia/Dhaka")
+
+
+def gym_today() -> date:
+    """The date at the gym now. The server's UTC date would change at 6 in the morning, in the middle of opening hours."""
+    return utc_now().astimezone(GYM_TIMEZONE).date()
 
 
 def start_of_day(day: date) -> datetime:
-    """Midnight UTC at the start of a day: the calendar the date filters and the expiry check use (SRS C-7)."""
-    return datetime.combine(day, time.min, tzinfo=timezone.utc)
+    """Midnight at the gym at the start of a day, as the UTC time the database holds."""
+    return datetime.combine(day, time.min, tzinfo=GYM_TIMEZONE).astimezone(timezone.utc)
+
+
+# A calendar day sent by a client. The range leaves room to add a plan's days without running past the last date.
+Day = Annotated[date, Field(ge=date(1990, 1, 1), le=date(2100, 12, 31))]
 
 
 def _blank_to_none(value: object) -> object:
@@ -60,7 +69,7 @@ EARLIEST_BIRTH_DATE = date(1900, 1, 1)
 
 
 def _check_birth_date(value: date | None) -> date | None:
-    if value is not None and not EARLIEST_BIRTH_DATE <= value <= utc_today():
+    if value is not None and not EARLIEST_BIRTH_DATE <= value <= gym_today():
         raise ValueError(f"date_of_birth must be between {EARLIEST_BIRTH_DATE.isoformat()} and today")
     return value
 
@@ -88,7 +97,7 @@ class User(SQLModel, table=True):
     is_banned: bool = False
     banned_at: datetime | None = None
     ban_reason: str | None = Field(default=None, max_length=500)
-    # Tokens issued before this moment stop working (set when the password is changed).
+    # Set when the person, or an admin resetting it, last changed the password. Shown on the account's details.
     password_changed_at: datetime | None = None
     # Set when an admin resets the password: until a new one is chosen, the account can do nothing else.
     must_change_password: bool = False
@@ -161,9 +170,9 @@ class MemberCreate(SQLModel):
     email: EmailStr
     phone: str | None = Field(default=None, max_length=20)
     plan: Plan
-    joined_on: date | None = None
+    joined_on: Day | None = None
     # Left out, it is joined_on plus the plan's days.
-    expires_on: date | None = None
+    expires_on: Day | None = None
     trainer_id: AccountId | None = None
     notes: str | None = Field(default=None, max_length=500)
     # Set when the person pays now: the plan's price is recorded as their first payment in the same step.
@@ -171,7 +180,7 @@ class MemberCreate(SQLModel):
 
     @model_validator(mode="after")
     def check_dates(self) -> "MemberCreate":
-        if self.expires_on is not None and self.expires_on < (self.joined_on or utc_today()):
+        if self.expires_on is not None and self.expires_on < (self.joined_on or gym_today()):
             raise ValueError("expires_on must be on or after joined_on")
         return self
 
@@ -205,7 +214,7 @@ class MemberUpdate(ProfileUpdate):
 
     name: FullName | None = None
     plan: Plan | None = None
-    expires_on: date | None = None
+    expires_on: Day | None = None
     is_frozen: bool | None = None
     # Sent: this personal trainer, or null for none. Left out: the trainer stays as it is.
     trainer_id: AccountId | None = None
@@ -427,7 +436,7 @@ class CheckInStats(SQLModel):
     last_7_days: int
     # Checked in today and not checked out yet.
     inside_now: int
-    # Each of the last 7 UTC days, oldest first; the last one is today.
+    # Each of the last 7 days, oldest first; the last one is today.
     by_day: list[DayCount]
 
 
@@ -558,19 +567,24 @@ class ClassBooking(SQLModel, table=True):
     attended: bool | None = None
 
 
+def _class_time(value: datetime) -> datetime:
+    # Checked before the conversion, which fails for a time at the very edge of the calendar.
+    if not 2000 <= value.year <= 2100:
+        raise ValueError("the year must be between 2000 and 2100")
+    return as_utc(value)
+
+
+ClassTime = Annotated[datetime, AfterValidator(_class_time)]
+
+
 class ClassCreate(SQLModel):
     name: FullName
     description: str | None = Field(default=None, max_length=500)
     # An account with the Trainer role (GET /api/v1/trainers lists them), or none.
     trainer_id: AccountId | None = None
-    starts_at: datetime
+    starts_at: ClassTime
     duration_minutes: DurationMinutes
     capacity: Capacity
-
-    @field_validator("starts_at")
-    @classmethod
-    def starts_at_in_utc(cls, value: datetime) -> datetime:
-        return as_utc(value)
 
 
 class ClassUpdate(SQLModel):
@@ -578,14 +592,9 @@ class ClassUpdate(SQLModel):
     description: str | None = Field(default=None, max_length=500)
     # Sent: this trainer, or null for none, replacing any old text name. Left out: the trainer stays as it is.
     trainer_id: AccountId | None = None
-    starts_at: datetime | None = None
+    starts_at: ClassTime | None = None
     duration_minutes: DurationMinutes | None = None
     capacity: Capacity | None = None
-
-    @field_validator("starts_at")
-    @classmethod
-    def starts_at_in_utc(cls, value: datetime | None) -> datetime | None:
-        return None if value is None else as_utc(value)
 
     @model_validator(mode="after")
     def check_required_not_null(self) -> "ClassUpdate":
@@ -753,10 +762,10 @@ class PaymentListPage(PaymentPage):
 
 
 class PaymentFilter(SQLModel):
-    """Query filters shared by the payments list and the CSV export. Dates are UTC calendar days, both inclusive."""
+    """Query filters shared by the payments list and the CSV export. Dates are the gym's calendar days, both inclusive."""
 
-    date_from: date | None = None
-    date_to: date | None = None
+    date_from: Day | None = None
+    date_to: Day | None = None
     method: PaymentMethod | None = None
     # Part of the member's name, any case.
     member: Annotated[str, StringConstraints(strip_whitespace=True, max_length=100)] | None = None
@@ -791,7 +800,7 @@ class MonthRevenue(SQLModel):
 
 
 class RevenueStats(SQLModel):
-    """Money taken, in whole taka, by UTC calendar day. Voided payments are never counted."""
+    """Money taken, in whole taka, by the gym's calendar day. Voided payments are never counted."""
 
     today: int
     this_month: int
@@ -849,7 +858,7 @@ class PlanUpdate(SQLModel):
 
 
 class PaymentsToday(SQLModel):
-    """Payments taken since midnight UTC that are not voided."""
+    """Payments taken since midnight that are not voided."""
 
     count: int
     amount: int
@@ -884,7 +893,7 @@ class Announcement(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     title: str = Field(max_length=100)
     message: str = Field(max_length=1000)
-    # The last UTC day it shows on, inclusive (like a membership's expires_on). None: it shows until it is deleted.
+    # The last day it shows on, inclusive (like a membership's expires_on). None: it shows until it is deleted.
     ends_on: date | None = None
     # Who posted it; null once that account is deleted, and the announcement stays.
     posted_by: int | None = Field(default=None, foreign_key="app_user.id", ondelete="SET NULL")
@@ -895,15 +904,15 @@ class Announcement(SQLModel, table=True):
 
 def _not_in_the_past(ends_on: date | None) -> date | None:
     # An end date before today would hide the announcement straight away, so it is refused.
-    if ends_on is not None and ends_on < utc_today():
-        raise ValueError("ends_on cannot be before today (UTC)")
+    if ends_on is not None and ends_on < gym_today():
+        raise ValueError("ends_on cannot be before today")
     return ends_on
 
 
 class AnnouncementCreate(SQLModel):
     title: AnnouncementTitle
     message: AnnouncementMessage
-    ends_on: date | None = None
+    ends_on: Day | None = None
 
     @field_validator("ends_on")
     @classmethod
@@ -915,7 +924,7 @@ class AnnouncementUpdate(SQLModel):
     title: AnnouncementTitle | None = None
     message: AnnouncementMessage | None = None
     # Sent: the new end date, or null to show it until it is deleted. Left out: the end date stays as it is.
-    ends_on: date | None = None
+    ends_on: Day | None = None
 
     @field_validator("ends_on")
     @classmethod
@@ -974,9 +983,15 @@ class ActivityEvent(str, Enum):
     EXPORT = "export"
     # An admin deleted an expense, so that month's total changed.
     EXPENSE_DELETE = "expense_delete"
-    # An admin removed someone's workout or training group (content moderation).
+    # A workout or a training group: by someone in the group, or by an admin (content moderation).
     WORKOUT_DELETE = "workout_delete"
     GROUP_DELETE = "group_delete"
+    # Deleted or voided by staff.
+    CLASS_DELETE = "class_delete"
+    EQUIPMENT_DELETE = "equipment_delete"
+    ANNOUNCEMENT_DELETE = "announcement_delete"
+    PLAN_DELETE = "plan_delete"
+    PAYMENT_VOID = "payment_void"
 
 
 class ActivityLog(SQLModel, table=True):
@@ -1022,13 +1037,13 @@ class ActivityPage(SQLModel):
 
 
 class ActivityFilter(SQLModel):
-    """Query filters shared by the activity list and its CSV export. Dates are UTC calendar days, both inclusive."""
+    """Query filters shared by the activity list and its CSV export. Dates are the gym's calendar days, both inclusive."""
 
     event: ActivityEvent | None = None
     # Rows where this account acted or was acted on.
     user_id: AccountId | None = None
-    date_from: date | None = None
-    date_to: date | None = None
+    date_from: Day | None = None
+    date_to: Day | None = None
     # Part of an email, the IP address or the details, any case.
     q: Annotated[str, StringConstraints(strip_whitespace=True, max_length=100)] | None = None
 
@@ -1088,7 +1103,7 @@ WORKOUT_DAYS_AHEAD = 365
 
 def _check_workout_date(value: date | None) -> date | None:
     if value is not None:
-        latest = date.fromordinal(utc_today().toordinal() + WORKOUT_DAYS_AHEAD)
+        latest = date.fromordinal(gym_today().toordinal() + WORKOUT_DAYS_AHEAD)
         if not EARLIEST_WORKOUT_DATE <= value <= latest:
             raise ValueError(f"workout_date must be between {EARLIEST_WORKOUT_DATE.isoformat()} and a year from today")
     return value
@@ -1287,7 +1302,7 @@ class AdminSessionRead(SQLModel):
 
 
 class UserRecordCounts(SQLModel):
-    """How much the account has on record; the lists themselves are on the pages they belong to."""
+    """How much the account has on record. The newest of each are in UserRecords."""
 
     visits: int
     bookings: int
@@ -1297,6 +1312,16 @@ class UserRecordCounts(SQLModel):
     # Workouts assigned to the user, and how many of those they marked done.
     workouts_assigned: int
     workouts_completed: int
+
+
+class UserRecords(SQLModel):
+    """The account's newest records of each kind (RECENT_RECORDS of each), for the admin's user details."""
+
+    # Workouts they added or were assigned.
+    workouts: list[WorkoutRead]
+    bookings: list[BookedClassRead]
+    visits: list[CheckInRead]
+    payments: list[PaymentRead]
 
 
 class UserGroupRead(SQLModel):
@@ -1313,8 +1338,11 @@ class AdminUserDetail(AdminUserRead):
     joined_on: date | None
     # Set while too many wrong passwords block the account's logins.
     locked_until: UtcDateTime | None
+    # None: never changed since signing up.
+    password_changed_at: UtcDateTime | None
     sessions: list[AdminSessionRead]
     records: UserRecordCounts
+    recent_records: UserRecords
     groups: list[UserGroupRead]
     # The newest rows where the user acted or was acted on (the Activity page has the rest).
     recent_activity: list[ActivityRead]
@@ -1326,8 +1354,8 @@ ModerationSearch = Annotated[str, StringConstraints(strip_whitespace=True, max_l
 
 
 class _DateRange(SQLModel):
-    date_from: date | None = None
-    date_to: date | None = None
+    date_from: Day | None = None
+    date_to: Day | None = None
 
     @model_validator(mode="after")
     def check_range(self) -> "_DateRange":
@@ -1336,17 +1364,22 @@ class _DateRange(SQLModel):
         return self
 
 
+WorkoutStatus = Literal["unassigned", "to_do", "done"]
+
+
 class ModerationWorkoutFilter(_DateRange):
     """Filters for the admin workout list and its CSV. The dates are the workout's date, both included."""
 
     owner_id: AccountId | None = None
     group_id: AccountId | None = None
+    # Assigned to nobody, assigned but not done yet, or marked done.
+    status: WorkoutStatus | None = None
     # Part of the title, the notes, or the owner's name or email, any case.
     q: ModerationSearch = None
 
 
 class ModerationGroupFilter(_DateRange):
-    """Filters for the admin group list and its CSV. The dates are the UTC days the group was made, both included."""
+    """Filters for the admin group list and its CSV. The dates are the days the group was made, both included."""
 
     owner_id: AccountId | None = None
     # Part of the group's name, or the owner's name or email, any case.
@@ -1406,8 +1439,8 @@ SERVICE_DUE_DAYS = 7
 
 
 def _past_day(value: date | None) -> date | None:
-    if value is not None and not date(1980, 1, 1) <= value <= utc_today():
-        raise ValueError("the date must be between 1980-01-01 and today (UTC)")
+    if value is not None and not date(1980, 1, 1) <= value <= gym_today():
+        raise ValueError("the date must be between 1980-01-01 and today")
     return value
 
 

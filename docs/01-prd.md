@@ -192,7 +192,7 @@ Priorities are per release: a Beta "Must" is required for the final, not for the
 - Vercel functions are serverless, so data must live in an external database (Supabase PostgreSQL), not a local file.
 - Backend: Python 3.10+, FastAPI. Frontend: Vite + React + TypeScript.
 - Payments happen outside the system; staff renew a membership by updating `expires_on`.
-- "Today" for expiry checks is the server's UTC date.
+- "Today" for expiry checks is the gym's own date (Dhaka, UTC+6).
 - The first admin is promoted manually (role set in the Supabase table editor); after that admins manage roles through the API.
 - MVP members are kept when the Beta is deployed; they become walk-in members until staff link them to an account.
 

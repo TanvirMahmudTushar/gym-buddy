@@ -1,6 +1,7 @@
 import type { ProfileErrors, ProfileForm } from "../utils/profile"
 import { EARLIEST_BIRTH_DATE } from "../utils/profile"
-import { todayUtc } from "../utils/member"
+import { gymToday } from "../utils/time"
+import FieldError from "./FieldError"
 
 interface Props {
   /** Prefix for the input ids, so two forms on one page never share one. */
@@ -27,18 +28,18 @@ export default function ProfileFields({ idPrefix, form, errors, onChange }: Prop
       </div>
       <div className="field">
         <label htmlFor={id("date_of_birth")}>Date of birth</label>
-        <input {...input("date_of_birth")} type="date" min={EARLIEST_BIRTH_DATE} max={todayUtc()} />
-        {errors.date_of_birth && <span className="field-error">{errors.date_of_birth}</span>}
+        <input {...input("date_of_birth")} type="date" min={EARLIEST_BIRTH_DATE} max={gymToday()} />
+        <FieldError>{errors.date_of_birth}</FieldError>
       </div>
       <div className="field">
-        <label htmlFor={id("emergency_contact_name")}>Emergency contact name</label>
+        <label htmlFor={id("emergency_contact_name")}>Emergency contact</label>
         <input {...input("emergency_contact_name")} maxLength={100} autoComplete="off" placeholder="Rina (mother)" />
+        <FieldError>{errors.emergency_contact}</FieldError>
       </div>
       <div className="field">
-        <label htmlFor={id("emergency_contact_phone")}>Emergency contact phone</label>
+        <label htmlFor={id("emergency_contact_phone")}>Emergency phone</label>
         <input {...input("emergency_contact_phone")} type="tel" maxLength={20} autoComplete="off" />
       </div>
-      {errors.emergency_contact && <span className="field-error wide-error">{errors.emergency_contact}</span>}
     </>
   )
 }

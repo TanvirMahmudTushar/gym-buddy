@@ -1,6 +1,7 @@
 # Login: the right password, a wrong one, and the lockout after 5 wrong passwords in a row (FR-13, FR-34).
-from app.services.auth_service import MAX_FAILED_LOGINS
 from conftest import PASSWORD
+
+from app.services.auth_service import MAX_FAILED_LOGINS
 
 
 def test_right_password_gives_tokens_and_a_refresh_cookie(account, anon):

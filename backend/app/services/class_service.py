@@ -8,9 +8,11 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, col, delete, func, select
 
 from app import rbac
-from app.models import ClassBooking, ClassCreate, GymClass, User, as_utc, utc_now
+from app.models import ActivityEvent, ClassBooking, ClassCreate, GymClass, User, as_utc, utc_now
 from app.rbac import Permission
-from app.services import checkin_service, trainer_service
+from app.request_info import Client
+from app.services import activity_service, checkin_service, trainer_service
+from app.services.csv_export import utc_text
 
 # Attendance can be marked from this long before the class starts (people arrive early), and any time after.
 ATTENDANCE_OPENS = timedelta(hours=1)
@@ -18,6 +20,10 @@ ATTENDANCE_OPENS = timedelta(hours=1)
 
 class ClassNotFoundError(Exception):
     """No class has the given ID."""
+
+
+class ClassInThePastError(Exception):
+    """A new class, or a new time for a class, that has already passed."""
 
 
 class CapacityBelowBookingsError(Exception):
@@ -122,6 +128,8 @@ def _count_bookings(session: Session, class_id: int) -> int:
 
 
 def create_class(session: Session, data: ClassCreate, created_by: User) -> dict:
+    if data.starts_at <= utc_now():
+        raise ClassInThePastError
     if data.trainer_id is not None:
         trainer_service.check_trainer(session, data.trainer_id)
     gym_class = GymClass(**data.model_dump(), created_by=created_by.id)
@@ -173,6 +181,10 @@ def update_class(session: Session, class_id: int, changes: dict) -> dict:
     """Only the fields sent change. Capacity cannot go below the current bookings."""
     gym_class = _get(session, class_id)
     booked = _count_bookings(session, class_id)
+    # A class that has started keeps its time when something else about it is edited.
+    if "starts_at" in changes and changes["starts_at"] != as_utc(gym_class.starts_at):
+        if changes["starts_at"] <= utc_now():
+            raise ClassInThePastError
     if "capacity" in changes and changes["capacity"] < booked:
         raise CapacityBelowBookingsError(f"Capacity cannot be lower than the {booked} booking(s) already made")
     if "trainer_id" in changes:
@@ -188,8 +200,16 @@ def update_class(session: Session, class_id: int, changes: dict) -> dict:
     return _read(gym_class, _trainer_name(session, gym_class), booked)
 
 
-def delete_class(session: Session, class_id: int) -> None:
+def delete_class(session: Session, class_id: int, actor: User, client: Client) -> None:
     gym_class = _get(session, class_id)
+    bookings = _count_bookings(session, class_id)
+    activity_service.record(
+        session,
+        ActivityEvent.CLASS_DELETE,
+        client,
+        actor=actor,
+        details=f"{gym_class.name}, {utc_text(gym_class.starts_at)} UTC; bookings deleted: {bookings}",
+    )
     # Bookings go first: the database cascades too, but SQLite does not enforce that by default.
     session.exec(delete(ClassBooking).where(col(ClassBooking.class_id) == class_id))
     session.delete(gym_class)
@@ -273,23 +293,18 @@ def book_class(session: Session, class_id: int, member: User) -> dict:
     return _booking_read(booking, member.name)
 
 
-def list_member_bookings(
-    session: Session, member_id: int, when: When, offset: int, limit: int
-) -> tuple[list[dict], int]:
-    """A member's bookings with their classes: upcoming ones soonest first, or past ones latest first."""
-    filters = [col(ClassBooking.member_id) == member_id, _when_filter(when)]
-    joined = col(ClassBooking.class_id) == col(GymClass.id)
-    total = session.exec(select(func.count()).select_from(ClassBooking).join(GymClass, joined).where(*filters)).one()
+def _booked_classes(session: Session, filters: list, order, offset: int, limit: int) -> list[dict]:
+    """Bookings matching the filters, each with its class and the trainer's name."""
     rows = session.exec(
         select(ClassBooking, GymClass, _TRAINER_NAME)
-        .join(GymClass, joined)
+        .join(GymClass, col(ClassBooking.class_id) == col(GymClass.id))
         .outerjoin(User, _TRAINER_JOIN)
         .where(*filters)
-        .order_by(_when_order(when), col(GymClass.id))
+        .order_by(order, col(GymClass.id))
         .offset(offset)
         .limit(limit)
     ).all()
-    items = [
+    return [
         {
             "class_id": c.id,
             "class_name": c.name,
@@ -301,7 +316,26 @@ def list_member_bookings(
         }
         for b, c, trainer in rows
     ]
-    return items, total
+
+
+def list_member_bookings(
+    session: Session, member_id: int, when: When, offset: int, limit: int
+) -> tuple[list[dict], int]:
+    """A member's bookings with their classes: upcoming ones soonest first, or past ones latest first."""
+    filters = [col(ClassBooking.member_id) == member_id, _when_filter(when)]
+    total = session.exec(
+        select(func.count())
+        .select_from(ClassBooking)
+        .join(GymClass, col(ClassBooking.class_id) == col(GymClass.id))
+        .where(*filters)
+    ).one()
+    return _booked_classes(session, filters, _when_order(when), offset, limit), total
+
+
+def list_newest_bookings(session: Session, member_id: int, limit: int) -> list[dict]:
+    """An account's bookings, upcoming or past, the last one made first, for the admin's user details."""
+    newest = col(ClassBooking.booked_at).desc()
+    return _booked_classes(session, [col(ClassBooking.member_id) == member_id], newest, 0, limit)
 
 
 def cancel_booking(session: Session, class_id: int, member: User) -> None:

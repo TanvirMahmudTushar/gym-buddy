@@ -1,96 +1,85 @@
 import { type FormEvent, useState } from "react"
+import Alert from "../../components/Alert"
 import ChangePasswordForm from "../../components/ChangePasswordForm"
 import MyDetailsCard from "../../components/MyDetailsCard"
+import PageHeader from "../../components/PageHeader"
+import RolePill from "../../components/RolePill"
 import SessionsCard from "../../components/SessionsCard"
 import { useAuth } from "../../context/AuthContext"
+import { useSave } from "../../hooks/useSave"
 import { renameMe } from "../../services/authService"
-import { ROLES, roleLabel } from "../../utils/auth"
-import { errorText, formatDate } from "../../utils/member"
+import { ROLES } from "../../utils/auth"
+import { formatDate } from "../../utils/time"
 
-// Every logged-in person sees this page: their details and their role.
+// Every logged-in person sees this page: their profile, password and sessions.
 export default function AccountPage() {
   const { user, setUser } = useAuth()
   const [name, setName] = useState(user?.name ?? "")
-  const [error, setError] = useState("")
   const [saved, setSaved] = useState(false)
-  const [busy, setBusy] = useState(false)
+  const { saving, error, setError, run } = useSave()
   // Bumped after a password change, which logs the other browsers out, so the session list shows that.
   const [sessionsKey, setSessionsKey] = useState(0)
 
   if (!user) return null
 
-  async function handleSubmit(e: FormEvent) {
+  function handleSubmit(e: FormEvent) {
     e.preventDefault()
     setSaved(false)
-    if (!name.trim()) {
-      setError("Enter your name.")
-      return
-    }
-    setError("")
-    setBusy(true)
-    try {
+    if (!name.trim()) return setError("Enter your name.")
+    void run(async () => {
       setUser(await renameMe(name.trim()))
       setSaved(true)
-    } catch (err) {
-      setError(errorText(err))
-    } finally {
-      setBusy(false)
-    }
+    })
   }
 
-  const description = ROLES.find((r) => r.value === user.role)?.description
-
   return (
-    <div className="column narrow">
-      <section className="card" aria-labelledby="account-heading">
-        <h2 id="account-heading">My account</h2>
-        <dl className="facts">
-          <dt>Email</dt>
-          <dd>{user.email}</dd>
-          <dt>Role</dt>
-          <dd>
-            <span className={`pill role-${user.role}`}>{roleLabel(user.role)}</span>
-          </dd>
-          <dt>Member since</dt>
-          <dd>{formatDate(user.created_at)}</dd>
-        </dl>
-        <p className="hint">{description}</p>
-        {user.role === "user" && (
-          <p className="hint">To manage gym members, ask an admin to make you a Gym Manager, then log in again.</p>
-        )}
-      </section>
-      <section className="card" aria-labelledby="name-heading">
-        <h2 id="name-heading">Change my name</h2>
-        <form className="stack" onSubmit={handleSubmit} noValidate>
-          <div className="field">
-            <label htmlFor="account-name">Full name</label>
-            <input
-              id="account-name"
-              value={name}
-              onChange={(e) => {
-                setName(e.target.value)
-                setSaved(false)
-              }}
-              maxLength={100}
-              autoComplete="name"
-            />
-          </div>
-          {error && (
-            <p className="error" role="alert">
-              {error}
-            </p>
-          )}
-          <div className="actions">
-            <button className="primary" type="submit" disabled={busy || name.trim() === user.name}>
-              {busy ? "Saving…" : "Save name"}
-            </button>
-            {saved && <span className="hint">Saved.</span>}
-          </div>
-        </form>
-      </section>
-      <MyDetailsCard />
-      <ChangePasswordForm onChanged={() => setSessionsKey((k) => k + 1)} />
-      <SessionsCard reloadKey={sessionsKey} />
+    <div className="page">
+      <PageHeader title="My account" subtitle={user.email} />
+      <div className="split">
+        <div className="column">
+          <section className="card">
+            <h2>Profile</h2>
+            <form className="stack" onSubmit={handleSubmit} noValidate>
+              <div className="inline">
+                <div className="field">
+                  <label htmlFor="account-name">Full name</label>
+                  <input
+                    id="account-name"
+                    value={name}
+                    onChange={(e) => {
+                      setName(e.target.value)
+                      setSaved(false)
+                    }}
+                    maxLength={100}
+                    autoComplete="name"
+                  />
+                </div>
+                <button className="primary" type="submit" disabled={saving || name.trim() === user.name}>
+                  {saving ? "Saving…" : "Save name"}
+                </button>
+              </div>
+              <Alert>{error}</Alert>
+              <Alert kind="success">{saved && "Your name is saved."}</Alert>
+            </form>
+            <dl className="facts">
+              <dt>Role</dt>
+              <dd>
+                <RolePill role={user.role} /> <span className="hint">{ROLES.find((r) => r.value === user.role)?.description}</span>
+              </dd>
+              <dt>Signed up</dt>
+              <dd>{formatDate(user.created_at)}</dd>
+            </dl>
+          </section>
+          <MyDetailsCard />
+        </div>
+        <div className="column">
+          <section className="card">
+            <h2>Password</h2>
+            <ChangePasswordForm onChanged={() => setSessionsKey((k) => k + 1)} />
+          </section>
+          <SessionsCard reloadKey={sessionsKey} />
+        </div>
+      </div>
     </div>
   )
 }

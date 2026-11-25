@@ -2,7 +2,7 @@
 # The cookie holds the refresh token; the database keeps only its hash, and every refresh replaces it (rotation).
 from datetime import timedelta
 
-from sqlmodel import Session, col, select, update
+from sqlmodel import Session, col, or_, select, update
 
 from app.models import ActivityEvent, AuthSession, User, as_utc, utc_now
 from app.request_info import Client
@@ -164,10 +164,14 @@ def revoke_all(session: Session, user_id: int, keep: int | None = None) -> int:
 
 
 def logout(session: Session, token: str, client: Client) -> None:
-    """Revoke the session whose current refresh token this is. An unknown token is ignored: logout always succeeds.
-    Only a session that was still open is logged, so a second logout adds nothing."""
+    """Revoke the session this refresh token belongs to, also when another tab has just replaced the token. An unknown
+    token is ignored: logout always succeeds. Only a session that was still open is logged, so a second logout adds
+    nothing."""
+    token_hash = hash_refresh_token(token)
     auth_session = session.exec(
-        select(AuthSession).where(col(AuthSession.token_hash) == hash_refresh_token(token))
+        select(AuthSession).where(
+            or_(col(AuthSession.token_hash) == token_hash, col(AuthSession.previous_token_hash) == token_hash)
+        )
     ).first()
     if auth_session is not None and auth_session.revoked_at is None:
         user = session.get(User, auth_session.user_id)

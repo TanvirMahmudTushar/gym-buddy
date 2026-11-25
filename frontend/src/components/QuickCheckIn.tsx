@@ -1,9 +1,13 @@
 import { type FormEvent, useEffect, useState } from "react"
 import { useDebouncedValue } from "../hooks/useDebouncedValue"
+import { useSave } from "../hooks/useSave"
 import { recordCheckIn } from "../services/checkInService"
 import { listMembers } from "../services/memberService"
 import type { Member } from "../types/member"
-import { errorText, formatTime, memberStatus, membersLink } from "../utils/member"
+import { memberStatus, membersLink } from "../utils/member"
+import { errorText } from "../utils/text"
+import { formatTime } from "../utils/time"
+import Alert from "./Alert"
 import StatusPill from "./StatusPill"
 
 const SHOWN = 6
@@ -12,54 +16,46 @@ const SHOWN = 6
 export default function QuickCheckIn({ onCheckedIn }: { onCheckedIn: () => void }) {
   const [search, setSearch] = useState("")
   const query = useDebouncedValue(search.trim())
-  const [found, setFound] = useState<Member[]>([])
-  const [loading, setLoading] = useState(false)
-  const [busyId, setBusyId] = useState<number | null>(null)
-  const [error, setError] = useState("")
+  // The people found, and the search they were found with.
+  const [found, setFound] = useState<{ query: string; members: Member[] }>({ query: "", members: [] })
+  const [searchError, setSearchError] = useState("")
+  const { saving, error, run } = useSave()
   const [message, setMessage] = useState("")
 
   useEffect(() => {
     if (!query) {
-      setFound([])
+      setFound({ query: "", members: [] })
       return
     }
     let ignore = false
-    setLoading(true)
-    setError("")
-    listMembers(0, null, query)
-      .then((page) => !ignore && setFound(page.items.slice(0, SHOWN)))
-      .catch((err) => !ignore && setError(errorText(err)))
-      .finally(() => !ignore && setLoading(false))
+    setSearchError("")
+    listMembers({ status: null, q: query }, 0)
+      .then((page) => !ignore && setFound({ query, members: page.items.slice(0, SHOWN) }))
+      .catch((err) => !ignore && setSearchError(errorText(err)))
     return () => {
       ignore = true
     }
   }, [query])
 
-  async function checkIn(member: Member) {
-    setBusyId(member.id)
-    setError("")
-    setMessage("")
-    try {
+  const checkIn = (member: Member) =>
+    run(async () => {
+      setMessage("")
       const visit = await recordCheckIn(member.id)
       setMessage(`${member.name} checked in at ${formatTime(visit.checked_in_at)}.`)
       setSearch("")
       onCheckedIn()
-    } catch (err) {
-      setError(errorText(err))
-    } finally {
-      setBusyId(null)
-    }
-  }
+    })
 
   // Enter checks in the person when the search found exactly one who may come in.
   function handleSubmit(e: FormEvent) {
     e.preventDefault()
-    if (found.length === 1 && memberStatus(found[0]) === "active") void checkIn(found[0])
+    const [only, ...rest] = found.members
+    if (only && rest.length === 0 && found.query === search.trim() && memberStatus(only) === "active" && !saving) void checkIn(only)
   }
 
   return (
-    <section className="card" aria-labelledby="quick-heading">
-      <h2 id="quick-heading">Check in a member</h2>
+    <section className="card">
+      <h2>Check in a member</h2>
       <form onSubmit={handleSubmit} role="search">
         <input
           type="search"
@@ -71,34 +67,26 @@ export default function QuickCheckIn({ onCheckedIn }: { onCheckedIn: () => void 
           autoComplete="off"
         />
       </form>
-      {query && !loading && found.length === 0 && !error && <p className="empty">No member matches "{query}".</p>}
-      {found.length > 0 && (
-        <ul className="visit-list">
-          {found.map((m) => {
+      <Alert kind="success">{message}</Alert>
+      <Alert>{error || searchError}</Alert>
+      {query && found.query === query && found.members.length === 0 && <p className="hint">No member matches "{query}".</p>}
+      {found.members.length > 0 && (
+        <ul className="rows">
+          {found.members.map((m) => {
             const status = memberStatus(m)
             return (
               <li key={m.id}>
-                <span className="wrap-text">
-                  <a href={membersLink({ member: m.id })}>{m.name}</a> <StatusPill status={status} />{" "}
-                  <span className="hint">{m.phone ?? m.email}</span>
+                <span>
+                  <a href={membersLink({ member: m.id })}>{m.name}</a> <StatusPill status={status} />
+                  <span className="row-note hint">{m.phone ?? m.email}</span>
                 </span>
-                <button type="button" className="primary" onClick={() => checkIn(m)} disabled={busyId !== null || status !== "active"}>
-                  {busyId === m.id ? "Checking in…" : "Check in"}
+                <button type="button" className="small primary" onClick={() => checkIn(m)} disabled={saving || status !== "active"}>
+                  Check in
                 </button>
               </li>
             )
           })}
         </ul>
-      )}
-      {message && (
-        <p className="hint" role="status">
-          {message}
-        </p>
-      )}
-      {error && (
-        <p className="error" role="alert">
-          {error}
-        </p>
       )}
     </section>
   )

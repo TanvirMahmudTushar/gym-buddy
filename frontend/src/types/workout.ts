@@ -1,4 +1,5 @@
 // Workout and training group types, matching the FastAPI schemas (TDD 5.3).
+import type { Page } from "./page"
 
 export interface Workout {
   id: number
@@ -20,12 +21,7 @@ export interface Workout {
   updated_at: string
 }
 
-export interface WorkoutPage {
-  items: Workout[]
-  total: number
-  offset: number
-  limit: number
-}
+export type WorkoutPage = Page<Workout>
 
 /** Add or edit a workout. group_id and assigned_to only when adding. */
 export interface WorkoutBody {
@@ -35,6 +31,9 @@ export interface WorkoutBody {
   group_id?: number
   assigned_to?: number
 }
+
+/** Assigned to nobody, assigned but not done yet, or marked done. */
+export type WorkoutStatus = "unassigned" | "to_do" | "done"
 
 /** What I may do in one group (backend/app/rbac.py, GroupPermission). The owner holds all five. */
 export type GroupPermission = "read" | "create" | "update" | "assign" | "manage"
@@ -51,12 +50,7 @@ export interface Group {
   my_permissions: GroupPermission[]
 }
 
-export interface GroupPage {
-  items: Group[]
-  total: number
-  offset: number
-  limit: number
-}
+export type GroupPage = Page<Group>
 
 /** Someone in a group. The owner's row always has every permission. */
 export interface GroupMember {

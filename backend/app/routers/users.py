@@ -1,12 +1,11 @@
 # The logged-in user's own account under /api/v1/users (TDD 6.2).
-from typing import Annotated, Literal
+from typing import Literal
 
-from fastapi import APIRouter, Query, Response
+from fastapi import APIRouter, Response
 
 from app import rbac
 from app.database import SessionDep
 from app.deps import AuthDep, CurrentUser, LoggedInUser
-from app.request_info import ClientDep
 from app.models import (
     BookedClassPage,
     CheckInPage,
@@ -20,6 +19,8 @@ from app.models import (
     User,
     UserNameUpdate,
 )
+from app.params import Limit, Offset, RowId
+from app.request_info import ClientDep
 from app.services import (
     auth_service,
     checkin_service,
@@ -71,8 +72,8 @@ def get_my_membership(user: CurrentUser, session: SessionDep) -> dict:
 def list_my_check_ins(
     user: CurrentUser,
     session: SessionDep,
-    offset: Annotated[int, Query(ge=0)] = 0,
-    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    offset: Offset = 0,
+    limit: Limit = 20,
 ) -> dict:
     """My visits, newest first. 404 if I have no membership."""
     member = member_service.get_own_membership(user)
@@ -85,8 +86,8 @@ def list_my_bookings(
     user: CurrentUser,
     session: SessionDep,
     when: Literal["upcoming", "past"] = "upcoming",
-    offset: Annotated[int, Query(ge=0)] = 0,
-    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    offset: Offset = 0,
+    limit: Limit = 20,
 ) -> dict:
     """My own bookings: upcoming ones soonest first (the default), or past ones latest first. Empty if I have none."""
     items, total = class_service.list_member_bookings(session, user.id, when, offset, limit)
@@ -97,8 +98,8 @@ def list_my_bookings(
 def list_my_payments(
     user: CurrentUser,
     session: SessionDep,
-    offset: Annotated[int, Query(ge=0)] = 0,
-    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    offset: Offset = 0,
+    limit: Limit = 20,
 ) -> dict:
     """My own payments, newest first, voided ones included (they show as voided). Empty if I have none."""
     items, total = payment_service.list_own_payments(session, user, offset, limit)
@@ -123,7 +124,7 @@ def list_my_sessions(user: CurrentUser, auth: AuthDep, session: SessionDep) -> l
 
 
 @router.delete("/me/sessions/{session_id}", status_code=204)
-def revoke_my_session(session_id: int, user: CurrentUser, session: SessionDep, client: ClientDep) -> Response:
+def revoke_my_session(session_id: RowId, user: CurrentUser, session: SessionDep, client: ClientDep) -> Response:
     """Logs that browser out: its refresh cookie and its access token stop working at once. Revoking the current
     session is the same as logging out here. 404 for a session that is not mine or no longer active."""
     session_service.revoke_own_session(session, user, session_id, client)

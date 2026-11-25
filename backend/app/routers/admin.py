@@ -3,7 +3,7 @@
 # Each route names its permission (app/rbac.py); only the Admin role holds them, so everyone else gets 403.
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Path, Query, Response
+from fastapi import APIRouter, Depends, Query, Response
 
 from app.database import SessionDep
 from app.models import (
@@ -21,8 +21,9 @@ from app.models import (
     User,
     UserFilter,
     UserRoleUpdate,
-    utc_today,
+    gym_today,
 )
+from app.params import Limit, Offset, RowId
 from app.rbac import Permission, require_permission
 from app.request_info import ClientDep
 from app.services import revenue_service, stats_service, user_service
@@ -39,8 +40,6 @@ PasswordResetter = Annotated[User, Depends(require_permission(Permission.USERS_R
 SessionRevoker = Annotated[User, Depends(require_permission(Permission.USERS_REVOKE_SESSIONS))]
 Exporter = Annotated[User, Depends(require_permission(Permission.USERS_EXPORT))]
 UserFilters = Annotated[UserFilter, Query()]
-# The id column is a 32-bit integer, so a larger id is refused as invalid instead of reaching the database.
-UserId = Annotated[int, Path(ge=1, le=2_147_483_647)]
 
 
 @router.get("/stats", response_model=AdminStats, dependencies=[READ_DASHBOARD])
@@ -51,7 +50,7 @@ def get_stats(session: SessionDep) -> dict:
 @router.get("/revenue", response_model=RevenueStats, dependencies=[READ_DASHBOARD])
 def get_revenue(session: SessionDep) -> dict:
     """Money taken today, this month and in the last 30 days (also split by method), and revenue, expenses and net
-    income in each of the last 6 months. UTC calendar days, like the payments list; voided payments are left out."""
+    income in each of the last 6 months. Days at the gym, like the payments list; voided payments are left out."""
     return revenue_service.revenue_stats(session)
 
 
@@ -59,8 +58,8 @@ def get_revenue(session: SessionDep) -> dict:
 def list_users(
     session: SessionDep,
     filters: UserFilters,
-    offset: Annotated[int, Query(ge=0)] = 0,
-    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    offset: Offset = 0,
+    limit: Limit = 20,
 ) -> dict:
     """Newest first, each with their membership. q (part of the name or email), role and status (active or banned)
     combine with each other and with paging."""
@@ -76,7 +75,7 @@ def list_users(
 )
 def export_users(session: SessionDep, filters: UserFilters, admin: Exporter, client: ClientDep) -> Response:
     """Needs users:export. The same filters and order as the list, every matching user. The download is logged."""
-    filename = f"users-{utc_today().isoformat()}.csv"
+    filename = f"users-{gym_today().isoformat()}.csv"
     return Response(
         content=user_service.export_csv(session, filters, admin, client),
         media_type="text/csv; charset=utf-8",
@@ -100,41 +99,41 @@ def bulk_unban(body: BulkUserAction, session: SessionDep, admin: Banner, client:
 
 
 @router.get("/users/{user_id}", response_model=AdminUserDetail, dependencies=[READ_USERS])
-def get_user_detail(user_id: UserId, session: SessionDep) -> dict:
+def get_user_detail(user_id: RowId, session: SessionDep) -> dict:
     """The account and membership, its active sessions, how many visits, bookings, payments and workouts it has, its
     groups and its 10 newest activity rows."""
     return user_service.user_detail(session, user_id)
 
 
 @router.post("/users/{user_id}/revoke-sessions", response_model=SessionsRevoked)
-def revoke_sessions(user_id: UserId, session: SessionDep, admin: SessionRevoker, client: ClientDep) -> dict:
+def revoke_sessions(user_id: RowId, session: SessionDep, admin: SessionRevoker, client: ClientDep) -> dict:
     """Ends every active session of the account: its next request gets 401, so the app shows Log in. Not for your
     own account (400; use My account)."""
     return {"revoked": user_service.revoke_sessions(session, admin, user_id, client)}
 
 
 @router.patch("/users/{user_id}/role", response_model=AdminUserRead)
-def change_role(user_id: int, body: UserRoleUpdate, session: SessionDep, admin: RoleChanger, client: ClientDep) -> User:
+def change_role(user_id: RowId, body: UserRoleUpdate, session: SessionDep, admin: RoleChanger, client: ClientDep) -> User:
     """An admin cannot change their own role (400), so the system always keeps an admin."""
     return user_service.change_role(session, admin, user_id, body.role, client)
 
 
 @router.post("/users/{user_id}/ban", response_model=AdminUserRead)
 def ban_user(
-    user_id: int, session: SessionDep, admin: Banner, client: ClientDep, body: BanRequest | None = None
+    user_id: RowId, session: SessionDep, admin: Banner, client: ClientDep, body: BanRequest | None = None
 ) -> User:
     """The user is locked out at once. An admin cannot ban themself or another admin (400)."""
     return user_service.ban_user(session, admin, user_id, body.reason if body else None, client)
 
 
 @router.post("/users/{user_id}/unban", response_model=AdminUserRead)
-def unban_user(user_id: int, session: SessionDep, admin: Banner, client: ClientDep) -> User:
+def unban_user(user_id: RowId, session: SessionDep, admin: Banner, client: ClientDep) -> User:
     return user_service.unban_user(session, admin, user_id, client)
 
 
 @router.post("/users/{user_id}/reset-password", response_model=PasswordResetResult)
 def reset_password(
-    user_id: int, session: SessionDep, admin: PasswordResetter, response: Response, client: ClientDep
+    user_id: RowId, session: SessionDep, admin: PasswordResetter, response: Response, client: ClientDep
 ) -> dict:
     """Makes a random temporary password and returns it this once. The account's logins end, and it must choose a
     new password before doing anything else. Not for your own account or another admin's (400)."""

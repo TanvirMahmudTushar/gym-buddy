@@ -1,58 +1,59 @@
 import { type ReactNode, useEffect, useState } from "react"
+import Icon, { type IconName } from "../components/Icon"
 import { useAuth } from "../context/AuthContext"
 import type { Me } from "../types/auth"
-import { type Page, type ProtectedPage, canOpen, roleLabel } from "../utils/auth"
-
-interface Link {
-  page: ProtectedPage
-  label: string
-  /** Other pages reached through this link, so it stays marked as the current one on them. */
-  covers?: ProtectedPage[]
-}
+import { PAGE_TITLES, type Page, type ProtectedPage, canOpen, homePage, roleLabel } from "../utils/auth"
+import { initials } from "../utils/text"
 
 // The menu, in sections. Each person sees only the pages their permissions allow, and no empty sections.
-const SECTIONS: { title: string; links: Link[] }[] = [
-  {
-    title: "Front desk",
-    links: [
-      { page: "dashboard", label: "Dashboard" },
-      { page: "members", label: "Members" },
-      { page: "attendance", label: "Attendance" },
-      { page: "payments", label: "Payments" },
-    ],
-  },
-  {
-    title: "Gym",
-    links: [
-      { page: "classes", label: "Classes" },
-      { page: "my-classes", label: "My classes" },
-      { page: "clients", label: "My clients" },
-      { page: "membership", label: "My membership" },
-      { page: "timetable", label: "Book a class" },
-      { page: "training", label: "Training" },
-      { page: "equipment", label: "Equipment" },
-      { page: "announcements", label: "Announcements" },
-    ],
-  },
-  {
-    title: "Business",
-    links: [
-      { page: "plans", label: "Plans" },
-      { page: "expenses", label: "Expenses" },
-    ],
-  },
-  {
-    title: "Administration",
-    links: [
-      { page: "users", label: "Users and staff" },
-      { page: "security", label: "Security", covers: ["activity"] },
-    ],
-  },
-  { title: "You", links: [{ page: "account", label: "My account" }] },
+const SECTIONS: { title: string; pages: ProtectedPage[] }[] = [
+  { title: "Front desk", pages: ["dashboard", "members", "attendance", "payments"] },
+  { title: "Gym", pages: ["my-classes", "clients", "membership", "timetable", "classes", "training", "equipment", "announcements"] },
+  { title: "Business", pages: ["plans", "expenses"] },
+  { title: "Administration", pages: ["users", "security", "activity"] },
+  { title: "You", pages: ["account"] },
 ]
 
-function menuFor(user: Me) {
-  return SECTIONS.map((s) => ({ ...s, links: s.links.filter((l) => canOpen(user, l.page)) })).filter((s) => s.links.length > 0)
+const ICONS: Record<ProtectedPage, IconName> = {
+  dashboard: "dashboard",
+  members: "members",
+  attendance: "attendance",
+  payments: "payments",
+  classes: "classes",
+  training: "training",
+  equipment: "equipment",
+  announcements: "announcements",
+  plans: "plans",
+  expenses: "expenses",
+  users: "users",
+  activity: "activity",
+  security: "security",
+  "my-classes": "classes",
+  clients: "clients",
+  membership: "membership",
+  timetable: "classes",
+  account: "account",
+}
+
+const menuFor = (user: Me) =>
+  SECTIONS.map((s) => ({ ...s, pages: s.pages.filter((p) => canOpen(user, p)) })).filter((s) => s.pages.length > 0)
+
+export function Brand({ href }: { href?: string }) {
+  const content = (
+    <>
+      <span className="brand-mark">
+        <Icon name="training" />
+      </span>
+      Gym Buddy
+    </>
+  )
+  return href ? (
+    <a className="brand" href={href}>
+      {content}
+    </a>
+  ) : (
+    <div className="brand">{content}</div>
+  )
 }
 
 interface Props {
@@ -70,55 +71,45 @@ export default function AppLayout({ page, children, locked = false }: Props) {
   // On a phone, choosing a page closes the menu.
   useEffect(() => setOpen(false), [page])
 
-  if (!user)
-    return (
-      <div className="page">
-        <header className="brand">
-          <h1>Gym Buddy</h1>
-          <span className="tagline">Gym management system</span>
-        </header>
-        {children}
-      </div>
-    )
+  if (!user) return null
 
   return (
     <div className="shell">
-      <header className={open ? "sidebar open" : "sidebar"}>
+      <div className={open ? "sidebar open" : "sidebar"}>
         <div className="sidebar-head">
-          <div className="brand">
-            <h1>Gym Buddy</h1>
-            <span className="tagline">Gym management system</span>
-          </div>
+          <Brand href={`#/${homePage(user)}`} />
           <button type="button" className="menu-button" aria-expanded={open} aria-controls="main-menu" onClick={() => setOpen((v) => !v)}>
-            Menu
+            <Icon name={open ? "close" : "menu"} /> Menu
           </button>
         </div>
         <div id="main-menu" className="sidebar-body">
-          {!locked && (
-            <nav aria-label="Main">
-              {menuFor(user).map((section) => (
+          <nav aria-label="Main">
+            {!locked &&
+              menuFor(user).map((section) => (
                 <div key={section.title} className="nav-section">
-                  <h2 className="nav-title">{section.title}</h2>
-                  {section.links.map((l) => {
-                    const current = l.page === page || (l.covers ?? []).some((p) => p === page)
-                    return (
-                      <a key={l.page} href={`#/${l.page}`} aria-current={current ? "page" : undefined}>
-                        {l.label}
-                      </a>
-                    )
-                  })}
+                  <span className="nav-title">{section.title}</span>
+                  {section.pages.map((p) => (
+                    <a key={p} href={`#/${p}`} aria-current={p === page ? "page" : undefined} onClick={() => setOpen(false)}>
+                      <Icon name={ICONS[p]} /> {PAGE_TITLES[p]}
+                    </a>
+                  ))}
                 </div>
               ))}
-            </nav>
-          )}
+          </nav>
           <div className="who">
-            <span className="wrap-text">
-              {user.name} <span className={`pill role-${user.role}`}>{roleLabel(user.role)}</span>
+            <span className="avatar" aria-hidden="true">
+              {initials(user.name)}
             </span>
-            <button onClick={logout}>Log out</button>
+            <span className="who-name">
+              {user.name}
+              <span className="hint">{roleLabel(user.role)}</span>
+            </span>
+            <button type="button" className="icon-button" onClick={logout} aria-label="Log out" title="Log out">
+              <Icon name="logout" />
+            </button>
           </div>
         </div>
-      </header>
+      </div>
       <main className="content">{children}</main>
     </div>
   )

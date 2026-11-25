@@ -3,7 +3,7 @@ import type { ActivityFilters, ActivityPage, SecuritySummary } from "../types/ac
 import { request, requestBlob } from "./api"
 
 const BASE = "/api/v1/admin/activity"
-const PAGE_SIZE = 50
+const PAGE_SIZE = 25
 
 /** Only the filters that are set go into the query string. The list and the CSV use the same ones. */
 function filterParams(filters: ActivityFilters): URLSearchParams {

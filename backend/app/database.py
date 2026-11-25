@@ -107,21 +107,6 @@ _ADDED_INDEXES = [
 # Plan codes were at most 10 characters ("quarterly"); a code made from a plan's name can be longer.
 _PLAN_COLUMNS = [("plan_price", "plan"), ("app_user", "plan"), ("payment", "plan")]
 
-# Before members became users, these tables pointed at member.id. They are dropped (data and all) and
-# create_all() makes them again pointing at app_user.id. Dependent tables first, member last.
-_OLD_MEMBER_TABLES = ["check_in", "class_booking", "payment", "member"]
-
-
-def _drop_old_member_tables() -> None:
-    """Runs only on a database that still has the old member table; a no-op from then on."""
-    with engine.begin() as conn:
-        if not inspect(conn).has_table("member"):
-            return
-        # CASCADE also drops foreign keys other tables still hold on these (PostgreSQL only; SQLite has no CASCADE).
-        cascade = " CASCADE" if engine.dialect.name == "postgresql" else ""
-        for table in _OLD_MEMBER_TABLES:
-            conn.execute(text(f"DROP TABLE IF EXISTS {table}{cascade}"))
-
 
 def _add_missing_columns() -> None:
     with engine.begin() as conn:
@@ -202,15 +187,14 @@ def _save_version(version: str) -> None:
 
 
 def create_db_and_tables() -> None:
-    """Create missing tables and columns; existing data is kept, except the old member data (see above). Every cold
-    start runs this, so when the saved version says the schema is already right, the checks are skipped. After
-    dropping a table by hand, delete the row in schema_state to have it made again."""
+    """Create missing tables and columns; existing data is always kept. Every cold start runs this, so when the saved
+    version says the schema is already right, the checks are skipped. After dropping a table by hand, delete the row in
+    schema_state to have it made again."""
     from app import models  # noqa: F401  (registers the tables on SQLModel.metadata)
 
     version = _schema_version()
     if _is_up_to_date(version):
         return
-    _drop_old_member_tables()
     SQLModel.metadata.create_all(engine)
     _add_missing_columns()
     _widen_plan_columns()

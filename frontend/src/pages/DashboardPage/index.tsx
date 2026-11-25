@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react"
+import Alert from "../../components/Alert"
 import AnnouncementsCard from "../../components/AnnouncementsCard"
 import BarList from "../../components/BarList"
-import FrontDesk from "../../components/FrontDesk"
+import PageHeader from "../../components/PageHeader"
 import RevenueCard from "../../components/RevenueCard"
 import Stat from "../../components/Stat"
 import { useAuth } from "../../context/AuthContext"
@@ -10,69 +11,117 @@ import { getOverview } from "../../services/overviewService"
 import type { AdminStats } from "../../types/auth"
 import type { Overview } from "../../types/overview"
 import type { RevenueStats } from "../../types/payment"
-import { can } from "../../utils/auth"
-import { errorText } from "../../utils/member"
+import { can, usersLink } from "../../utils/auth"
+import { equipmentLink } from "../../utils/equipment"
+import { pageLink } from "../../utils/hash"
+import { membersLink } from "../../utils/member"
+import { formatMoney, paymentsLink } from "../../utils/payment"
+import { count, errorText } from "../../utils/text"
+import { formatClassTime, formatWeekday, gymToday, longToday } from "../../utils/time"
 import { trainingLink } from "../../utils/workout"
 
-const dayName = (day: string) =>
-  new Date(`${day}T00:00:00Z`).toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" })
+// The front desk part: what needs attention today. Every number links to the list it counts.
+function Today({ overview: o }: { overview: Overview }) {
+  const today = gymToday()
+  return (
+    <section className="card">
+      <h2>Today</h2>
+      <div className="stats">
+        <Stat label="In the gym now" value={o.inside_now} href="#/attendance?inside=1" />
+        <Stat label="Checked in" value={o.check_ins_today} href="#/attendance" />
+        <Stat label="Payments" value={formatMoney(o.payments_today.amount)} href={paymentsLink(today, today)} note={count(o.payments_today.count, "payment")} />
+        <Stat label="Expiring in 7 days" value={o.expiring_soon} href={membersLink({ filter: "expiring_soon" })} />
+        <Stat label="Waiting to join" value={o.waiting} href={membersLink({ filter: "waiting" })} />
+        <Stat label="Equipment to fix" value={o.equipment_attention} alert href={equipmentLink("needs_attention")} />
+        <Stat label="Services due" value={o.equipment_service_due} href={equipmentLink("service_due")} />
+      </div>
+    </section>
+  )
+}
+
+function NextClasses({ classes }: { classes: Overview["next_classes"] }) {
+  return (
+    <section className="card">
+      <div className="toolbar">
+        <h2>Next classes</h2>
+        <a href="#/classes">All classes</a>
+      </div>
+      {classes.length === 0 ? (
+        <p className="empty">No upcoming classes. Add one on the Classes page.</p>
+      ) : (
+        <ul className="rows">
+          {classes.map((c) => (
+            <li key={c.id}>
+              <span>
+                <span className="row-title">{c.name}</span>
+                <span className="hint">
+                  {formatClassTime(c.starts_at)}
+                  {c.trainer_name ? ` · ${c.trainer_name}` : ""}
+                </span>
+              </span>
+              <span className={c.booked_count >= c.capacity ? "pill bad" : "pill good"}>
+                {c.booked_count} / {c.capacity} booked
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  )
+}
 
 // The admin part: how the whole gym is doing.
-function GymReport({ stats, revenue }: { stats: AdminStats; revenue: RevenueStats }) {
+function GymReport({ stats: s, revenue }: { stats: AdminStats; revenue: RevenueStats }) {
   return (
     <>
       <RevenueCard revenue={revenue} />
-      <section className="card" aria-labelledby="stats-members">
-        <div className="toolbar">
-          <h2 id="stats-members">Members</h2>
-          <a href="#/members">All members</a>
-        </div>
-        <dl className="stats">
-          <Stat label="Total" value={stats.members.total} />
-          <Stat label="Active" value={stats.members.active} href="#/members?filter=active" />
-          <Stat label="Expired" value={stats.members.expired} href="#/members?filter=expired" />
-          <Stat label="Frozen" value={stats.members.frozen} href="#/members?filter=frozen" />
-          <Stat label="New in the last 7 days" value={stats.members.new_last_7_days} />
-        </dl>
-      </section>
-      <section className="card" aria-labelledby="stats-attendance">
-        <div className="toolbar">
-          <h2 id="stats-attendance">Attendance, last 7 days</h2>
-          <a href="#/attendance">Attendance</a>
-        </div>
-        <BarList
-          bars={stats.check_ins.by_day.map((d) => ({ key: d.day, name: dayName(d.day), value: d.count, label: String(d.count) }))}
-        />
-      </section>
-      <section className="card" aria-labelledby="stats-gym">
-        <h2 id="stats-gym">Classes, training and equipment</h2>
-        <dl className="stats">
-          <Stat label="Upcoming classes" value={stats.classes.upcoming} href="#/classes" />
-          <Stat label="Training groups" value={stats.groups.total} href={trainingLink("all-groups")} />
-          <Stat
-            label="Workouts"
-            value={stats.workouts.total}
-            href={trainingLink("all-workouts")}
-            note={`${stats.workouts.completed} done · ${stats.workouts.last_7_days} new in 7 days`}
-          />
-          <Stat label="Equipment" value={stats.equipment.total} href="#/equipment" />
-        </dl>
-      </section>
-      <section className="card" aria-labelledby="stats-users">
-        <div className="toolbar">
-          <h2 id="stats-users">Accounts</h2>
-          <a href="#/users">Users and staff</a>
-        </div>
-        <dl className="stats">
-          <Stat label="Total" value={stats.users.total} />
-          <Stat label="Users" value={stats.users.users} />
-          <Stat label="Trainers" value={stats.users.trainers} />
-          <Stat label="Gym Managers" value={stats.users.gym_managers} />
-          <Stat label="Admins" value={stats.users.admins} />
-          <Stat label="Banned" value={stats.users.banned} alert />
-          <Stat label="New in the last 7 days" value={stats.users.new_last_7_days} />
-        </dl>
-      </section>
+      <div className="split">
+        <section className="card">
+          <div className="toolbar">
+            <h2>Accounts</h2>
+            <a href={usersLink()}>All users</a>
+          </div>
+          <div className="stats">
+            <Stat label="Total" value={s.users.total} href={usersLink()} />
+            <Stat label="New in 7 days" value={s.users.new_last_7_days} />
+            <Stat label="Banned" value={s.users.banned} alert href={pageLink("users", { status: "banned" })} />
+            <Stat label="Admins" value={s.users.admins} href={pageLink("users", { role: "admin" })} />
+            <Stat label="Gym Managers" value={s.users.gym_managers} href={pageLink("users", { role: "gym_manager" })} />
+            <Stat label="Trainers" value={s.users.trainers} href={pageLink("users", { role: "trainer" })} />
+          </div>
+        </section>
+        <section className="card">
+          <div className="toolbar">
+            <h2>Members</h2>
+            <a href={membersLink()}>All members</a>
+          </div>
+          <div className="stats">
+            <Stat label="Total" value={s.members.total} href={membersLink()} />
+            <Stat label="New in 7 days" value={s.members.new_last_7_days} />
+            <Stat label="Active" value={s.members.active} href={membersLink({ filter: "active" })} />
+            <Stat label="Expired" value={s.members.expired} href={membersLink({ filter: "expired" })} />
+            <Stat label="Frozen" value={s.members.frozen} href={membersLink({ filter: "frozen" })} />
+            <Stat label="Expiring soon" value={s.members.expiring_soon} href={membersLink({ filter: "expiring_soon" })} />
+          </div>
+        </section>
+        <section className="card">
+          <h2>Records and groups</h2>
+          <div className="stats">
+            <Stat label="Training groups" value={s.groups.total} href={trainingLink("all-groups")} />
+            <Stat label="Workouts" value={s.workouts.total} href={trainingLink("all-workouts")} note={`${s.workouts.completed} done`} />
+            <Stat label="New workouts, 7 days" value={s.workouts.last_7_days} />
+            <Stat label="Upcoming classes" value={s.classes.upcoming} href="#/classes" />
+            <Stat label="Equipment" value={s.equipment.total} href={equipmentLink("")} />
+          </div>
+        </section>
+        <section className="card">
+          <div className="toolbar">
+            <h2>Check-ins, last 7 days</h2>
+            <span className="hint">{s.check_ins.by_day.reduce((sum, d) => sum + d.count, 0)} in total</span>
+          </div>
+          <BarList bars={s.check_ins.by_day.map((d) => ({ key: d.day, name: formatWeekday(d.day), value: d.count, label: String(d.count) }))} />
+        </section>
+      </div>
     </>
   )
 }
@@ -104,43 +153,27 @@ export default function DashboardPage() {
 
   useEffect(() => {
     void load()
-  }, [load])
-
-  const longDate = new Date().toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" })
+  }, [load, refreshKey])
 
   return (
-    <div className="column">
-      <div className="toolbar">
-        <h2>
-          Dashboard <span className="hint">· {longDate}</span>
-        </h2>
-        <button
-          onClick={() => {
-            void load()
-            setRefreshKey((k) => k + 1)
-          }}
-          disabled={loading}
-        >
+    <div className="page">
+      <PageHeader title="Dashboard" subtitle={longToday()}>
+        <button type="button" onClick={() => setRefreshKey((k) => k + 1)} disabled={loading}>
           {loading ? "Refreshing…" : "Refresh"}
         </button>
-      </div>
-      {error && (
-        <p className="error" role="alert">
-          {error}
-        </p>
+      </PageHeader>
+      <Alert>{error}</Alert>
+      {!overview && loading && <p className="empty">Loading…</p>}
+      {overview && (
+        <>
+          <Today overview={overview} />
+          <div className="split">
+            <NextClasses classes={overview.next_classes} />
+            <AnnouncementsCard refreshKey={refreshKey} manageLink />
+          </div>
+        </>
       )}
-      {!overview && loading && <p className="empty">Loading the numbers…</p>}
-      {overview && <FrontDesk overview={overview} />}
       {report && <GymReport {...report} />}
-      <AnnouncementsCard
-        refreshKey={refreshKey}
-        emptyText="Nothing is showing to members right now."
-        footer={
-          <p className="hint">
-            <a href="#/announcements">Open the announcements page</a> to post, edit or delete them.
-          </p>
-        }
-      />
     </div>
   )
 }

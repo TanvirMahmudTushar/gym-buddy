@@ -1,14 +1,13 @@
 import { type FormEvent, useState } from "react"
 import { useAuth } from "../context/AuthContext"
+import { useSave } from "../hooks/useSave"
 import { changePassword } from "../services/authService"
-import { errorText } from "../utils/member"
+import Alert from "./Alert"
+import FieldError from "./FieldError"
 
 const EMPTY = { current: "", next: "", confirm: "" }
 
 interface Props {
-  heading?: string
-  /** A paragraph above the form. */
-  intro?: string
   /** The label of the first field, such as "Temporary password" after an admin reset. */
   currentLabel?: string
   /** Called after the password changed, for example to reload the session list. */
@@ -16,87 +15,62 @@ interface Props {
 }
 
 // The server logs out every other browser; this one stays logged in.
-export default function ChangePasswordForm({
-  heading = "Change my password",
-  intro,
-  currentLabel = "Current password",
-  onChanged,
-}: Props) {
+export default function ChangePasswordForm({ currentLabel = "Current password", onChanged }: Props) {
   const { user, setUser } = useAuth()
   const [form, setForm] = useState(EMPTY)
   const [errors, setErrors] = useState<Partial<Record<keyof typeof EMPTY, string>>>({})
-  const [error, setError] = useState("")
   const [done, setDone] = useState(false)
-  const [busy, setBusy] = useState(false)
+  const { saving, error, run } = useSave()
 
-  const set = (key: keyof typeof EMPTY) => (e: { target: { value: string } }) =>
-    setForm((prev) => ({ ...prev, [key]: e.target.value }))
+  const field = (key: keyof typeof EMPTY, label: string, autoComplete: string) => (
+    <div className="field">
+      <label htmlFor={`pw-${key}`}>{label}</label>
+      <input
+        id={`pw-${key}`}
+        type="password"
+        value={form[key]}
+        onChange={(e) => setForm((prev) => ({ ...prev, [key]: e.target.value }))}
+        maxLength={128}
+        autoComplete={autoComplete}
+        aria-invalid={!!errors[key]}
+      />
+      <FieldError>{errors[key]}</FieldError>
+    </div>
+  )
 
-  async function handleSubmit(e: FormEvent) {
+  function handleSubmit(e: FormEvent) {
     e.preventDefault()
     const next: typeof errors = {}
     if (!form.current) next.current = `Enter your ${currentLabel.toLowerCase()}.`
     if (form.next.length < 8) next.next = "Use at least 8 characters."
+    else if (form.next === form.current) next.next = "Choose a password different from the current one."
     if (form.confirm !== form.next) next.confirm = "The passwords do not match."
     setErrors(next)
-    setError("")
+    setDone(false)
     if (Object.keys(next).length) return
 
-    setBusy(true)
-    setDone(false)
-    try {
+    void run(async () => {
       await changePassword(form.current, form.next)
       setForm(EMPTY)
       // After an admin reset, choosing a password unlocks the rest of the app straight away.
-      if (user?.must_change_password) {
-        setUser({ ...user, must_change_password: false })
-        return
-      }
+      if (user?.must_change_password) setUser({ ...user, must_change_password: false })
       setDone(true)
       onChanged?.()
-    } catch (err) {
-      setError(errorText(err))
-    } finally {
-      setBusy(false)
-    }
+    })
   }
 
   return (
-    <section className="card" aria-labelledby="password-heading">
-      <h2 id="password-heading">{heading}</h2>
-      {intro && <p className="hint">{intro}</p>}
-      <form className="stack" onSubmit={handleSubmit} noValidate>
-        <div className="field">
-          <label htmlFor="pw-current">{currentLabel}</label>
-          <input id="pw-current" type="password" value={form.current} onChange={set("current")} maxLength={128} autoComplete="current-password" />
-          {errors.current && <span className="field-error">{errors.current}</span>}
-        </div>
-        <div className="field">
-          <label htmlFor="pw-new">New password</label>
-          <input id="pw-new" type="password" value={form.next} onChange={set("next")} maxLength={128} autoComplete="new-password" />
-          {errors.next && <span className="field-error">{errors.next}</span>}
-        </div>
-        <div className="field">
-          <label htmlFor="pw-confirm">Confirm new password</label>
-          <input id="pw-confirm" type="password" value={form.confirm} onChange={set("confirm")} maxLength={128} autoComplete="new-password" />
-          {errors.confirm && <span className="field-error">{errors.confirm}</span>}
-        </div>
-        {error && (
-          <p className="error" role="alert">
-            {error}
-          </p>
-        )}
-        {done && (
-          <p className="hint" role="status">
-            Password changed. You are still logged in here; every other browser has been logged out.
-          </p>
-        )}
-        <div className="actions">
-          <button className="primary" type="submit" disabled={busy}>
-            {busy ? "Changing…" : "Change password"}
-          </button>
-        </div>
-      </form>
-    </section>
+    <form className="stack" onSubmit={handleSubmit} noValidate>
+      {field("current", currentLabel, "current-password")}
+      {field("next", "New password (at least 8 characters)", "new-password")}
+      {field("confirm", "Confirm new password", "new-password")}
+      <Alert>{error}</Alert>
+      <Alert kind="success">{done && "Password changed. Every other browser has been logged out."}</Alert>
+      <div className="actions">
+        <button className="primary" type="submit" disabled={saving}>
+          {saving ? "Changing…" : "Change password"}
+        </button>
+      </div>
+    </form>
   )
 }

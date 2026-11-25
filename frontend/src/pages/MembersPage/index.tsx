@@ -1,153 +1,73 @@
-import { useEffect, useState } from "react"
-import { useDebouncedValue } from "../../hooks/useDebouncedValue"
-import { listMembers } from "../../services/memberService"
+import { useState } from "react"
 import AddMemberForm from "../../components/AddMemberForm"
+import Icon from "../../components/Icon"
 import MemberDetail from "../../components/MemberDetail"
-import MemberList, { FILTERS, type Filter } from "../../components/MemberList"
-import WaitingList from "../../components/WaitingList"
-import type { Member } from "../../types/member"
-import { errorText, hashParams, membersLink } from "../../utils/member"
+import MemberFilterChips, { MEMBER_TABS } from "../../components/MemberFilterChips"
+import MemberTable from "../../components/MemberTable"
+import Modal from "../../components/Modal"
+import PageHeader from "../../components/PageHeader"
+import WaitingTable from "../../components/WaitingTable"
+import { useDebouncedValue } from "../../hooks/useDebouncedValue"
+import { useHashValue } from "../../hooks/useHashValue"
+import { hashId, hashParams } from "../../utils/hash"
+import { membersLink } from "../../utils/member"
 
-/** The list filter named in the address (#/members?filter=expiring_soon), so other pages can link straight to it. */
-function filterFromHash(): Filter {
-  const value = hashParams().get("filter")
-  return FILTERS.find((f) => f.value === value)?.value ?? "all"
-}
+/** The list named in the address (#/members?filter=expiring_soon), so other pages can link straight to it. */
+const tabFromHash = () => MEMBER_TABS.find((t) => t.value === hashParams().get("filter")) ?? MEMBER_TABS[0]
 
-/** The member named in the address (#/members?member=5): any page that shows a member's name links here. */
-function memberFromHash(): number | null {
-  const id = Number(hashParams().get("member"))
-  return Number.isInteger(id) && id > 0 ? id : null
-}
-
-// The members page: the searchable member list, people waiting for a membership and the add form on the left; details
-// of the selected member on the right.
-export default function MembersPage() {
-  const [members, setMembers] = useState<Member[]>([])
-  const [filter, setFilter] = useState<Filter>(filterFromHash)
+function MemberList() {
+  const tab = useHashValue(tabFromHash)
   const [search, setSearch] = useState("")
-  const query = useDebouncedValue(search)
-  const [selectedId, setSelectedId] = useState<number | null>(memberFromHash)
-  // Members ticked for bulk delete; separate from selectedId, the member shown in the details panel.
-  const [checkedIds, setCheckedIds] = useState<number[]>([])
-  const [loading, setLoading] = useState(true)
-  const [loadingMore, setLoadingMore] = useState(false)
-  const [total, setTotal] = useState(0)
-  const [error, setError] = useState("")
-  // Bumped to reload the first page after a change.
-  const [reloadKey, setReloadKey] = useState(0)
-  // The account whose email Start membership put in the Add member form; key makes a second click on the same one count.
-  const [start, setStart] = useState<{ email: string; key: number } | null>(null)
-  // #/members?show=waiting (from the Dashboard) opens with the waiting list in view.
-  const [showWaiting] = useState(() => hashParams().get("show") === "waiting")
-
-  const status = filter === "all" ? null : filter
-
-  // Keep the address in step with the filter and the open member, so a reload or a shared link shows the same.
-  // replaceState does not add history entries or fire hashchange.
-  useEffect(() => {
-    window.history.replaceState(null, "", membersLink({ filter, member: selectedId }))
-  }, [filter, selectedId])
-
-  // A link to another member followed while this page is open (the address changes, the page stays).
-  useEffect(() => {
-    const onHashChange = () => {
-      setFilter(filterFromHash())
-      setSelectedId(memberFromHash())
-    }
-    window.addEventListener("hashchange", onHashChange)
-    return () => window.removeEventListener("hashchange", onHashChange)
-  }, [])
-
-  // Read list: load the first page whenever the filter or search changes or a reload is asked for.
-  useEffect(() => {
-    let ignore = false
-    setLoading(true)
-    setError("")
-    listMembers(0, status, query)
-      .then((page) => {
-        if (ignore) return
-        setMembers(page.items)
-        setTotal(page.total)
-        // Only members still on screen can stay ticked, so nothing hidden gets deleted.
-        setCheckedIds((prev) => prev.filter((id) => page.items.some((m) => m.id === id)))
-      })
-      .catch((err) => !ignore && setError(errorText(err)))
-      .finally(() => !ignore && setLoading(false))
-    return () => {
-      ignore = true
-    }
-  }, [status, query, reloadKey])
-
-  async function loadMore() {
-    setLoadingMore(true)
-    try {
-      const page = await listMembers(members.length, status, query)
-      setMembers((prev) => [...prev, ...page.items])
-      setTotal(page.total)
-    } catch (err) {
-      setError(errorText(err))
-    } finally {
-      setLoadingMore(false)
-    }
-  }
-
-  function handleCreated(member: Member) {
-    setFilter("all")
-    setSearch("")
-    setStart(null)
-    setSelectedId(member.id)
-    setReloadKey((k) => k + 1)
-  }
-
-  function handleDeleted() {
-    setSelectedId(null)
-    setReloadKey((k) => k + 1)
-  }
-
-  function handleFilterChange(next: Filter) {
-    setFilter(next)
-    setCheckedIds([])
-  }
-
-  function handleBulkDeleted(ids: number[]) {
-    setCheckedIds([])
-    setSelectedId((current) => (current !== null && ids.includes(current) ? null : current))
-    setReloadKey((k) => k + 1)
-  }
+  const q = useDebouncedValue(search.trim())
+  // The Add member dialog, with the email filled in when it was opened from the waiting list.
+  const [adding, setAdding] = useState<{ email?: string } | null>(null)
 
   return (
-    <div className="layout">
-      <div className="column">
-        <MemberList
-          members={members}
-          filter={filter}
-          onFilterChange={handleFilterChange}
-          search={search}
-          onSearchChange={setSearch}
-          query={query}
-          selectedId={selectedId}
-          onSelect={setSelectedId}
-          loading={loading}
-          error={error}
-          total={total}
-          loadingMore={loadingMore}
-          onLoadMore={loadMore}
-          checkedIds={checkedIds}
-          onCheckedChange={setCheckedIds}
-          onBulkDeleted={handleBulkDeleted}
-        />
-        {/* Reloads with the member list: starting a membership moves the person from this list to that one. */}
-        <WaitingList refreshKey={reloadKey} scrollOnOpen={showWaiting} onStart={(email) => setStart((s) => ({ email, key: (s?.key ?? 0) + 1 }))} />
-        <AddMemberForm onCreated={handleCreated} start={start} />
-      </div>
-      <aside className="column">
-        <MemberDetail
-          memberId={selectedId}
-          onChanged={() => setReloadKey((k) => k + 1)}
-          onDeleted={handleDeleted}
-        />
-      </aside>
+    <div className="page">
+      <PageHeader title="Members" subtitle="A member signs up in the app first; then the front desk starts their membership.">
+        <button type="button" className="primary" onClick={() => setAdding({})}>
+          <Icon name="plus" /> Add member
+        </button>
+      </PageHeader>
+      <section className="card">
+        <div className="toolbar">
+          <MemberFilterChips tab={tab.value} />
+          <div className="filters">
+            <div className="field grow">
+              <input
+                type="search"
+                aria-label="Search by name, email or phone"
+                placeholder="Search name, email or phone"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                maxLength={100}
+              />
+            </div>
+          </div>
+        </div>
+        {tab.value === "waiting" ? (
+          <WaitingTable q={q} empty={tab.empty} onStart={(email) => setAdding({ email })} />
+        ) : (
+          <MemberTable status={tab.value === "all" ? null : tab.value} q={q} empty={tab.empty} />
+        )}
+      </section>
+      {adding && (
+        <Modal title="Start a membership" onClose={() => setAdding(null)}>
+          <AddMemberForm
+            email={adding.email}
+            onCancel={() => setAdding(null)}
+            onCreated={(member) => {
+              window.location.hash = membersLink({ member: member.id })
+            }}
+          />
+        </Modal>
+      )}
     </div>
   )
+}
+
+// The members: the list, or one member when the address names them (#/members?member=5).
+export default function MembersPage() {
+  const memberId = useHashValue(() => hashId("member"))
+  return memberId === null ? <MemberList /> : <MemberDetail key={memberId} memberId={memberId} />
 }

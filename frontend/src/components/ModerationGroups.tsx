@@ -1,200 +1,144 @@
-import { type FormEvent, useEffect, useMemo, useState } from "react"
+import { type ReactNode, useState } from "react"
+import { useDebouncedValue } from "../hooks/useDebouncedValue"
 import { usePagedList } from "../hooks/usePagedList"
+import { useSelection } from "../hooks/useSelection"
 import { deleteGroups, exportGroupsCsv, listGroups } from "../services/moderationService"
-import type { GroupFilters } from "../types/moderation"
-import { errorText, formatDate, todayUtc } from "../utils/member"
-import { saveFile } from "../utils/payment"
-import ContentDeleteBar from "./ContentDeleteBar"
+import type { GroupFilters, ModerationGroup } from "../types/moderation"
+import { usersLink } from "../utils/auth"
+import { count } from "../utils/text"
+import { formatDate } from "../utils/time"
+import { trainingLink } from "../utils/workout"
+import Alert from "./Alert"
+import BulkDelete from "./BulkDelete"
+import ConfirmModal from "./ConfirmModal"
+import ExportButton from "./ExportButton"
+import ListState from "./ListState"
+import PageHeader from "./PageHeader"
+import Pager from "./Pager"
+import TickAll from "./TickAll"
 
-type Draft = Omit<GroupFilters, "owner_id">
-const NO_FILTERS: Draft = { date_from: "", date_to: "", q: "" }
+const NO_FILTERS: GroupFilters = { owner_id: null, date_from: "", date_to: "", q: "" }
 
 interface Props {
+  tabs: ReactNode
+  /** Only this account's groups (from a user's details). */
   ownerId: number | null
-  onPickOwner: (id: number, label: string) => void
 }
 
-// Admins: every training group, with filters, select-many delete (with its workouts and memberships) and a CSV.
-export default function ModerationGroups({ ownerId, onPickOwner }: Props) {
-  const [draft, setDraft] = useState<Draft>(NO_FILTERS)
-  const [applied, setApplied] = useState<Draft>(NO_FILTERS)
-  const filters = useMemo<GroupFilters>(() => ({ ...applied, owner_id: ownerId }), [applied, ownerId])
+// Admins: every training group, with filters, delete one or many (with their workouts and memberships) and a CSV.
+export default function ModerationGroups({ tabs, ownerId }: Props) {
+  const [draft, setDraft] = useState<GroupFilters>({ ...NO_FILTERS, owner_id: ownerId })
+  const filters = useDebouncedValue(draft)
   const [reloadKey, setReloadKey] = useState(0)
   const list = usePagedList(listGroups, filters, reloadKey)
-  const [checkedIds, setCheckedIds] = useState<number[]>([])
+  const selection = useSelection(list.items.map((g) => g.id))
+  const [deleting, setDeleting] = useState<ModerationGroup | null>(null)
   const [notice, setNotice] = useState("")
-  const [filterError, setFilterError] = useState("")
-  const [exporting, setExporting] = useState(false)
   const [exportError, setExportError] = useState("")
+  // How many workouts go with the ticked groups, for the question.
+  const workoutsTicked = list.items.filter((g) => selection.has(g.id)).reduce((sum, g) => sum + g.workout_count, 0)
 
-  useEffect(() => setCheckedIds([]), [filters, reloadKey])
-
-  function apply(e: FormEvent) {
-    e.preventDefault()
-    if (draft.date_from && draft.date_to && draft.date_from > draft.date_to) {
-      setFilterError("The From date must be on or before the To date.")
-      return
-    }
-    setFilterError("")
-    setNotice("")
-    setApplied({ ...draft, q: draft.q.trim() })
+  async function remove(ids: number[]) {
+    const { deleted } = await deleteGroups(ids)
+    setNotice(`Deleted ${count(deleted, "group")}. It is recorded in the activity log.`)
+    setReloadKey((k) => k + 1)
   }
-
-  async function exportCsv() {
-    setExporting(true)
-    setExportError("")
-    try {
-      saveFile(await exportGroupsCsv(filters), `groups-${todayUtc()}.csv`)
-    } catch (err) {
-      setExportError(errorText(err))
-    } finally {
-      setExporting(false)
-    }
-  }
-
-  const allChecked = list.items.length > 0 && list.items.every((g) => checkedIds.includes(g.id))
-  const toggle = (id: number) => setCheckedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
-  // How many workouts go with the ticked groups, for the confirm step.
-  const workoutsTicked = list.items.filter((g) => checkedIds.includes(g.id)).reduce((sum, g) => sum + g.workout_count, 0)
 
   return (
-    <section className="card" aria-labelledby="mod-groups-heading">
-      <div className="toolbar">
-        <h2 id="mod-groups-heading">All training groups</h2>
-        <button onClick={exportCsv} disabled={exporting || list.loading || list.total === 0}>
-          {exporting ? "Exporting…" : "Export CSV"}
-        </button>
-      </div>
-      <form className="filters" onSubmit={apply} noValidate aria-label="Filter groups">
-        <div className="field">
-          <label htmlFor="mod-g-q">Search</label>
-          <input
-            id="mod-g-q"
-            value={draft.q}
-            onChange={(e) => setDraft({ ...draft, q: e.target.value })}
-            maxLength={100}
-            placeholder="Group name, owner"
-            autoComplete="off"
-          />
-        </div>
-        <div className="field">
-          <label htmlFor="mod-g-from">Made from</label>
-          <input id="mod-g-from" type="date" value={draft.date_from} onChange={(e) => setDraft({ ...draft, date_from: e.target.value })} />
-        </div>
-        <div className="field">
-          <label htmlFor="mod-g-to">Made to</label>
-          <input id="mod-g-to" type="date" value={draft.date_to} onChange={(e) => setDraft({ ...draft, date_to: e.target.value })} />
-        </div>
-        <div className="actions">
-          <button className="primary" type="submit" disabled={list.loading}>
-            Apply
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setDraft(NO_FILTERS)
-              setApplied(NO_FILTERS)
-              setFilterError("")
-            }}
-            disabled={list.loading}
-          >
+    <>
+      <PageHeader title="Training" subtitle="Moderation: every training group in the gym, whoever runs it.">
+        <ExportButton name="groups" load={() => exportGroupsCsv(filters)} disabled={list.total === 0} onError={setExportError} />
+      </PageHeader>
+      {tabs}
+      <section className="card">
+        <div className="filters">
+          <div className="field grow">
+            <label htmlFor="mod-g-q">Search</label>
+            <input id="mod-g-q" type="search" value={draft.q} onChange={(e) => setDraft({ ...draft, q: e.target.value })} maxLength={100} placeholder="Group or owner" autoComplete="off" />
+          </div>
+          <div className="field">
+            <label htmlFor="mod-g-from">Started from</label>
+            <input id="mod-g-from" type="date" max={draft.date_to || undefined} value={draft.date_from} onChange={(e) => setDraft({ ...draft, date_from: e.target.value })} />
+          </div>
+          <div className="field">
+            <label htmlFor="mod-g-to">Started to</label>
+            <input id="mod-g-to" type="date" min={draft.date_from || undefined} value={draft.date_to} onChange={(e) => setDraft({ ...draft, date_to: e.target.value })} />
+          </div>
+          <button type="button" onClick={() => setDraft(NO_FILTERS)}>
             Clear
           </button>
         </div>
-      </form>
-      {filterError && (
-        <p className="error" role="alert">
-          {filterError}
-        </p>
-      )}
-      <p className="summary" aria-live="polite">
-        <strong>{list.total}</strong> group{list.total === 1 ? "" : "s"}
-        <span className="hint"> · dates are UTC days</span>
-      </p>
-      {(list.error || exportError) && (
-        <p className="error" role="alert">
-          {list.error || exportError}
-        </p>
-      )}
-      {notice && (
-        <p className="hint" role="status">
-          {notice}
-        </p>
-      )}
-      {checkedIds.length > 0 && (
-        <ContentDeleteBar
-          ids={checkedIds}
-          noun="group"
-          warning={`Their ${workoutsTicked} workout${workoutsTicked === 1 ? "" : "s"} and every membership go with them.`}
-          onDelete={async (ids) => (await deleteGroups(ids)).deleted}
-          onDone={(message) => {
-            setNotice(message)
-            setReloadKey((k) => k + 1)
-          }}
-          onClear={() => setCheckedIds([])}
-        />
-      )}
-      {list.loading && list.items.length === 0 ? (
-        <p className="empty">Loading groups…</p>
-      ) : list.items.length === 0 ? (
-        <p className="empty">No groups match these filters.</p>
-      ) : (
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th className="check">
-                  <input
-                    type="checkbox"
-                    aria-label="Select all groups shown"
-                    checked={allChecked}
-                    ref={(el) => {
-                      if (el) el.indeterminate = checkedIds.length > 0 && !allChecked
-                    }}
-                    onChange={() => setCheckedIds(allChecked ? [] : list.items.map((g) => g.id))}
-                  />
-                </th>
-                <th>Group</th>
-                <th>Owner</th>
-                <th>People</th>
-                <th>Workouts</th>
-                <th>Made</th>
-              </tr>
-            </thead>
-            <tbody>
-              {list.items.map((g) => (
-                <tr key={g.id}>
-                  <td className="check">
-                    <input type="checkbox" aria-label={`Select ${g.name}`} checked={checkedIds.includes(g.id)} onChange={() => toggle(g.id)} />
-                  </td>
-                  <td className="name wrap">{g.name}</td>
-                  <td className="wrap">
-                    <button type="button" className="linklike" title="Show only this person's content" onClick={() => onPickOwner(g.owner_id, g.owner_name)}>
-                      {g.owner_name}
-                    </button>
-                    <div className="hint">{g.owner_email}</div>
-                  </td>
-                  <td>{g.member_count}</td>
-                  <td>{g.workout_count}</td>
-                  <td>{formatDate(g.created_at)}</td>
+        {filters.owner_id && <Alert kind="info">Only groups owned by account #{filters.owner_id}. Clear the filters to see everyone's.</Alert>}
+        <Alert kind="success">{notice}</Alert>
+        <Alert>{exportError}</Alert>
+        <BulkDelete selection={selection} noun="group" warning={`${count(workoutsTicked, "workout")} and every membership go with them.`} onDelete={remove} />
+        <ListState loading={list.loading} error={list.error} isEmpty={list.items.length === 0} empty="No groups match these filters.">
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <TickAll selection={selection} label="Select all groups shown" />
+                  <th>Group</th>
+                  <th>Owner</th>
+                  <th className="number">People</th>
+                  <th className="number">Workouts</th>
+                  <th>Started</th>
+                  <th className="act">
+                    <span className="visually-hidden">Action</span>
+                  </th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {list.items.map((g) => (
+                  <tr key={g.id}>
+                    <td className="tick" data-label="Select">
+                      <input type="checkbox" aria-label={`Select ${g.name}`} checked={selection.has(g.id)} onChange={() => selection.toggle(g.id)} />
+                    </td>
+                    <td className="name">{g.name}</td>
+                    <td data-label="Owner">
+                      <span>
+                        <a href={usersLink(g.owner_id)}>{g.owner_name}</a>
+                        <span className="hint">{g.owner_email}</span>
+                      </span>
+                    </td>
+                    <td data-label="People" className="number">
+                      {g.member_count}
+                    </td>
+                    <td data-label="Workouts" className="number">
+                      <a href={trainingLink("all-workouts", { group_id: g.id })}>{g.workout_count}</a>
+                    </td>
+                    <td data-label="Started" className="nowrap">
+                      {formatDate(g.created_at)}
+                    </td>
+                    <td className="act">
+                      <div className="actions">
+                        <button type="button" className="small danger" onClick={() => setDeleting(g)}>
+                          Delete
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <Pager {...list} onChange={list.goTo} />
+        </ListState>
+      </section>
+      {deleting && (
+        <ConfirmModal
+          title={`Delete "${deleting.name}"?`}
+          confirmLabel="Delete group"
+          busyLabel="Deleting…"
+          onClose={() => setDeleting(null)}
+          onConfirm={async () => {
+            await remove([deleting.id])
+            setDeleting(null)
+          }}
+        >
+          Its {count(deleting.workout_count, "workout")} and every membership go with it. This cannot be undone.
+        </ConfirmModal>
       )}
-      {list.items.length > 0 && (
-        <div className="list-foot">
-          <span>
-            Showing {list.items.length} of {list.total}
-          </span>
-          {list.items.length < list.total && (
-            <button onClick={list.loadMore} disabled={list.loadingMore}>
-              {list.loadingMore ? "Loading…" : "Load more"}
-            </button>
-          )}
-        </div>
-      )}
-    </section>
+    </>
   )
 }

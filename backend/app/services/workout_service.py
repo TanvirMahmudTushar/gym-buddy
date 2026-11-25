@@ -3,12 +3,13 @@
 # group_service): outsiders get 404, members without the permission 403. The person a workout is assigned to marks it
 # done.
 from sqlalchemy.orm import aliased
-from sqlmodel import Session, col, func, select
+from sqlmodel import Session, col, func, or_, select
 
 from app import rbac
-from app.models import TrainingGroup, User, Workout, WorkoutCreate, utc_now
+from app.models import ActivityEvent, TrainingGroup, User, Workout, WorkoutCreate, utc_now
 from app.rbac import GroupPermission
-from app.services import group_service
+from app.request_info import Client
+from app.services import activity_service, group_service
 
 
 class WorkoutNotFoundError(Exception):
@@ -77,6 +78,14 @@ def list_group(session: Session, user: User, group_id: int, offset: int, limit: 
     """A group's workouts, for anyone in the group."""
     group_service.access(session, user, group_id)
     return _page(session, [col(Workout.group_id) == group_id], offset, limit)
+
+
+def list_of_account(session: Session, user_id: int, limit: int) -> list[dict]:
+    """The newest workouts an account added or was assigned, for the admin's user details."""
+    items, _ = _page(
+        session, [or_(col(Workout.owner_id) == user_id, col(Workout.assigned_to) == user_id)], 0, limit
+    )
+    return items
 
 
 def _check_assignee(session: Session, group: TrainingGroup, user_id: int) -> None:
@@ -154,9 +163,17 @@ def complete_workout(session: Session, user: User, workout_id: int, done: bool) 
     return _one(session, workout_id)
 
 
-def delete_workout(session: Session, user: User, workout_id: int) -> None:
+def delete_workout(session: Session, user: User, workout_id: int, client: Client) -> None:
     """Deleting counts as editing: it needs the update permission."""
     workout = _access(session, user, workout_id, GroupPermission.UPDATE)
+    group = session.get(TrainingGroup, workout.group_id)
+    activity_service.record(
+        session,
+        ActivityEvent.WORKOUT_DELETE,
+        client,
+        actor=user,
+        details=f"{workout.title} ({workout.workout_date.isoformat()}, in group {group.name})",
+    )
     session.delete(workout)
     session.commit()
 
